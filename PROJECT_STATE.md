@@ -4,13 +4,13 @@
 
 **Last updated:** 2026-09-04  
 **Version target:** 0.1.0-dev  
-**Current phase:** Phase 3 — Analyst UX (Process Deep Dive + jobs landed; search next)
+**Current phase:** Phase 3 — Analyst UX (Deep Dive, jobs, search, IOCs landed)
 
 ---
 
 ## Current Status
 
-Process Deep Dive and Recommended Analysis are implemented with real Volatility 3 APIs and background jobs.
+Process Deep Dive, Recommended Analysis, Global Search, and IOC extraction are implemented against normalized SQLite data and real Volatility 3 APIs (when jobs run on a real dump).
 
 Workflow:
 
@@ -39,15 +39,17 @@ No synthetic forensic rows are fabricated. Empty states are explicit until a rea
 - [x] Heuristic findings (encoded PowerShell, VAD W+X / private executable) — explainable only
 - [x] Jobs UI + polling; basic triage is async (does not freeze UI on submit)
 - [x] Network / Modules / Findings investigation views (data-backed empty states)
+- [x] Global search over normalized entities
+- [x] IOC extraction + list + JSON/CSV export (schema v3 `iocs`)
+- [x] Search / IOCs UI
 
 ---
 
 ## In Progress
 
-- Global search
-- Richer Network investigation UX
-- Memory/VAD global view
-- IOC extraction pipeline
+- Memory/VAD global explorer
+- Timeline
+- Artifact extraction / provenance
 
 ---
 
@@ -55,9 +57,10 @@ No synthetic forensic rows are fabricated. Empty states are explicit until a rea
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| No real memory image on machine | Info | Deep dive data empty until real dump + jobs complete |
+| No real memory image on machine | Info | Deep dive / search data empty until real dump + jobs complete |
 | netscan is image-wide | Info | By Vol3 API design; we filter to selected PID when persisting |
 | Job cancel cooperative only | Medium | Between plugins; cannot abort inside Vol3 plugin mid-run |
+| IOC domain regex conservative | Low | May miss uncommon TLDs; avoids some noise |
 | Handles capped at 5000 in deep dive query | Low | Pagination later |
 | Single worker queue | Low | One analysis at a time in engine process |
 
@@ -86,7 +89,7 @@ No synthetic forensic rows are fabricated. Empty states are explicit until a rea
 
 | Check | Result |
 |-------|--------|
-| pytest | **11 passed** |
+| pytest | **12 passed** |
 | cargo test | **2 passed** |
 | frontend build | **PASS** |
 | cargo build | **PASS** |
@@ -95,11 +98,10 @@ No synthetic forensic rows are fabricated. Empty states are explicit until a rea
 
 ## Next Steps
 
-1. Global search over processes/modules/network/findings  
-2. Network view navigation → process  
-3. IOC extraction from cmdline/network  
-4. Memory/VAD explorer  
-5. Process deep dive polish + username plugin when chosen  
+1. Memory/VAD global explorer (from stored regions + optional job)
+2. Lightweight timeline from process create times + findings
+3. Artifact dump/provenance for suspicious VADs
+4. Username enrichment plugin when selected  
 
 ---
 
