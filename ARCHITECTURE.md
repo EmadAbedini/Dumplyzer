@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-04 — design locked; **minimal shell + engine smoke implemented and verified**.
+> Last verified: 2026-09-04 — **Phase 1 foundation + Phase 2 import/triage/process explorer implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -389,22 +389,55 @@ Tests grow with features; no “test only at the end.”
 ### Smoke path implemented
 
 ```
-Frontend invoke("smoke_e2e")
-  → Tauri command smoke_e2e (app/desktop/src/lib.rs)
-    → spawn engine/.venv/Scripts/python.exe -m memscope_engine  (argv, no shell)
-      → NDJSON JSON-RPC method smoke.e2e
-        → import volatility3 + framework surfaces
+Frontend invoke("smoke_e2e") / engine_call(method, params)
+  → Tauri persistent EngineState (app/desktop/src/lib.rs)
+    → engine/.venv/Scripts/python.exe -m memscope_engine  (argv, no shell)
+      → NDJSON JSON-RPC
+        → SQLite + Volatility 3 APIs
 ```
 
-IPC methods today: `health`, `volatility.init`, `smoke.e2e`.
+### IPC methods (implemented)
+
+| Method | Purpose |
+|--------|---------|
+| `health` | Liveness |
+| `app.init` | Data dir, logging, DB migrate |
+| `app.paths` | Resolved paths |
+| `volatility.init` | Vol3 import check |
+| `smoke.e2e` | Combined health + vol init |
+| `evidence.import` | Hash + metadata row |
+| `evidence.list` / `evidence.get` | Evidence CRUD read |
+| `evidence.analyze_basic` | `windows.info` + `windows.pslist` |
+| `processes.list` | Normalized processes |
+| `overview.get` | Investigation summary |
+
+### SQLite schema version
+
+**v1** — `evidence`, `analysis_runs`, `plugin_executions`, `processes`, `jobs`, `schema_meta`
+
+DB path: `{app_data}/memscope.db` (Windows: `%LOCALAPPDATA%\MemScope\`).
+
+### Volatility adapter (actual)
+
+`memscope_engine.volatility.session.VolatilitySession`:
+
+1. `contexts.Context()`
+2. `ctx.config["automagic.LayerStacker.single_location"] = URIRequirement.location_from_file(path)`
+3. `automagic.available` → `choose_automagic` → `stacker.choose_os_stackers`
+4. `plugins.construct_plugin(...)`
+5. `plugin.run()` → `TreeGrid.populate(visitor)` → JSON rows
+6. Normalizers map rows → MemScope DTOs (never CLI text)
+
+Errors: `exceptions.UnsatisfiedException` → `AppError(code=volatility_unsatisfied, ...)`.
 
 ---
 
 ## 21. Open decisions
 
-1. **License:** Apache-2.0 proposed for app code; confirm if GPL-incompatible deps appear  
-2. **Engine shipping for release:** embedded Python vs first-run venv bootstrap (still open for Phase 7)  
-3. **Python engine runtime:** **decided — 3.12.x venv** (AD-003); do not run engine on 3.13 unless separately validated  
+1. **License:** Apache-2.0 proposed for app code  
+2. **Engine shipping for release:** embedded Python vs first-run venv (Phase 7)  
+3. **Python engine runtime:** **3.12.x venv** (decided)  
+4. **Long-running jobs:** move analyze_* off the single RPC lock / add job worker thread (next)
 
 Ordinary implementation choices proceed without further permission.
 

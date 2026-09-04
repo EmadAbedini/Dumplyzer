@@ -1,0 +1,59 @@
+import { invoke } from "@tauri-apps/api/core";
+import type { AppErrorPayload } from "./types";
+
+export class EngineClientError extends Error {
+  payload: AppErrorPayload;
+
+  constructor(payload: AppErrorPayload) {
+    super(payload.message);
+    this.name = "EngineClientError";
+    this.payload = payload;
+  }
+}
+
+function parseEngineError(err: unknown): EngineClientError {
+  const raw = String(err);
+  // Tauri serializes EngineError as string: "message | {json data}"
+  const parts = raw.split(" | ");
+  if (parts.length >= 2) {
+    const message = parts[0].replace(/^.*?:\s*/, "");
+    try {
+      const data = JSON.parse(parts.slice(1).join(" | ")) as Record<string, unknown>;
+      return new EngineClientError({
+        message: message || raw,
+        app_code: typeof data.app_code === "string" ? data.app_code : undefined,
+        details: typeof data.details === "string" ? data.details : undefined,
+        suggestion: typeof data.suggestion === "string" ? data.suggestion : undefined,
+        entity: typeof data.entity === "string" ? data.entity : undefined,
+        raw,
+      });
+    } catch {
+      /* fall through */
+    }
+  }
+  return new EngineClientError({ message: raw, raw });
+}
+
+export async function engineCall<T = unknown>(
+  method: string,
+  params?: Record<string, unknown>,
+  timeoutSecs?: number,
+): Promise<T> {
+  try {
+    return await invoke<T>("engine_call", {
+      method,
+      params: params ?? {},
+      timeoutSecs: timeoutSecs ?? null,
+    });
+  } catch (err) {
+    throw parseEngineError(err);
+  }
+}
+
+export async function ensureAppPaths(): Promise<Record<string, string>> {
+  try {
+    return await invoke("get_app_paths");
+  } catch (err) {
+    throw parseEngineError(err);
+  }
+}

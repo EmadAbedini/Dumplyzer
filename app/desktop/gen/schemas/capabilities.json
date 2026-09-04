@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default MemScope capabilities","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default MemScope capabilities","local":true,"windows":["main"],"permissions":["core:default","core:path:default","dialog:default"]}}

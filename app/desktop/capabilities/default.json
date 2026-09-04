@@ -4,6 +4,8 @@
   "description": "Default MemScope capabilities",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:path:default",
+    "dialog:default"
   ]
 }

@@ -1,62 +1,31 @@
-:root {
-  color-scheme: dark;
-  font-family: "Segoe UI", system-ui, sans-serif;
-  background: #0f1115;
-  color: #e8eaed;
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0c0e12;
+  --color-surface: #12151c;
+  --color-surface-2: #1a1f2b;
+  --color-border: #2a3142;
+  --color-muted: #8b93a7;
+  --color-foreground: #e8eaef;
+  --color-accent: #3b82f6;
+  --color-accent-fg: #ffffff;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --font-sans: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
   margin: 0;
-}
-
-.app {
-  max-width: 720px;
-  margin: 2rem auto;
-  padding: 0 1rem;
-}
-
-h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.tagline {
-  margin: 0 0 1.5rem;
-  color: #9aa0a6;
-  font-size: 0.9rem;
-}
-
-button {
-  background: #1a73e8;
-  color: #fff;
-  border: 0;
-  border-radius: 6px;
-  padding: 0.55rem 1rem;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-pre {
-  margin-top: 1.25rem;
-  padding: 1rem;
-  border-radius: 8px;
-  background: #1a1d23;
-  border: 1px solid #2a2f3a;
-  overflow: auto;
-  font-size: 0.8rem;
-  line-height: 1.4;
-}
-
-pre.ok {
-  border-color: #2e7d32;
-}
-
-pre.fail {
-  border-color: #c62828;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 13px;
 }
