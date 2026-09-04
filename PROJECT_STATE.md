@@ -4,56 +4,50 @@
 
 **Last updated:** 2026-09-04  
 **Version target:** 0.1.0-dev  
-**Current phase:** Phase 2 — Volatility Core (in progress; import + basic triage + process explorer landed)
+**Current phase:** Phase 3 — Analyst UX (Process Deep Dive + jobs landed; search next)
 
 ---
 
 ## Current Status
 
-Phase 1 foundation is complete. Phase 2 first forensic workflow is implemented end-to-end in code:
+Process Deep Dive and Recommended Analysis are implemented with real Volatility 3 APIs and background jobs.
 
-**Import memory → SHA-256 → SQLite evidence → Volatility 3 `windows.info` + `windows.pslist` (API) → normalize processes → Overview + Process Explorer**
+Workflow:
 
-Verified without a real dump:
+**Process Explorer → select process → Deep Dive → Analyze process (job)**  
+→ `windows.cmdline` / `dlllist` / `netscan` (PID filter) / `handles` / `vadinfo`  
+→ normalized modules, network, handles, VAD, transparent findings  
+→ Jobs view (queued/running/completed/failed/cancelled)
 
-- Import + hashing + DB persistence (RPC + unit tests)
-- Junk image analyze returns structured `volatility_unsatisfied` AppError (real Vol3 `construct_plugin` path)
-- Workstation shell builds; cargo/frontend/pytest green
-
-Full process listing against a real Windows memory image still needs a sample dump on this machine.
+No synthetic forensic rows are fabricated. Empty states are explicit until a real dump is analyzed.
 
 ---
 
 ## Completed
 
-### Phase 0–1 environment
-- [x] Toolchains (Rust 1.98.1 MSVC, VS Build Tools 17.14.39, Python 3.12.10 venv, Vol3 2.28.0)
-- [x] Smoke Tauri → engine → Vol3 init
+### Prior
+- Phase 0–1 foundation, Phase 2 import + basic triage + process list
 
-### Phase 1 foundation
-- [x] SQLite schema v1 + migrations (`evidence`, `analysis_runs`, `plugin_executions`, `processes`, `jobs`)
-- [x] App data paths (`LOCALAPPDATA/MemScope` or `MEMSCOPE_DATA_DIR`)
-- [x] Structured JSON logging (`engine.jsonl`, channels app/analysis/tool)
-- [x] AppError + RPC error propagation (code, message, details, suggestion)
-- [x] Persistent engine process from Tauri + `engine_call` / `get_app_paths`
-- [x] Workstation shell: Tailwind v4 + shadcn-style primitives, dark compact layout
-- [x] Navigation: Overview, Processes, Network, Modules, Memory, Findings, IOCs, Timeline, Artifacts, Jobs, Plugins, Settings
-- [x] Frontend typed contracts + error parsing
-
-### Phase 2 (first slice)
-- [x] Evidence import (path validate, size, streaming SHA-256, DB upsert by hash)
-- [x] VolatilitySession via official APIs (`URIRequirement.location_from_file`, `automagic`, `plugins.construct_plugin`, TreeGrid.populate)
-- [x] `windows.info` → OS/arch/symbol status normalization
-- [x] `windows.pslist` → normalized Process rows persisted
-- [x] Overview + Process Explorer UI wired to engine
-- [x] File open dialog (`tauri-plugin-dialog`)
+### This milestone
+- [x] SQLite schema **v2** (modules, network_connections, handle_entries, memory_regions, findings, job/process fields)
+- [x] Thread-safe DB + **JobManager** (background worker, cancel flag)
+- [x] Jobs: `basic_triage`, `process_recommended`
+- [x] IPC: `jobs.*`, `process.get`, `process.analyze_recommended`, `network.list`, `modules.list`, `findings.list`
+- [x] Process Deep Dive UI (tabs: overview, cmdline, family, modules, network, handles, memory, findings)
+- [x] Recommended analysis strategy documented on AnalysisRun (`strategy_json`)
+- [x] Targeted plugins: cmdline/dlllist/handles/vadinfo with `pid` list; netscan image-wide then PID filter
+- [x] Heuristic findings (encoded PowerShell, VAD W+X / private executable) — explainable only
+- [x] Jobs UI + polling; basic triage is async (does not freeze UI on submit)
+- [x] Network / Modules / Findings investigation views (data-backed empty states)
 
 ---
 
 ## In Progress
 
-- Phase 2 remainder: network/modules via Vol3, richer process fields (cmdline/dlllist), real dump validation
-- Job manager UI (table exists in schema; not fully used yet)
+- Global search
+- Richer Network investigation UX
+- Memory/VAD global view
+- IOC extraction pipeline
 
 ---
 
@@ -61,21 +55,19 @@ Full process listing against a real Windows memory image still needs a sample du
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| No real memory image on machine | Info | Process explorer empty until analyst imports a dump; junk file correctly fails Vol3 |
-| MSI/WiX timeout | Low | Deferred; debug exe builds |
-| Engine RPC is synchronous under one lock | Medium | Long analysis blocks other calls; acceptable for now |
-| Symbol download may need network | Info | Vol3 automagic may fetch symbols; offline symbol path TBD |
-| `child` process kill on timeout not fully wired | Low | Field retained for future timeout kill |
+| No real memory image on machine | Info | Deep dive data empty until real dump + jobs complete |
+| netscan is image-wide | Info | By Vol3 API design; we filter to selected PID when persisting |
+| Job cancel cooperative only | Medium | Between plugins; cannot abort inside Vol3 plugin mid-run |
+| Handles capped at 5000 in deep dive query | Low | Pagination later |
+| Single worker queue | Low | One analysis at a time in engine process |
 
 ---
 
 ## Technical Debt
 
-- shadcn components hand-rolled (Button/Input/Badge only)
-- No virtualized process table yet
-- Jobs table unused by workflows
-- Analysis runs not cancellable mid-plugin
-- Frontend filter is client-side only
+- Username still not populated (needs getsids/other plugin later)
+- Artifacts extraction not started
+- Engine RPC still one-request-at-a-time on stdio while jobs run in parallel thread (reads OK)
 
 ---
 
@@ -83,25 +75,10 @@ Full process listing against a real Windows memory image still needs a sample du
 
 | ID | Decision | Status |
 |----|----------|--------|
-| AD-003 | Engine Python 3.12 venv | Accepted |
-| AD-004 | Volatility 3 2.28.0 | Accepted |
-| AD-011 | Persistent engine child + NDJSON multiplex | Accepted |
-| AD-012 | Schema v1 SQLite under app data dir | Accepted |
-| AD-013 | Basic triage = `windows.info` + `windows.pslist` via APIs | Accepted |
-| AD-014 | TreeGrid → JSON rows then normalize (not CLI text) | Accepted |
-
----
-
-## Dependencies (key)
-
-| Component | Version |
-|-----------|---------|
-| volatility3 | 2.28.0 |
-| tauri | 2.11.5 |
-| tauri-plugin-dialog | 2.7.x |
-| React | 19.2.x |
-| Tailwind | 4.3.x |
-| Python engine | 3.12.10 |
+| AD-015 | Schema v2 for process-related entities | Accepted |
+| AD-016 | Background JobManager for triage + process analysis | Accepted |
+| AD-017 | process_recommended strategy: cmdline, dlllist, netscan, handles, vadinfo | Accepted |
+| AD-018 | Transparent findings only (no risk scores) | Accepted |
 
 ---
 
@@ -109,44 +86,25 @@ Full process listing against a real Windows memory image still needs a sample du
 
 | Check | Result |
 |-------|--------|
-| `pytest tests/engine` | **6 passed** |
-| `cargo test` | **2 passed** |
-| `npm run build` (frontend) | **PASS** |
-| `cargo build` (desktop) | **PASS** |
-| RPC import + analyze junk dump | **PASS** (import ok; analyze → `volatility_unsatisfied`) |
-
----
-
-## Current Phase
-
-**Phase 2 — Volatility Core** (import/triage/process explorer done; expand plugins next)
+| pytest | **11 passed** |
+| cargo test | **2 passed** |
+| frontend build | **PASS** |
+| cargo build | **PASS** |
 
 ---
 
 ## Next Steps
 
-1. Obtain/use a real Windows memory image; verify process list end-to-end
-2. Add `windows.cmdline` / `dlllist` / `netscan` normalization + UI pages
-3. Job manager for long runs + cancellation
-4. Process deep dive view
-5. Analysis cache keys
-6. Continue Phase 3 analyst UX polish
+1. Global search over processes/modules/network/findings  
+2. Network view navigation → process  
+3. IOC extraction from cmdline/network  
+4. Memory/VAD explorer  
+5. Process deep dive polish + username plugin when chosen  
 
 ---
 
 ## Important Discoveries
 
-1. Vol3 2.28 plugin construction: set `automagic.LayerStacker.single_location` from `URIRequirement.location_from_file`, `choose_automagic`, `stacker.choose_os_stackers`, then `plugins.construct_plugin`.
-2. TreeGrid consumption: `grid.populate(visitor, None)` (not CLI renderer).
-3. PsList columns: PID, PPID, ImageFileName, Offset(V/P), Threads, Handles, SessionId, Wow64, CreateTime, ExitTime, File output.
-4. Unsatisfied requirements surface as actionable `AppError` with `volatility_unsatisfied`.
-
----
-
-## Unfinished Work
-
-- Network/modules/memory/findings/IOC/timeline/artifacts features
-- Advanced plugin explorer
-- YARA/PE-sieve/mal_unpack
-- Packaging/release
-- LICENSE and full docs set
+1. CmdLine/DllList/Handles/VadInfo accept `ListRequirement pid`.  
+2. NetScan has no PID requirement — filter after TreeGrid normalize.  
+3. Parallel Rust IPC tests must use unique `MEMSCOPE_DATA_DIR` (shared PID temp dir raced).

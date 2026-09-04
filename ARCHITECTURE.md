@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-04 — **Phase 1 foundation + Phase 2 import/triage/process explorer implemented**.
+> Last verified: 2026-09-04 — **Phase 1–2 + Process Deep Dive / JobManager / schema v2 implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -401,34 +401,40 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 | Method | Purpose |
 |--------|---------|
 | `health` | Liveness |
-| `app.init` | Data dir, logging, DB migrate |
+| `app.init` | Data dir, logging, DB migrate, start JobManager |
 | `app.paths` | Resolved paths |
 | `volatility.init` | Vol3 import check |
 | `smoke.e2e` | Combined health + vol init |
 | `evidence.import` | Hash + metadata row |
-| `evidence.list` / `evidence.get` | Evidence CRUD read |
-| `evidence.analyze_basic` | `windows.info` + `windows.pslist` |
+| `evidence.list` / `evidence.get` | Evidence read |
+| `evidence.analyze_basic` | Queue `basic_triage` job (async) |
 | `processes.list` | Normalized processes |
+| `process.get` | Deep dive aggregate from SQLite |
+| `process.analyze_recommended` | Queue `process_recommended` job |
 | `overview.get` | Investigation summary |
+| `network.list` / `modules.list` / `findings.list` | Entity lists |
+| `jobs.submit` / `jobs.get` / `jobs.list` / `jobs.cancel` | Job control |
 
 ### SQLite schema version
 
-**v1** — `evidence`, `analysis_runs`, `plugin_executions`, `processes`, `jobs`, `schema_meta`
+**v2** — v1 tables plus `modules`, `network_connections`, `handle_entries`, `memory_regions`, `findings`, and job/analysis_run process linkage + `strategy_json`.
 
-DB path: `{app_data}/memscope.db` (Windows: `%LOCALAPPDATA%\MemScope\`).
+### Job manager
 
-### Volatility adapter (actual)
+- In-process worker thread (`JobManager`)
+- Status: `queued` → `running` → `completed` | `failed` | `cancelled`
+- Cooperative cancel via `cancel_requested` flag checked between plugin steps
+- Progress messages are truthful strings; `progress_kind` remains `indeterminate` unless real % exists
 
-`memscope_engine.volatility.session.VolatilitySession`:
+### Process recommended strategy (actual)
 
-1. `contexts.Context()`
-2. `ctx.config["automagic.LayerStacker.single_location"] = URIRequirement.location_from_file(path)`
-3. `automagic.available` → `choose_automagic` → `stacker.choose_os_stackers`
-4. `plugins.construct_plugin(...)`
-5. `plugin.run()` → `TreeGrid.populate(visitor)` → JSON rows
-6. Normalizers map rows → MemScope DTOs (never CLI text)
+1. `windows.cmdline` with `pid=[pid]`  
+2. `windows.dlllist` with `pid=[pid]`  
+3. `windows.netscan` (full image) → normalize → keep rows for PID  
+4. `windows.handles` with `pid=[pid]`  
+5. `windows.vadinfo` with `pid=[pid]`  
 
-Errors: `exceptions.UnsatisfiedException` → `AppError(code=volatility_unsatisfied, ...)`.
+PluginExecution rows + AnalysisRun.strategy_json record what ran and why.
 
 ---
 
@@ -437,7 +443,7 @@ Errors: `exceptions.UnsatisfiedException` → `AppError(code=volatility_unsatisf
 1. **License:** Apache-2.0 proposed for app code  
 2. **Engine shipping for release:** embedded Python vs first-run venv (Phase 7)  
 3. **Python engine runtime:** **3.12.x venv** (decided)  
-4. **Long-running jobs:** move analyze_* off the single RPC lock / add job worker thread (next)
+4. **Multi-worker jobs:** optional later if queue latency matters  
 
 Ordinary implementation choices proceed without further permission.
 

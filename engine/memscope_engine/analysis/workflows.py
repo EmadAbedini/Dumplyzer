@@ -375,22 +375,27 @@ def list_processes(
 
 def overview(db: Database, evidence_id: str) -> dict[str, Any]:
     evidence = get_evidence(db, evidence_id)
-    proc = db.fetchone(
-        "SELECT COUNT(*) AS c FROM processes WHERE evidence_id = ?", (evidence_id,)
-    )
+
+    def _count(table: str) -> int:
+        row = db.fetchone(
+            f"SELECT COUNT(*) AS c FROM {table} WHERE evidence_id = ?",
+            (evidence_id,),
+        )
+        return int(row["c"]) if row else 0
+
     runs = db.fetchall(
         """
-        SELECT id, kind, status, started_at, finished_at, volatility_version, notes
+        SELECT id, kind, status, started_at, finished_at, volatility_version, notes, pid
         FROM analysis_runs WHERE evidence_id = ? ORDER BY started_at DESC LIMIT 10
         """,
         (evidence_id,),
     )
     return {
         "evidence": evidence,
-        "process_count": int(proc["c"]) if proc else 0,
-        "network_count": 0,
-        "module_count": 0,
-        "finding_count": 0,
+        "process_count": _count("processes"),
+        "network_count": _count("network_connections"),
+        "module_count": _count("modules"),
+        "finding_count": _count("findings"),
         "ioc_count": 0,
         "recent_runs": runs,
     }

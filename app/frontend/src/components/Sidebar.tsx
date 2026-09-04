@@ -4,6 +4,7 @@ import { cn } from "../lib/utils";
 const NAV: { id: NavId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "processes", label: "Processes" },
+  { id: "process_dive", label: "Process Deep Dive" },
   { id: "network", label: "Network" },
   { id: "modules", label: "Modules" },
   { id: "memory", label: "Memory" },

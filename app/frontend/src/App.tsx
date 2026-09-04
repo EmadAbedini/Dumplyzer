@@ -1,14 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { OverviewView } from "./components/OverviewView";
 import { ProcessExplorer } from "./components/ProcessExplorer";
+import { ProcessDeepDiveView } from "./components/ProcessDeepDiveView";
+import { JobsView } from "./components/JobsView";
+import {
+  FindingsView,
+  ModulesView,
+  NetworkView,
+} from "./components/InvestigationViews";
 import { PlaceholderView } from "./components/PlaceholderView";
 import { engineCall, ensureAppPaths, EngineClientError } from "./lib/api";
 import type {
   AppErrorPayload,
   Evidence,
+  Job,
   NavId,
   Overview,
   ProcessRow,
@@ -23,15 +31,20 @@ export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [processes, setProcesses] = useState<ProcessRow[]>([]);
   const [processTotal, setProcessTotal] = useState(0);
+  const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
+  const [jobTick, setJobTick] = useState(0);
+  const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
+
+  const setErr = useCallback((msg: string) => {
+    setError({ message: msg });
+  }, []);
 
   useEffect(() => {
     void (async () => {
       try {
         await ensureAppPaths();
         const listed = await engineCall<{ items: Evidence[] }>("evidence.list");
-        if (listed.items[0]) {
-          setEvidence(listed.items[0]);
-        }
+        if (listed.items[0]) setEvidence(listed.items[0]);
       } catch (err) {
         if (err instanceof EngineClientError) setError(err.payload);
         else setError({ message: String(err) });
@@ -62,7 +75,56 @@ export default function App() {
         if (err instanceof EngineClientError) setError(err.payload);
       }
     })();
-  }, [evidence?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidence?.id]);
+
+  // Poll active jobs; refresh data when they finish
+  useEffect(() => {
+    if (activeJobIds.length === 0) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        const still: string[] = [];
+        let finished = false;
+        for (const id of activeJobIds) {
+          try {
+            const j = await engineCall<Job>("jobs.get", { job_id: id });
+            if (j.status === "queued" || j.status === "running") {
+              still.push(id);
+            } else {
+              finished = true;
+              if (j.status === "failed" && j.error) {
+                const msg =
+                  typeof j.error.message === "string"
+                    ? j.error.message
+                    : "Job failed";
+                setError({
+                  message: msg,
+                  details:
+                    typeof j.error.details === "string" ? j.error.details : undefined,
+                  suggestion:
+                    typeof j.error.suggestion === "string"
+                      ? j.error.suggestion
+                      : undefined,
+                });
+              }
+            }
+          } catch {
+            /* ignore transient */
+          }
+        }
+        setActiveJobIds(still);
+        setJobTick((t) => t + 1);
+        if (finished && evidence) {
+          try {
+            await refreshEvidenceViews(evidence);
+          } catch {
+            /* ignore */
+          }
+        }
+      })();
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [activeJobIds, evidence, refreshEvidenceViews]);
 
   const onImport = useCallback(async () => {
     setError(null);
@@ -83,10 +145,13 @@ export default function App() {
         setBusy(false);
         return;
       }
-      const imported = await engineCall<Evidence>("evidence.import", {
-        path: selected,
-      }, 600);
+      const imported = await engineCall<Evidence>(
+        "evidence.import",
+        { path: selected },
+        600,
+      );
       setEvidence(imported);
+      setSelectedProcessId(null);
       setNav("overview");
     } catch (err) {
       if (err instanceof EngineClientError) setError(err.payload);
@@ -101,28 +166,32 @@ export default function App() {
     setError(null);
     setBusy(true);
     try {
-      const result = await engineCall<{
-        evidence: Evidence;
-        process_count: number;
-      }>("evidence.analyze_basic", { evidence_id: evidence.id }, 900);
-      setEvidence(result.evidence);
-      await refreshEvidenceViews(result.evidence);
-      setNav("processes");
+      const job = await engineCall<Job>("evidence.analyze_basic", {
+        evidence_id: evidence.id,
+      });
+      setActiveJobIds((ids) => [...ids, job.id]);
+      setJobTick((t) => t + 1);
+      setNav("jobs");
     } catch (err) {
       if (err instanceof EngineClientError) setError(err.payload);
       else setError({ message: String(err) });
-      // Still refresh overview to show failed run status if stored
-      try {
-        if (evidence) await refreshEvidenceViews(evidence);
-      } catch {
-        /* ignore */
-      }
     } finally {
       setBusy(false);
     }
-  }, [evidence, refreshEvidenceViews]);
+  }, [evidence]);
 
-  let body: React.ReactNode;
+  const onSelectProcess = (p: ProcessRow) => {
+    setSelectedProcessId(p.id);
+    setNav("process_dive");
+  };
+
+  const onJobSubmitted = (job: Job) => {
+    setActiveJobIds((ids) => [...ids, job.id]);
+    setJobTick((t) => t + 1);
+    setNav("jobs");
+  };
+
+  let body: ReactNode;
   switch (nav) {
     case "overview":
       body = <OverviewView data={overview} />;
@@ -133,6 +202,44 @@ export default function App() {
           items={processes}
           total={processTotal}
           loading={busy}
+          selectedId={selectedProcessId}
+          onSelect={onSelectProcess}
+        />
+      );
+      break;
+    case "process_dive":
+      body =
+        selectedProcessId && evidence ? (
+          <ProcessDeepDiveView
+            processId={selectedProcessId}
+            evidenceId={evidence.id}
+            onOpenProcess={(id) => {
+              setSelectedProcessId(id);
+            }}
+            onError={setErr}
+            onJobSubmitted={onJobSubmitted}
+          />
+        ) : (
+          <div className="p-4 text-sm text-muted">
+            Select a process in the Processes view.
+          </div>
+        );
+      break;
+    case "network":
+      body = <NetworkView evidenceId={evidence?.id ?? null} onError={setErr} />;
+      break;
+    case "modules":
+      body = <ModulesView evidenceId={evidence?.id ?? null} onError={setErr} />;
+      break;
+    case "findings":
+      body = <FindingsView evidenceId={evidence?.id ?? null} onError={setErr} />;
+      break;
+    case "jobs":
+      body = (
+        <JobsView
+          evidenceId={evidence?.id ?? null}
+          refreshToken={jobTick}
+          onError={setErr}
         />
       );
       break;
@@ -143,7 +250,7 @@ export default function App() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TopBar
-        busy={busy}
+        busy={busy || activeJobIds.length > 0}
         error={error}
         onImport={onImport}
         onAnalyze={onAnalyze}

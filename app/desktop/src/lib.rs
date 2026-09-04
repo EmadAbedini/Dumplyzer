@@ -235,8 +235,12 @@ fn call_engine_oneshot(method: &str, params: Value) -> Result<Value, EngineError
     let python = engine_python(&root)?;
     let engine_dir = root.join("engine");
     let tmp = std::env::temp_dir().join(format!(
-        "memscope-test-{}",
-        std::process::id()
+        "memscope-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
     ));
     std::fs::create_dir_all(&tmp)
         .map_err(|e| EngineError::Message(format!("temp dir: {e}")))?;

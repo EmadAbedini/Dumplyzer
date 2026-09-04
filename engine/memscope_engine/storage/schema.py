@@ -1,8 +1,8 @@
-"""SQLite schema version 1 for MemScope metadata (not memory images)."""
+"""SQLite schema migrations for MemScope metadata (not memory images)."""
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -93,5 +93,105 @@ MIGRATIONS: dict[int, str] = {
       error_json TEXT,
       result_json TEXT
     );
-    """
+    """,
+    2: """
+    ALTER TABLE jobs ADD COLUMN process_id TEXT;
+    ALTER TABLE jobs ADD COLUMN pid INTEGER;
+    ALTER TABLE jobs ADD COLUMN analysis_run_id TEXT;
+    ALTER TABLE jobs ADD COLUMN params_json TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0;
+
+    ALTER TABLE analysis_runs ADD COLUMN process_id TEXT;
+    ALTER TABLE analysis_runs ADD COLUMN pid INTEGER;
+    ALTER TABLE analysis_runs ADD COLUMN job_id TEXT;
+    ALTER TABLE analysis_runs ADD COLUMN strategy_json TEXT NOT NULL DEFAULT '[]';
+
+    CREATE TABLE IF NOT EXISTS modules (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      analysis_run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      process_id TEXT REFERENCES processes(id) ON DELETE SET NULL,
+      pid INTEGER NOT NULL,
+      name TEXT,
+      path TEXT,
+      base_address TEXT,
+      size TEXT,
+      load_count INTEGER,
+      load_time TEXT,
+      source_plugin TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_modules_evidence_pid ON modules(evidence_id, pid);
+
+    CREATE TABLE IF NOT EXISTS network_connections (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      analysis_run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      process_id TEXT REFERENCES processes(id) ON DELETE SET NULL,
+      pid INTEGER,
+      protocol TEXT,
+      local_address TEXT,
+      local_port INTEGER,
+      remote_address TEXT,
+      remote_port INTEGER,
+      state TEXT,
+      owner TEXT,
+      created TEXT,
+      offset_hex TEXT,
+      source_plugin TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_net_evidence_pid ON network_connections(evidence_id, pid);
+
+    CREATE TABLE IF NOT EXISTS handle_entries (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      analysis_run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      process_id TEXT REFERENCES processes(id) ON DELETE SET NULL,
+      pid INTEGER NOT NULL,
+      offset_hex TEXT,
+      handle_value TEXT,
+      handle_type TEXT,
+      granted_access TEXT,
+      name TEXT,
+      source_plugin TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_handles_evidence_pid ON handle_entries(evidence_id, pid);
+
+    CREATE TABLE IF NOT EXISTS memory_regions (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      analysis_run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      process_id TEXT REFERENCES processes(id) ON DELETE SET NULL,
+      pid INTEGER NOT NULL,
+      process_name TEXT,
+      offset_hex TEXT,
+      start_vpn TEXT,
+      end_vpn TEXT,
+      tag TEXT,
+      protection TEXT,
+      commit_charge INTEGER,
+      private_memory INTEGER,
+      parent TEXT,
+      file_path TEXT,
+      source_plugin TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_vad_evidence_pid ON memory_regions(evidence_id, pid);
+
+    CREATE TABLE IF NOT EXISTS findings (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      analysis_run_id TEXT,
+      process_id TEXT,
+      pid INTEGER,
+      finding_type TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      explanation TEXT NOT NULL,
+      field_name TEXT,
+      field_value TEXT,
+      plugin TEXT,
+      confidence TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_findings_evidence ON findings(evidence_id);
+    CREATE INDEX IF NOT EXISTS idx_findings_pid ON findings(evidence_id, pid);
+    """,
 }
