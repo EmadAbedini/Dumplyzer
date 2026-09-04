@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-04 — **Phase 1–2 + Process Deep Dive / JobManager / schema v2 implemented**.
+> Last verified: 2026-09-04 — **Memory/VAD, Timeline, Artifacts (schema v4) implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -413,28 +413,26 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 | `process.analyze_recommended` | Queue `process_recommended` job |
 | `overview.get` | Investigation summary |
 | `network.list` / `modules.list` / `findings.list` | Entity lists |
-| `jobs.submit` / `jobs.get` / `jobs.list` / `jobs.cancel` | Job control |
+| `memory.list` / `memory.get` / `memory.scan` / `memory.extract` | VAD explorer + dump jobs |
+| `timeline.build` / `timeline.list` | Forensic timeline |
+| `artifacts.list` / `artifacts.get` | Artifact metadata + provenance |
 
 ### SQLite schema version
 
-**v2** — v1 tables plus `modules`, `network_connections`, `handle_entries`, `memory_regions`, `findings`, and job/analysis_run process linkage + `strategy_json`.
+**v4** — adds `artifacts`, `timeline_events`; `memory_regions.size_bytes` + `indicators_json`.
 
-### Job manager
+### Artifacts
 
-- In-process worker thread (`JobManager`)
-- Status: `queued` → `running` → `completed` | `failed` | `cancelled`
-- Cooperative cancel via `cancel_requested` flag checked between plugin steps
-- Progress messages are truthful strings; `progress_kind` remains `indeterminate` unless real % exists
+- Root: `{app_data}/artifacts/{evidence_id}/`  
+- Dump via Volatility `VadInfo.vad_dump` into sanitized filenames  
+- SHA-256 on write; PE magic sniff; never executed  
+- Provenance chain: evidence → process → memory_region → artifact  
 
-### Process recommended strategy (actual)
+### Timeline
 
-1. `windows.cmdline` with `pid=[pid]`  
-2. `windows.dlllist` with `pid=[pid]`  
-3. `windows.netscan` (full image) → normalize → keep rows for PID  
-4. `windows.handles` with `pid=[pid]`  
-5. `windows.vadinfo` with `pid=[pid]`  
-
-PluginExecution rows + AnalysisRun.strategy_json record what ran and why.
+- Rebuilt from processes, network, modules (with load_time), findings, artifacts  
+- `classification`: `observed` (forensic fields) vs `inferred` (heuristics / analysis time)  
+- Missing timestamps stay null with `time_precision=unknown` — never invented OS times  
 
 ---
 
@@ -443,7 +441,7 @@ PluginExecution rows + AnalysisRun.strategy_json record what ran and why.
 1. **License:** Apache-2.0 proposed for app code  
 2. **Engine shipping for release:** embedded Python vs first-run venv (Phase 7)  
 3. **Python engine runtime:** **3.12.x venv** (decided)  
-4. **Multi-worker jobs:** optional later if queue latency matters  
+4. **Optional malware tools:** user-supplied paths only until license review  
 
 Ordinary implementation choices proceed without further permission.
 

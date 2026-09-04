@@ -508,15 +508,25 @@ def run_process_recommended_job(
                 (evidence_id, pid),
             )
             for r in regions:
+                er = r
+                try:
+                    from memscope_engine.analysis.memory_artifacts import enrich_region
+
+                    er = enrich_region(r)
+                    r = dict(r)
+                    r["size_bytes"] = er.get("size_bytes")
+                    r["indicators_json"] = json.dumps(er.get("indicators") or [])
+                except Exception:  # noqa: BLE001
+                    r.setdefault("indicators_json", "[]")
                 _insert_region(db, r)
-            for f in findings_from_vad(
-                evidence_id=evidence_id,
-                analysis_run_id=run_id,
-                process_id=process_id,
-                pid=pid,
-                regions=regions,
-            ):
-                _insert_finding(db, f)
+                for f in findings_from_vad(
+                    evidence_id=evidence_id,
+                    analysis_run_id=run_id,
+                    process_id=process_id,
+                    pid=pid,
+                    regions=[er],
+                ):
+                    _insert_finding(db, f)
             _record_plugin_done(
                 db, pe, status="completed", row_count=len(regions), transparency=res.transparency
             )
@@ -622,7 +632,7 @@ def get_process_deep_dive(db: Database, process_id: str) -> dict[str, Any]:
         "modules": [_module_dto(m) for m in modules],
         "network": [_net_dto(n) for n in network],
         "handles": [_handle_dto(h) for h in handles],
-        "memory_regions": [_region_dto(r) for r in regions],
+        "memory_regions": [_region_dto_enriched(r) for r in regions],
         "findings": [_finding_dto(f) for f in findings],
         "analysis_runs": runs,
         "counts": {
@@ -784,8 +794,8 @@ def _insert_region(db: Database, r: dict[str, Any]) -> None:
         INSERT INTO memory_regions (
           id, evidence_id, analysis_run_id, process_id, pid, process_name,
           offset_hex, start_vpn, end_vpn, tag, protection, commit_charge,
-          private_memory, parent, file_path, source_plugin
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          private_memory, parent, file_path, source_plugin, size_bytes, indicators_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             r["id"],
@@ -804,6 +814,8 @@ def _insert_region(db: Database, r: dict[str, Any]) -> None:
             r["parent"],
             r["file_path"],
             r["source_plugin"],
+            r.get("size_bytes"),
+            r.get("indicators_json") or "[]",
         ),
     )
 
@@ -922,7 +934,16 @@ def _region_dto(row: dict[str, Any]) -> dict[str, Any]:
         "parent": row.get("parent"),
         "file_path": row.get("file_path"),
         "source_plugin": row.get("source_plugin"),
+        "size_bytes": row.get("size_bytes"),
+        "process_id": row.get("process_id"),
+        "evidence_id": row.get("evidence_id"),
     }
+
+
+def _region_dto_enriched(row: dict[str, Any]) -> dict[str, Any]:
+    from memscope_engine.analysis.memory_artifacts import enrich_region
+
+    return enrich_region(_region_dto(row))
 
 
 def _finding_dto(row: dict[str, Any]) -> dict[str, Any]:

@@ -87,11 +87,15 @@ export type HandleRow = {
 
 export type MemoryRegion = {
   id: string;
+  evidence_id?: string;
+  analysis_run_id?: string | null;
+  process_id: string | null;
   pid: number;
   process_name: string | null;
   offset_hex: string | null;
   start_vpn: string | null;
   end_vpn: string | null;
+  size_bytes?: number | null;
   tag: string | null;
   protection: string | null;
   commit_charge: number | null;
@@ -99,6 +103,50 @@ export type MemoryRegion = {
   parent: string | null;
   file_path: string | null;
   source_plugin: string | null;
+  indicators?: Array<{ code: string; label: string; detail: string }>;
+  indicator_codes?: string[];
+};
+
+export type Artifact = {
+  id: string;
+  evidence_id: string;
+  process_id: string | null;
+  pid: number | null;
+  memory_region_id: string | null;
+  filename: string;
+  stored_path: string;
+  sha256: string;
+  size_bytes: number;
+  file_type: string | null;
+  extraction_method: string;
+  source_plugin: string | null;
+  tool_name: string | null;
+  tool_version: string | null;
+  source_address: string | null;
+  start_vpn: string | null;
+  end_vpn: string | null;
+  extracted_at: string | null;
+  notes: string | null;
+  metadata?: Record<string, unknown>;
+  provenance_chain?: Array<Record<string, unknown>>;
+};
+
+export type TimelineEvent = {
+  id: string;
+  evidence_id: string;
+  event_time: string | null;
+  time_precision: string;
+  classification: string;
+  event_kind: string;
+  summary: string;
+  process_id: string | null;
+  pid: number | null;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  source_table: string | null;
+  source_plugin: string | null;
+  provenance?: Record<string, unknown>;
+  created_at: string | null;
 };
 
 export type Finding = {

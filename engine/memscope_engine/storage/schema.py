@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -209,5 +209,55 @@ MIGRATIONS: dict[int, str] = {
     CREATE INDEX IF NOT EXISTS idx_iocs_evidence ON iocs(evidence_id);
     CREATE INDEX IF NOT EXISTS idx_iocs_type ON iocs(evidence_id, ioc_type);
     CREATE INDEX IF NOT EXISTS idx_iocs_value ON iocs(evidence_id, value);
+    """,
+    4: """
+    ALTER TABLE memory_regions ADD COLUMN size_bytes INTEGER;
+    ALTER TABLE memory_regions ADD COLUMN indicators_json TEXT NOT NULL DEFAULT '[]';
+
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      process_id TEXT,
+      pid INTEGER,
+      memory_region_id TEXT,
+      filename TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      file_type TEXT,
+      extraction_method TEXT NOT NULL,
+      source_plugin TEXT,
+      tool_name TEXT,
+      tool_version TEXT,
+      source_address TEXT,
+      start_vpn TEXT,
+      end_vpn TEXT,
+      extracted_at TEXT NOT NULL,
+      notes TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifacts_evidence ON artifacts(evidence_id);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_sha ON artifacts(sha256);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_process ON artifacts(evidence_id, pid);
+
+    CREATE TABLE IF NOT EXISTS timeline_events (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      event_time TEXT,
+      time_precision TEXT NOT NULL DEFAULT 'unknown',
+      classification TEXT NOT NULL,
+      event_kind TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      process_id TEXT,
+      pid INTEGER,
+      related_entity_type TEXT,
+      related_entity_id TEXT,
+      source_table TEXT,
+      source_plugin TEXT,
+      provenance_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_timeline_evidence_time ON timeline_events(evidence_id, event_time);
+    CREATE INDEX IF NOT EXISTS idx_timeline_kind ON timeline_events(evidence_id, event_kind);
     """,
 }

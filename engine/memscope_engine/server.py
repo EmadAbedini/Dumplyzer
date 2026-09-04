@@ -8,7 +8,7 @@ import traceback
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Callable
 
-from memscope_engine.analysis import process_analysis, search_iocs, workflows
+from memscope_engine.analysis import memory_artifacts, process_analysis, search_iocs, workflows
 from memscope_engine.errors import AppError, rpc_error_payload
 from memscope_engine.jobs.manager import JobManager
 from memscope_engine.logging_setup import get_logger, setup_logging
@@ -93,6 +93,14 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
     jobs = JobManager(db)
     jobs.register("basic_triage", process_analysis.run_basic_triage_job)
     jobs.register("process_recommended", process_analysis.run_process_recommended_job)
+    jobs.register("vad_scan", memory_artifacts.run_vad_scan_job)
+
+    def _vad_extract(db_, params, cancelled, progress):
+        return memory_artifacts.run_vad_extract_job(
+            db_, params, cancelled, progress, paths=paths
+        )
+
+    jobs.register("vad_extract", _vad_extract)
     jobs.start()
     _STATE["paths"] = paths
     _STATE["db"] = db
@@ -184,6 +192,44 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "iocs.export_csv": lambda p: {
         "csv": search_iocs.export_iocs_csv(_db(), p["evidence_id"])
     },
+    "memory.list": lambda p: memory_artifacts.list_memory_regions(
+        _db(),
+        p["evidence_id"],
+        pid=p.get("pid"),
+        process_id=p.get("process_id"),
+        suspicious_only=bool(p.get("suspicious_only", False)),
+        limit=int(p.get("limit", 10000)),
+        offset=int(p.get("offset", 0)),
+    ),
+    "memory.get": lambda p: memory_artifacts.get_memory_region(_db(), p["region_id"]),
+    "memory.scan": lambda p: _jobs().submit(
+        "vad_scan",
+        evidence_id=p["evidence_id"],
+        process_id=p.get("process_id"),
+        pid=p.get("pid"),
+        params={
+            "evidence_id": p["evidence_id"],
+            "process_id": p.get("process_id"),
+            "pid": p.get("pid"),
+        },
+        message=f"VAD scan PID {p.get('pid')}",
+    ),
+    "memory.extract": lambda p: _jobs().submit(
+        "vad_extract",
+        evidence_id=p["evidence_id"],
+        process_id=p.get("process_id"),
+        pid=p.get("pid"),
+        params={
+            "evidence_id": p["evidence_id"],
+            "memory_region_id": p["memory_region_id"],
+            "maxsize": p.get("maxsize"),
+        },
+        message="Extract VAD region",
+    ),
+    "timeline.build": lambda p: memory_artifacts.build_timeline(_db(), p["evidence_id"]),
+    "timeline.list": lambda p: memory_artifacts.list_timeline(_db(), p["evidence_id"]),
+    "artifacts.list": lambda p: memory_artifacts.list_artifacts(_db(), p["evidence_id"]),
+    "artifacts.get": lambda p: memory_artifacts.get_artifact(_db(), p["artifact_id"]),
     "jobs.submit": handle_job_submit,
     "jobs.get": lambda p: _jobs().get(p["job_id"]),
     "jobs.list": lambda p: {

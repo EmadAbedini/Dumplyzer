@@ -45,7 +45,7 @@ def _seed(db: Database, evidence_id: str) -> str:
 
 def test_global_search_and_iocs(tmp_path: Path) -> None:
     db = Database(tmp_path / "s.db")
-    assert db.schema_version() == 3
+    assert db.schema_version() == 4
     img = tmp_path / "t.raw"
     img.write_bytes(b"search-test")
     ev = import_evidence(db, str(img))

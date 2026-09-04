@@ -4,52 +4,41 @@
 
 **Last updated:** 2026-09-04  
 **Version target:** 0.1.0-dev  
-**Current phase:** Phase 3 — Analyst UX (Deep Dive, jobs, search, IOCs landed)
+**Current phase:** Phase 4 — Forensic features (Memory/VAD, Timeline, Artifacts)
 
 ---
 
 ## Current Status
 
-Process Deep Dive, Recommended Analysis, Global Search, and IOC extraction are implemented against normalized SQLite data and real Volatility 3 APIs (when jobs run on a real dump).
+Memory/VAD explorer, forensic timeline, and first-class artifact provenance are implemented on schema **v4**.
 
-Workflow:
+- VAD list with indicators (W+X, private executable unbacked, etc.) — **not** malice labels  
+- Jobs: `vad_scan`, `vad_extract` (real `VadInfo.vad_dump` API)  
+- Timeline rebuild from normalized tables; **observed** vs **inferred**  
+- Artifacts: controlled store, SHA-256, PE sniff, provenance chain Evidence→Process→Region→Artifact  
 
-**Process Explorer → select process → Deep Dive → Analyze process (job)**  
-→ `windows.cmdline` / `dlllist` / `netscan` (PID filter) / `handles` / `vadinfo`  
-→ normalized modules, network, handles, VAD, transparent findings  
-→ Jobs view (queued/running/completed/failed/cancelled)
-
-No synthetic forensic rows are fabricated. Empty states are explicit until a real dump is analyzed.
+No synthetic forensic evidence. Empty states until a real dump is analyzed.
 
 ---
 
 ## Completed
 
-### Prior
-- Phase 0–1 foundation, Phase 2 import + basic triage + process list
-
-### This milestone
-- [x] SQLite schema **v2** (modules, network_connections, handle_entries, memory_regions, findings, job/process fields)
-- [x] Thread-safe DB + **JobManager** (background worker, cancel flag)
-- [x] Jobs: `basic_triage`, `process_recommended`
-- [x] IPC: `jobs.*`, `process.get`, `process.analyze_recommended`, `network.list`, `modules.list`, `findings.list`
-- [x] Process Deep Dive UI (tabs: overview, cmdline, family, modules, network, handles, memory, findings)
-- [x] Recommended analysis strategy documented on AnalysisRun (`strategy_json`)
-- [x] Targeted plugins: cmdline/dlllist/handles/vadinfo with `pid` list; netscan image-wide then PID filter
-- [x] Heuristic findings (encoded PowerShell, VAD W+X / private executable) — explainable only
-- [x] Jobs UI + polling; basic triage is async (does not freeze UI on submit)
-- [x] Network / Modules / Findings investigation views (data-backed empty states)
-- [x] Global search over normalized entities
-- [x] IOC extraction + list + JSON/CSV export (schema v3 `iocs`)
-- [x] Search / IOCs UI
+- Phase 0–3: foundation, triage, deep dive, jobs, search, IOCs  
+- [x] Schema v4: artifacts, timeline_events, region size/indicators  
+- [x] Memory explorer UI + scan/extract jobs  
+- [x] Timeline build/list UI  
+- [x] Artifacts list + provenance detail  
+- [x] Safe artifact paths + hashing  
+- [x] Tests (16 pytest, 2 cargo)
 
 ---
 
 ## In Progress
 
-- Memory/VAD global explorer
-- Timeline
-- Artifact extraction / provenance
+- Optional providers: YARA, PE-sieve, mal_unpack  
+- Plugin Explorer / Advanced Volatility mode  
+- Export/reporting  
+- Windows release engineering (MSI deferred)
 
 ---
 
@@ -57,31 +46,10 @@ No synthetic forensic rows are fabricated. Empty states are explicit until a rea
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| No real memory image on machine | Info | Deep dive / search data empty until real dump + jobs complete |
-| netscan is image-wide | Info | By Vol3 API design; we filter to selected PID when persisting |
-| Job cancel cooperative only | Medium | Between plugins; cannot abort inside Vol3 plugin mid-run |
-| IOC domain regex conservative | Low | May miss uncommon TLDs; avoids some noise |
-| Handles capped at 5000 in deep dive query | Low | Pagination later |
-| Single worker queue | Low | One analysis at a time in engine process |
-
----
-
-## Technical Debt
-
-- Username still not populated (needs getsids/other plugin later)
-- Artifacts extraction not started
-- Engine RPC still one-request-at-a-time on stdio while jobs run in parallel thread (reads OK)
-
----
-
-## Architecture Decisions
-
-| ID | Decision | Status |
-|----|----------|--------|
-| AD-015 | Schema v2 for process-related entities | Accepted |
-| AD-016 | Background JobManager for triage + process analysis | Accepted |
-| AD-017 | process_recommended strategy: cmdline, dlllist, netscan, handles, vadinfo | Accepted |
-| AD-018 | Transparent findings only (no risk scores) | Accepted |
+| No real memory image | Info | Extract/scan need a real dump |
+| VAD size = end-start | Low | Approximate if end exclusive semantics differ |
+| Single job worker | Low | One analysis at a time |
+| MSI/WiX | Deferred | |
 
 ---
 
@@ -89,7 +57,7 @@ No synthetic forensic rows are fabricated. Empty states are explicit until a rea
 
 | Check | Result |
 |-------|--------|
-| pytest | **12 passed** |
+| pytest | **16 passed** |
 | cargo test | **2 passed** |
 | frontend build | **PASS** |
 | cargo build | **PASS** |
@@ -98,15 +66,19 @@ No synthetic forensic rows are fabricated. Empty states are explicit until a rea
 
 ## Next Steps
 
-1. Memory/VAD global explorer (from stored regions + optional job)
-2. Lightweight timeline from process create times + findings
-3. Artifact dump/provenance for suspicious VADs
-4. Username enrichment plugin when selected  
+1. YARA provider (optional, user rules)  
+2. PE-sieve / mal_unpack adapters (user-supplied binaries)  
+3. Plugin Explorer + advanced plugin execution  
+4. Reporting/export  
+5. Release packaging later  
 
 ---
 
-## Important Discoveries
+## Architecture Decisions
 
-1. CmdLine/DllList/Handles/VadInfo accept `ListRequirement pid`.  
-2. NetScan has no PID requirement — filter after TreeGrid normalize.  
-3. Parallel Rust IPC tests must use unique `MEMSCOPE_DATA_DIR` (shared PID temp dir raced).
+| ID | Decision | Status |
+|----|----------|--------|
+| AD-019 | Schema v4 artifacts + timeline | Accepted |
+| AD-020 | VAD extract via `VadInfo.vad_dump` + controlled FileHandler | Accepted |
+| AD-021 | Timeline classification observed vs inferred | Accepted |
+| AD-022 | Never auto-execute artifacts | Accepted |

@@ -12,6 +12,11 @@ import {
   NetworkView,
 } from "./components/InvestigationViews";
 import { IocsView, SearchView } from "./components/SearchIocViews";
+import { MemoryExplorerView } from "./components/MemoryExplorerView";
+import {
+  ArtifactsView,
+  TimelineView,
+} from "./components/TimelineArtifactsViews";
 import { PlaceholderView } from "./components/PlaceholderView";
 import { engineCall, ensureAppPaths, EngineClientError } from "./lib/api";
 import type {
@@ -232,6 +237,22 @@ export default function App() {
     case "modules":
       body = <ModulesView evidenceId={evidence?.id ?? null} onError={setErr} />;
       break;
+    case "memory":
+      body = (
+        <MemoryExplorerView
+          evidenceId={evidence?.id ?? null}
+          processes={processes}
+          selectedProcessId={selectedProcessId}
+          onSelectProcess={(id) => {
+            setSelectedProcessId(id);
+            setNav("process_dive");
+          }}
+          onJobSubmitted={onJobSubmitted}
+          onError={setErr}
+          refreshToken={jobTick}
+        />
+      );
+      break;
     case "findings":
       body = <FindingsView evidenceId={evidence?.id ?? null} onError={setErr} />;
       break;
@@ -247,6 +268,28 @@ export default function App() {
             setNav("process_dive");
           }}
           onError={setErr}
+        />
+      );
+      break;
+    case "timeline":
+      body = (
+        <TimelineView
+          evidenceId={evidence?.id ?? null}
+          onOpenProcess={(id) => {
+            setSelectedProcessId(id);
+            setNav("process_dive");
+          }}
+          onError={setErr}
+          refreshToken={jobTick}
+        />
+      );
+      break;
+    case "artifacts":
+      body = (
+        <ArtifactsView
+          evidenceId={evidence?.id ?? null}
+          onError={setErr}
+          refreshToken={jobTick}
         />
       );
       break;
