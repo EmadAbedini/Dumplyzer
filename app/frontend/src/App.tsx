@@ -11,6 +11,7 @@ import {
   ModulesView,
   NetworkView,
 } from "./components/InvestigationViews";
+import { IocsView, SearchView } from "./components/SearchIocViews";
 import { PlaceholderView } from "./components/PlaceholderView";
 import { engineCall, ensureAppPaths, EngineClientError } from "./lib/api";
 import type {
@@ -233,6 +234,21 @@ export default function App() {
       break;
     case "findings":
       body = <FindingsView evidenceId={evidence?.id ?? null} onError={setErr} />;
+      break;
+    case "iocs":
+      body = <IocsView evidenceId={evidence?.id ?? null} onError={setErr} />;
+      break;
+    case "search":
+      body = (
+        <SearchView
+          evidenceId={evidence?.id ?? null}
+          onOpenProcess={(id) => {
+            setSelectedProcessId(id);
+            setNav("process_dive");
+          }}
+          onError={setErr}
+        />
+      );
       break;
     case "jobs":
       body = (

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -193,5 +193,21 @@ MIGRATIONS: dict[int, str] = {
     );
     CREATE INDEX IF NOT EXISTS idx_findings_evidence ON findings(evidence_id);
     CREATE INDEX IF NOT EXISTS idx_findings_pid ON findings(evidence_id, pid);
+    """,
+    3: """
+    CREATE TABLE IF NOT EXISTS iocs (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      process_id TEXT,
+      pid INTEGER,
+      ioc_type TEXT NOT NULL,
+      value TEXT NOT NULL,
+      context TEXT,
+      source TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_iocs_evidence ON iocs(evidence_id);
+    CREATE INDEX IF NOT EXISTS idx_iocs_type ON iocs(evidence_id, ioc_type);
+    CREATE INDEX IF NOT EXISTS idx_iocs_value ON iocs(evidence_id, value);
     """,
 }

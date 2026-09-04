@@ -396,9 +396,17 @@ def overview(db: Database, evidence_id: str) -> dict[str, Any]:
         "network_count": _count("network_connections"),
         "module_count": _count("modules"),
         "finding_count": _count("findings"),
-        "ioc_count": 0,
+        "ioc_count": _count("iocs") if _table_exists(db, "iocs") else 0,
         "recent_runs": runs,
     }
+
+
+def _table_exists(db: Database, name: str) -> bool:
+    row = db.fetchone(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        (name,),
+    )
+    return row is not None
 
 
 def _evidence_dto(row: dict[str, Any]) -> dict[str, Any]:

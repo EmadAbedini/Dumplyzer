@@ -10,6 +10,7 @@ const NAV: { id: NavId; label: string }[] = [
   { id: "memory", label: "Memory" },
   { id: "findings", label: "Findings" },
   { id: "iocs", label: "IOCs" },
+  { id: "search", label: "Search" },
   { id: "timeline", label: "Timeline" },
   { id: "artifacts", label: "Artifacts" },
   { id: "jobs", label: "Jobs" },

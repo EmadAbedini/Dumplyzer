@@ -8,7 +8,7 @@ import traceback
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Callable
 
-from memscope_engine.analysis import process_analysis, workflows
+from memscope_engine.analysis import process_analysis, search_iocs, workflows
 from memscope_engine.errors import AppError, rpc_error_payload
 from memscope_engine.jobs.manager import JobManager
 from memscope_engine.logging_setup import get_logger, setup_logging
@@ -170,6 +170,20 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         _db(), p["evidence_id"], pid=p.get("pid")
     ),
     "findings.list": lambda p: process_analysis.list_findings(_db(), p["evidence_id"]),
+    "search.query": lambda p: search_iocs.global_search(
+        _db(),
+        p["evidence_id"],
+        p["query"],
+        limit=int(p.get("limit", 200)),
+    ),
+    "iocs.extract": lambda p: search_iocs.extract_iocs(_db(), p["evidence_id"]),
+    "iocs.list": lambda p: search_iocs.list_iocs(
+        _db(), p["evidence_id"], ioc_type=p.get("ioc_type")
+    ),
+    "iocs.export_json": lambda p: search_iocs.export_iocs_json(_db(), p["evidence_id"]),
+    "iocs.export_csv": lambda p: {
+        "csv": search_iocs.export_iocs_csv(_db(), p["evidence_id"])
+    },
     "jobs.submit": handle_job_submit,
     "jobs.get": lambda p: _jobs().get(p["job_id"]),
     "jobs.list": lambda p: {

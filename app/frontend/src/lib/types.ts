@@ -174,8 +174,32 @@ export type NavId =
   | "memory"
   | "findings"
   | "iocs"
+  | "search"
   | "timeline"
   | "artifacts"
   | "jobs"
   | "plugins"
   | "settings";
+
+export type SearchHit = {
+  entity: string;
+  value: string;
+  context: string;
+  process_id: string | null;
+  pid: number | null;
+  source: string | null;
+  plugin: string | null;
+  ref_id: string | null;
+};
+
+export type Ioc = {
+  id: string;
+  evidence_id: string;
+  process_id: string | null;
+  pid: number | null;
+  ioc_type: string;
+  value: string;
+  context: string | null;
+  source: string | null;
+  created_at: string | null;
+};
