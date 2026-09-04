@@ -25,7 +25,9 @@ engine/.venv/
 *.e01
 *.dd
 data/
-artifacts/
+data/artifacts/
+# runtime artifact stores (not source packages)
+**/MemScope/artifacts/
 *.db
 *.sqlite
 *.sqlite3
