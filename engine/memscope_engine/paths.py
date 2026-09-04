@@ -34,9 +34,17 @@ class AppPaths:
         self.cache = self.root / "cache"
         self.config_path = self.root / "config.json"
         self.tmp = self.root / "tmp"
+        self.yara_rules = self.root / "yara_rules"
 
     def ensure(self) -> "AppPaths":
-        for p in (self.root, self.logs, self.artifacts, self.cache, self.tmp):
+        for p in (
+            self.root,
+            self.logs,
+            self.artifacts,
+            self.cache,
+            self.tmp,
+            self.yara_rules,
+        ):
             p.mkdir(parents=True, exist_ok=True)
         return self
 
@@ -49,4 +57,5 @@ class AppPaths:
             "cache": str(self.cache),
             "config_path": str(self.config_path),
             "tmp": str(self.tmp),
+            "yara_rules": str(self.yara_rules),
         }

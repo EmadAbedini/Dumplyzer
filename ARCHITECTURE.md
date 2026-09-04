@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-04 — **Memory/VAD, Timeline, Artifacts (schema v4) implemented**.
+> Last verified: 2026-09-04 — **YARA optional provider (schema v5) implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -413,26 +413,33 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 | `process.analyze_recommended` | Queue `process_recommended` job |
 | `overview.get` | Investigation summary |
 | `network.list` / `modules.list` / `findings.list` | Entity lists |
-| `memory.list` / `memory.get` / `memory.scan` / `memory.extract` | VAD explorer + dump jobs |
-| `timeline.build` / `timeline.list` | Forensic timeline |
-| `artifacts.list` / `artifacts.get` | Artifact metadata + provenance |
+| `yara.status` / `yara.configure` | Provider availability + settings |
+| `yara.scan_artifact` | Queue artifact YARA job |
+| `yara.scans_for_artifact` / `yara.scan_get` / `yara.matches_for_evidence` | Results |
 
 ### SQLite schema version
 
-**v4** — adds `artifacts`, `timeline_events`; `memory_regions.size_bytes` + `indicators_json`.
+**v5** — `yara_scans`, `yara_matches`, `app_settings`; prior v4 artifacts/timeline.
 
-### Artifacts
+### Optional providers
 
-- Root: `{app_data}/artifacts/{evidence_id}/`  
-- Dump via Volatility `VadInfo.vad_dump` into sanitized filenames  
-- SHA-256 on write; PE magic sniff; never executed  
-- Provenance chain: evidence → process → memory_region → artifact  
+```
+providers/
+  base.py          # AnalysisProvider protocol
+  yara_provider.py # yara-python adapter (optional import)
+```
 
-### Timeline
+**YARA**
 
-- Rebuilt from processes, network, modules (with load_time), findings, artifacts  
-- `classification`: `observed` (forensic fields) vs `inferred` (heuristics / analysis time)  
-- Missing timestamps stay null with `time_precision=unknown` — never invented OS times  
+- Optional: `pip install yara-python` / `pip install -e ".[yara]"`
+- Rules directory: `{app_data}/yara_rules/` (`.yar` / `.yara`)
+- Scan target: **artifact file paths** under controlled artifact store only
+- Job kind: `yara_artifact_scan`
+- Results: rule name, namespace, source file, tags, meta, string identifiers + offsets
+- No threat scores; no process live-memory scan unless later explicitly added with a real target
+- Security: path allow-list for rules, artifact path confinement, no shell, timeouts, cooperative cancel
+
+Extension: PE-sieve / mal_unpack should implement the same `AnalysisProvider` pattern and job registration without coupling to React.
 
 ---
 
@@ -441,7 +448,7 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 1. **License:** Apache-2.0 proposed for app code  
 2. **Engine shipping for release:** embedded Python vs first-run venv (Phase 7)  
 3. **Python engine runtime:** **3.12.x venv** (decided)  
-4. **Optional malware tools:** user-supplied paths only until license review  
+4. **PE-sieve / mal_unpack:** user-supplied binaries only after license review  
 
 Ordinary implementation choices proceed without further permission.
 

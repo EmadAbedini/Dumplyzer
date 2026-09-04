@@ -8,7 +8,13 @@ import traceback
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Callable
 
-from memscope_engine.analysis import memory_artifacts, process_analysis, search_iocs, workflows
+from memscope_engine.analysis import (
+    memory_artifacts,
+    process_analysis,
+    search_iocs,
+    workflows,
+    yara_workflows,
+)
 from memscope_engine.errors import AppError, rpc_error_payload
 from memscope_engine.jobs.manager import JobManager
 from memscope_engine.logging_setup import get_logger, setup_logging
@@ -100,7 +106,13 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
             db_, params, cancelled, progress, paths=paths
         )
 
+    def _yara_scan(db_, params, cancelled, progress):
+        return yara_workflows.run_yara_artifact_scan_job(
+            db_, params, cancelled, progress, paths=paths
+        )
+
     jobs.register("vad_extract", _vad_extract)
+    jobs.register("yara_artifact_scan", _yara_scan)
     jobs.start()
     _STATE["paths"] = paths
     _STATE["db"] = db
@@ -111,6 +123,7 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
         "paths": paths.as_dict(),
         "schema_version": db.schema_version(),
         "volatility": _vol_init(),
+        "yara": yara_workflows.yara_status(paths, db),
     }
 
 
@@ -135,6 +148,14 @@ def handle_job_submit(params: dict[str, Any]) -> dict[str, Any]:
         params=params.get("params") or {},
         message=params.get("message"),
     )
+
+
+def _artifact_get(artifact_id: str) -> dict[str, Any]:
+    dto = memory_artifacts.get_artifact(_db(), artifact_id)
+    yara = yara_workflows.list_yara_scans_for_artifact(_db(), artifact_id)
+    dto["yara_scans"] = yara["items"]
+    dto["yara_status"] = yara_workflows.yara_status(_paths(), _db())
+    return dto
 
 
 HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
@@ -229,7 +250,26 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "timeline.build": lambda p: memory_artifacts.build_timeline(_db(), p["evidence_id"]),
     "timeline.list": lambda p: memory_artifacts.list_timeline(_db(), p["evidence_id"]),
     "artifacts.list": lambda p: memory_artifacts.list_artifacts(_db(), p["evidence_id"]),
-    "artifacts.get": lambda p: memory_artifacts.get_artifact(_db(), p["artifact_id"]),
+    "artifacts.get": lambda p: _artifact_get(p["artifact_id"]),
+    "yara.status": lambda _p: yara_workflows.yara_status(_paths(), _db()),
+    "yara.configure": lambda p: yara_workflows.configure_yara(
+        _paths(), _db(), p.get("settings") or p
+    ),
+    "yara.scan_artifact": lambda p: _jobs().submit(
+        "yara_artifact_scan",
+        evidence_id=p.get("evidence_id"),
+        process_id=p.get("process_id"),
+        pid=p.get("pid"),
+        params={"artifact_id": p["artifact_id"], "evidence_id": p.get("evidence_id")},
+        message=f"YARA scan artifact {p.get('artifact_id')}",
+    ),
+    "yara.scans_for_artifact": lambda p: yara_workflows.list_yara_scans_for_artifact(
+        _db(), p["artifact_id"]
+    ),
+    "yara.scan_get": lambda p: yara_workflows.get_yara_scan(_db(), p["scan_id"]),
+    "yara.matches_for_evidence": lambda p: yara_workflows.list_yara_matches_for_evidence(
+        _db(), p["evidence_id"]
+    ),
     "jobs.submit": handle_job_submit,
     "jobs.get": lambda p: _jobs().get(p["job_id"]),
     "jobs.list": lambda p: {

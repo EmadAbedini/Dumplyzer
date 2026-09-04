@@ -129,6 +129,69 @@ export type Artifact = {
   notes: string | null;
   metadata?: Record<string, unknown>;
   provenance_chain?: Array<Record<string, unknown>>;
+  yara_scans?: YaraScanBundle[];
+  yara_status?: YaraStatus;
+};
+
+export type YaraStatus = {
+  available: boolean;
+  reason?: string | null;
+  suggestion?: string | null;
+  yara_version?: string | null;
+  binding?: string | null;
+  provider?: string;
+  rule_file_count?: number;
+  rule_files?: string[];
+  default_rules_dir?: string | null;
+  extra_rule_paths?: string[];
+  timeout_secs?: number;
+};
+
+export type YaraMatch = {
+  id: string;
+  scan_id: string;
+  evidence_id: string;
+  artifact_id: string;
+  process_id: string | null;
+  pid: number | null;
+  memory_region_id: string | null;
+  rule_name: string;
+  namespace: string | null;
+  rule_source: string | null;
+  tags: string[];
+  meta: Record<string, unknown>;
+  strings: Array<{
+    identifier: string;
+    instances?: Array<{
+      offset?: number | null;
+      matched_length?: number | null;
+      matched_data_hex?: string | null;
+    }>;
+  }>;
+  created_at: string | null;
+};
+
+export type YaraScan = {
+  id: string;
+  evidence_id: string;
+  artifact_id: string;
+  process_id: string | null;
+  pid: number | null;
+  memory_region_id: string | null;
+  analysis_run_id: string | null;
+  job_id: string | null;
+  status: string;
+  match_count: number;
+  yara_version: string | null;
+  ruleset?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type YaraScanBundle = {
+  scan: YaraScan;
+  matches: YaraMatch[];
 };
 
 export type TimelineEvent = {

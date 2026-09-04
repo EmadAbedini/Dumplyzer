@@ -4,52 +4,65 @@
 
 **Last updated:** 2026-09-04  
 **Version target:** 0.1.0-dev  
-**Current phase:** Phase 4 — Forensic features (Memory/VAD, Timeline, Artifacts)
+**Current phase:** Phase 5 — Optional malware providers (YARA done)
 
 ---
 
 ## Current Status
 
-Memory/VAD explorer, forensic timeline, and first-class artifact provenance are implemented on schema **v4**.
+**YARA** is integrated as an optional provider:
 
-- VAD list with indicators (W+X, private executable unbacked, etc.) — **not** malice labels  
-- Jobs: `vad_scan`, `vad_extract` (real `VadInfo.vad_dump` API)  
-- Timeline rebuild from normalized tables; **observed** vs **inferred**  
-- Artifacts: controlled store, SHA-256, PE sniff, provenance chain Evidence→Process→Region→Artifact  
+- Detects `yara-python` (this machine: **4.5.4**)
+- Rules under `%LOCALAPPDATA%\MemScope\yara_rules` (or `MEMSCOPE_DATA_DIR/yara_rules`)
+- Job `yara_artifact_scan` scans **extracted artifacts only**
+- Results in `yara_scans` / `yara_matches` (schema **v5**) with full provenance links
+- Artifacts UI: availability, rule count, Scan with YARA, match details
+- Distinguishes: unavailable / no matches / failure / matches
 
-No synthetic forensic evidence. Empty states until a real dump is analyzed.
+Core MemScope works without YARA (`pip install -e ".[yara]"` optional).
 
 ---
 
 ## Completed
 
-- Phase 0–3: foundation, triage, deep dive, jobs, search, IOCs  
-- [x] Schema v4: artifacts, timeline_events, region size/indicators  
-- [x] Memory explorer UI + scan/extract jobs  
-- [x] Timeline build/list UI  
-- [x] Artifacts list + provenance detail  
-- [x] Safe artifact paths + hashing  
-- [x] Tests (16 pytest, 2 cargo)
+- Phases 0–4 forensic core  
+- [x] Provider protocol + YaraProvider  
+- [x] Schema v5 YARA tables + app_settings  
+- [x] Job + AnalysisRun + PluginExecution linkage  
+- [x] Artifact UI YARA panel  
+- [x] Tests (availability, compile fail, match/nomatch, path deny, job, unavailable mock)
 
 ---
 
-## In Progress
+## In Progress / Next
 
-- Optional providers: YARA, PE-sieve, mal_unpack  
-- Plugin Explorer / Advanced Volatility mode  
-- Export/reporting  
-- Windows release engineering (MSI deferred)
+1. PE-sieve provider (user-supplied binary; license check)  
+2. mal_unpack provider  
+3. Plugin Explorer / Advanced Volatility  
+4. Export/reporting  
+5. Release packaging (MSI deferred)
 
 ---
 
-## Known Issues
+## Known Issues / Limitations
 
-| Issue | Severity | Notes |
-|-------|----------|-------|
-| No real memory image | Info | Extract/scan need a real dump |
-| VAD size = end-start | Low | Approximate if end exclusive semantics differ |
-| Single job worker | Low | One analysis at a time |
-| MSI/WiX | Deferred | |
+| Issue | Notes |
+|-------|--------|
+| YARA cancel is cooperative | Cannot kill native `yara.match` mid-call; timeout bounds runtime |
+| Process not scanned live | Only extracted artifact files |
+| Rule paths restricted | Must live under configured yara_rules roots |
+| No threat score | By design |
+
+---
+
+## YARA on this machine
+
+| Item | Value |
+|------|--------|
+| Available | **Yes** |
+| Package | yara-python **4.5.4** |
+| Binding | yara-python |
+| CLI `yara` | Not on PATH (not required) |
 
 ---
 
@@ -57,20 +70,10 @@ No synthetic forensic evidence. Empty states until a real dump is analyzed.
 
 | Check | Result |
 |-------|--------|
-| pytest | **16 passed** |
+| pytest | **23 passed** |
 | cargo test | **2 passed** |
 | frontend build | **PASS** |
 | cargo build | **PASS** |
-
----
-
-## Next Steps
-
-1. YARA provider (optional, user rules)  
-2. PE-sieve / mal_unpack adapters (user-supplied binaries)  
-3. Plugin Explorer + advanced plugin execution  
-4. Reporting/export  
-5. Release packaging later  
 
 ---
 
@@ -78,7 +81,7 @@ No synthetic forensic evidence. Empty states until a real dump is analyzed.
 
 | ID | Decision | Status |
 |----|----------|--------|
-| AD-019 | Schema v4 artifacts + timeline | Accepted |
-| AD-020 | VAD extract via `VadInfo.vad_dump` + controlled FileHandler | Accepted |
-| AD-021 | Timeline classification observed vs inferred | Accepted |
-| AD-022 | Never auto-execute artifacts | Accepted |
+| AD-023 | YARA optional via yara-python | Accepted |
+| AD-024 | Scan targets = artifact files only | Accepted |
+| AD-025 | Provider protocol for future PE-sieve/mal_unpack | Accepted |
+| AD-026 | Schema v5 yara_scans/matches | Accepted |

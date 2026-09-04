@@ -13,10 +13,8 @@ import {
 } from "./components/InvestigationViews";
 import { IocsView, SearchView } from "./components/SearchIocViews";
 import { MemoryExplorerView } from "./components/MemoryExplorerView";
-import {
-  ArtifactsView,
-  TimelineView,
-} from "./components/TimelineArtifactsViews";
+import { TimelineView } from "./components/TimelineArtifactsViews";
+import { ArtifactsView } from "./components/ArtifactsView";
 import { PlaceholderView } from "./components/PlaceholderView";
 import { engineCall, ensureAppPaths, EngineClientError } from "./lib/api";
 import type {
@@ -289,6 +287,7 @@ export default function App() {
         <ArtifactsView
           evidenceId={evidence?.id ?? null}
           onError={setErr}
+          onJobSubmitted={onJobSubmitted}
           refreshToken={jobTick}
         />
       );

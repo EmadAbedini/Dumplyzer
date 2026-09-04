@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -259,5 +259,52 @@ MIGRATIONS: dict[int, str] = {
     );
     CREATE INDEX IF NOT EXISTS idx_timeline_evidence_time ON timeline_events(evidence_id, event_time);
     CREATE INDEX IF NOT EXISTS idx_timeline_kind ON timeline_events(evidence_id, event_kind);
+    """,
+    5: """
+    CREATE TABLE IF NOT EXISTS yara_scans (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+      process_id TEXT,
+      pid INTEGER,
+      memory_region_id TEXT,
+      analysis_run_id TEXT,
+      job_id TEXT,
+      status TEXT NOT NULL,
+      match_count INTEGER NOT NULL DEFAULT 0,
+      yara_version TEXT,
+      ruleset_json TEXT NOT NULL DEFAULT '{}',
+      error_json TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_yara_scans_artifact ON yara_scans(artifact_id);
+    CREATE INDEX IF NOT EXISTS idx_yara_scans_evidence ON yara_scans(evidence_id);
+
+    CREATE TABLE IF NOT EXISTS yara_matches (
+      id TEXT PRIMARY KEY,
+      scan_id TEXT NOT NULL REFERENCES yara_scans(id) ON DELETE CASCADE,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+      process_id TEXT,
+      pid INTEGER,
+      memory_region_id TEXT,
+      rule_name TEXT NOT NULL,
+      namespace TEXT,
+      rule_source TEXT,
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      meta_json TEXT NOT NULL DEFAULT '{}',
+      strings_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_yara_matches_scan ON yara_matches(scan_id);
+    CREATE INDEX IF NOT EXISTS idx_yara_matches_artifact ON yara_matches(artifact_id);
+    CREATE INDEX IF NOT EXISTS idx_yara_matches_rule ON yara_matches(evidence_id, rule_name);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     """,
 }
