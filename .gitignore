@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+app/frontend/dist/
+app/frontend/node_modules/
+
+# Rust / Tauri
+app/desktop/target/
+**/*.rs.bk
+
+# Python
+engine/.venv/
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Local data / evidence (never commit)
+*.raw
+*.dmp
+*.mem
+*.vmem
+*.lime
+*.aff4
+*.e01
+*.dd
+data/
+artifacts/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Build outputs
+dist/
+build/
+target/

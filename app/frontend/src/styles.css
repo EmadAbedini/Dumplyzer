@@ -1,0 +1,62 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: #0f1115;
+  color: #e8eaed;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.tagline {
+  margin: 0 0 1.5rem;
+  color: #9aa0a6;
+  font-size: 0.9rem;
+}
+
+button {
+  background: #1a73e8;
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+pre {
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: #1a1d23;
+  border: 1px solid #2a2f3a;
+  overflow: auto;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+pre.ok {
+  border-color: #2e7d32;
+}
+
+pre.fail {
+  border-color: #c62828;
+}
