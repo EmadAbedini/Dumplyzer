@@ -52,3 +52,6 @@ Desktop.ini
 dist/
 build/
 target/
+app/desktop/resources/runtime/**
+!app/desktop/resources/runtime/.gitkeep
+packaging/cache/

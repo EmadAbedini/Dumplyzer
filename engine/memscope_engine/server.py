@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import traceback
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any, Callable
 
 from memscope_engine.analysis import (
@@ -24,6 +26,7 @@ from memscope_engine.jobs.manager import JobManager
 from memscope_engine.logging_setup import get_logger, setup_logging
 from memscope_engine.paths import AppPaths
 from memscope_engine.storage import Database
+from memscope_engine.version import APP_VERSION
 
 log = get_logger("app")
 
@@ -32,6 +35,16 @@ _STATE: dict[str, Any] = {
     "db": None,
     "jobs": None,
 }
+
+
+def _runtime_info() -> dict[str, Any]:
+    return {
+        "app_version": APP_VERSION,
+        "engine_version": APP_VERSION,
+        "python_version": sys.version.split()[0],
+        "python_executable": sys.executable,
+        "packaged": os.environ.get("MEMSCOPE_PACKAGED") == "1",
+    }
 
 
 def _vol_init() -> dict[str, Any]:
@@ -49,8 +62,7 @@ def _vol_init() -> dict[str, Any]:
 
     return {
         "ok": True,
-        "engine_version": "0.1.0-dev",
-        "python_version": sys.version.split()[0],
+        **_runtime_info(),
         "volatility3_version": vol_ver,
         "volatility3_path": getattr(volatility3, "__file__", None),
         "framework_package_version": getattr(constants, "PACKAGE_VERSION", None),
@@ -90,8 +102,30 @@ def _jobs() -> JobManager:
     return jobs
 
 
+def _resolve_init_root(params: dict[str, Any]) -> Path | str | None:
+    """Honor MEMSCOPE_DATA_DIR from the desktop shell; ignore client overrides."""
+    env = os.environ.get("MEMSCOPE_DATA_DIR")
+    requested = params.get("data_dir")
+    if env and str(env).strip():
+        env_path = Path(str(env)).expanduser().resolve()
+        if requested:
+            try:
+                req_path = Path(str(requested)).expanduser().resolve()
+            except (OSError, TypeError, ValueError):
+                req_path = None
+            if req_path is not None and req_path != env_path:
+                log.warning(
+                    "ignored client data_dir override",
+                    extra={"channel": "app"},
+                )
+        return env_path
+    if requested:
+        return Path(str(requested))
+    return None
+
+
 def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
-    data_dir = params.get("data_dir")
+    data_dir = _resolve_init_root(params)
     paths = AppPaths(data_dir).ensure() if data_dir else AppPaths().ensure()
     setup_logging(paths.logs)
     if _STATE.get("db") is not None:
@@ -150,6 +184,8 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
         "ok": True,
         "paths": paths.as_dict(),
         "schema_version": db.schema_version(),
+        "app_version": APP_VERSION,
+        "runtime": _runtime_info(),
         "volatility": _vol_init(),
         "yara": yara_workflows.yara_status(paths, db),
         "pe_sieve": pe_sieve_workflows.pe_sieve_status(paths, db),
@@ -165,8 +201,9 @@ def handle_health(_params: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "service": "memscope_engine",
-        "version": "0.1.0-dev",
+        "version": APP_VERSION,
         "initialized": _STATE.get("db") is not None,
+        "runtime": _runtime_info(),
     }
 
 
@@ -207,6 +244,15 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         "ok": True,
         "health": handle_health({}),
         "volatility": _vol_init(),
+        "providers": {
+            "yara": yara_workflows.yara_status(_paths(), _db()),
+            "pe_sieve": pe_sieve_workflows.pe_sieve_status(_paths(), _db()),
+            "mal_unpack": mal_unpack_workflows.mal_unpack_status(_paths(), _db()),
+        },
+        "plugins": {
+            "volatility_version": plugin_explorer.volatility_version(),
+            "model_version": 1,
+        },
     },
     "evidence.import": lambda p: workflows.import_evidence(_db(), p["path"]),
     "evidence.list": lambda _p: {"items": workflows.list_evidence(_db())},

@@ -3,22 +3,22 @@
 > Single source of truth for project continuity. Update after every meaningful milestone.
 
 **Last updated:** 2026-09-06  
-**Version target:** 0.1.0-dev  
-**Current phase:** Phase 7 — Export / reporting done
+**Version target:** 0.1.0  
+**Current phase:** Release engineering — Windows packaging
 
 ---
 
 ## Current Status
 
-**Export / reporting** is implemented on top of existing MemScope evidence (findings, timeline, IOCs, artifacts, provenance, processes, network, VAD, YARA, PE-sieve, mal_unpack, Advanced Volatility).
+**Windows release packaging** is implemented on top of the frozen forensic feature set.
 
-- Formats: JSON (`memscope-report-v1`), CSV tabular datasets, self-contained HTML forensic report
-- Report schema **v1**; analysis SQLite schema **v9** (`exports` table)
-- Job kind `export_report` with queued / running / completed / failed / cancelled
-- Files written only under `{app_data}/exports/`; evidence is never overwritten
-- HTML truncates large tables; Advanced plugin TreeGrid is summarized, not dumped
+- End-user installers: NSIS per-user (`%LOCALAPPDATA%\Programs\MemScope`) and WiX 3.14 MSI
+- Engine: official CPython **3.12.10** embeddable + `memscope-engine` **0.1.0** + Volatility 3 **2.28.0** (no global Python)
+- User data: `%LOCALAPPDATA%\MemScope\` (db, logs, cache, artifacts, exports, yara_rules, tools)
+- YARA / PE-sieve / mal_unpack remain optional and are not bundled or downloaded
+- Clean-machine installation on a VM **was not executed** in this milestone
 
-Plugin Explorer and optional providers are unchanged.
+Forensic workflows (Volatility core, process/module/network/VAD, findings/IOC/timeline, artifacts, YARA/PE-sieve/mal_unpack providers, Plugin Explorer, Advanced execution, JobManager, SQLite, cache, JSON/CSV/HTML export) are unchanged aside from version metadata and data-dir hardening.
 
 ---
 
@@ -27,17 +27,19 @@ Plugin Explorer and optional providers are unchanged.
 - Phases 0–4 forensic core  
 - Optional YARA / PE-sieve / mal_unpack providers  
 - Plugin Explorer + Advanced Volatility execution (schema v8)  
-- [x] JSON / CSV / HTML investigation export  
-- [x] Forensic HTML report (metadata, summary, findings, processes, network, modules, VAD, timeline, IOCs, artifacts, malware analysis, Advanced Volatility)  
-- [x] Provenance chain + observed vs inferred timeline  
-- [x] Export UI (complete vs selected sections, generation states, cancel)  
-- [x] Safe output paths, filename sanitization, HTML escaping  
+- JSON / CSV / HTML investigation export (schema v9, report v1)  
+- [x] Windows engine runtime packaging (embeddable CPython, not PyInstaller)  
+- [x] Pinned lockfiles (Python runtime, Volatility, pefile, frontend npm lock, Cargo.lock)  
+- [x] NSIS + MSI installer configuration  
+- [x] First-launch directories, canonical data path, legacy db copy, engine process lifecycle  
 
 ---
 
 ## In Progress / Next
 
-1. Release packaging (MSI deferred)
+1. Clean-machine validation on a Windows x64 VM without developer toolchains (checklist in `docs/clean-machine-validation.md`)
+2. Authenticode signing
+3. Linux packaging (out of scope for 0.1.0)
 
 ---
 
@@ -57,13 +59,16 @@ Plugin Explorer and optional providers are unchanged.
 | Dummy/unanalyzed images | Automagic often raises `volatility_unsatisfied` until symbols/OS resolve |
 | Plugin Explorer is generic | Does not replace dedicated process/memory views |
 | Result preview cap | UI/IPC preview is 500 rows; full table remains in the cache file |
-| 6 Vol3 import failures | Discovery records them; those modules are not listed as available |
+| Volatility `full` extras omitted | capstone / pycryptodome / yara-python are not in the shipped runtime; some plugins may import-fail |
 | HTML report row cap | 400 rows per large section; remainder is in JSON/CSV |
 | JSON/CSV row caps | JSON 20000 / CSV 50000 per section; not a full unbounded dump |
 | No PDF export | Intentionally omitted |
 | Export destination | Engine-chosen under app data `exports/` only; client paths rejected |
 | HTML is static | No JavaScript; open as a file. Command lines/paths are escaped text, not executed |
 | No desktop UI browser pass | Export view verified via TypeScript build + engine IPC tests |
+| Clean-machine install | Not run; do not claim it passed |
+| Code signing | Not configured |
+| Per-user install is writable | Windows current-user install directory is user-writable |
 
 ---
 
@@ -72,9 +77,9 @@ Plugin Explorer and optional providers are unchanged.
 | Item | Value |
 |------|-------|
 | Version | **2.28.0** |
-| Discovered plugins | **191** |
+| Discovered plugins | **191** (developer venv; shipped runtime may show additional import failures without `full` extras) |
 | Categories | windows 99, linux 60, mac 23, framework 9 |
-| Import failures | 6 (not marked available) |
+| Import failures | 6 on the developer venv (not marked available) |
 
 ---
 
@@ -82,10 +87,13 @@ Plugin Explorer and optional providers are unchanged.
 
 | Check | Result |
 |-------|--------|
-| pytest | **105 passed, 2 skipped** (skips = real PE-sieve and mal_unpack EXEs not installed) |
-| cargo test | **Not run** — `cargo` is not installed on this machine |
+| pytest | **119 passed, 2 skipped** (skips = real PE-sieve and mal_unpack EXEs not installed) |
+| cargo test | **6 passed** (engine IPC + launch resolution) |
 | frontend build | **PASS** (`tsc --noEmit && vite build`) |
-| cargo build | **Not run** — `cargo` is not installed on this machine |
+| cargo build | **PASS** (debug); **PASS** (release via `tauri build`) |
+| NSIS installer | **PASS** `MemScope_0.1.0_x64-setup.exe` (12.7 MB) |
+| MSI installer | **PASS** `MemScope_0.1.0_x64_en-US.msi` (16.3 MB) |
+| Clean-machine install | **Not run** |
 
 ---
 
@@ -93,14 +101,9 @@ Plugin Explorer and optional providers are unchanged.
 
 | ID | Decision | Status |
 |----|----------|--------|
-| AD-023–AD-032 | Prior YARA / PE-sieve / mal_unpack decisions | Accepted |
-| AD-033 | Plugin Explorer uses Volatility 3 Python APIs only (`construct_plugin` / TreeGrid), never vol.py stdout | Accepted |
-| AD-034 | Plugin ids resolve only via `framework.list_plugins`; no user `import_module` | Accepted |
-| AD-035 | Evidence URI/kernel/layers are engine-filled; UI edits only simple configurable requirements | Accepted |
-| AD-036 | Schema v8 analysis_cache + plugin_results; large TreeGrids live as JSON files under app cache | Accepted |
-| AD-037 | Cache key = evidence SHA-256 + Vol version + plugin id + canonical params + schema version | Accepted |
-| AD-038 | PID→process navigation only when a process row already exists for that PID | Accepted |
-| AD-039 | Export formats are JSON, CSV, and HTML only; no PDF until a dedicated architecture exists | Accepted |
-| AD-040 | Exports write only under `{app_data}/exports/`; client destination paths and traversal are rejected | Accepted |
-| AD-041 | Report schema `memscope-report-v1` is independent of SQLite schema version | Accepted |
-| AD-042 | HTML reports omit raw Advanced plugin TreeGrid; summaries + structured JSON/CSV hold detail | Accepted |
+| AD-023–AD-042 | Prior forensic / export decisions | Accepted |
+| AD-043 | Ship official CPython 3.12.10 Windows embeddable + site-packages, not PyInstaller and not a first-run venv | Accepted |
+| AD-044 | NSIS `currentUser` default install dir is `%LOCALAPPDATA%\Programs\MemScope` so it does not collide with user data | Accepted |
+| AD-045 | Canonical user data is `%LOCALAPPDATA%\MemScope\` (not Tauri roaming identifier) | Accepted |
+| AD-046 | WiX Toolset **3.14.1** for MSI, prefetch with pinned SHA-256 | Accepted |
+| AD-047 | Application/engine/installer version is **0.1.0**; report schema and SQLite schema stay independent | Accepted |

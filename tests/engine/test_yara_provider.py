@@ -22,6 +22,11 @@ from memscope_engine.providers.yara_provider import (
 from memscope_engine.storage import Database
 
 
+def _require_yara() -> None:
+    if not detect_yara()["available"]:
+        pytest.skip("yara-python is optional and not installed")
+
+
 def test_schema_v5(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
     assert db.schema_version() == 9
@@ -31,13 +36,13 @@ def test_schema_v5(tmp_path: Path) -> None:
 
 
 def test_yara_available_on_this_machine() -> None:
+    _require_yara()
     info = detect_yara()
-    # Document reality: this environment has yara-python 4.5.4
-    assert info["available"] is True
     assert info["yara_version"]
 
 
 def test_compile_invalid_rule(tmp_path: Path) -> None:
+    _require_yara()
     paths = AppPaths(tmp_path / "data").ensure()
     bad = paths.yara_rules / "bad.yar"
     bad.write_text("rule broken { condition: not_a_thing }\n", encoding="utf-8")
@@ -48,6 +53,7 @@ def test_compile_invalid_rule(tmp_path: Path) -> None:
 
 
 def test_compile_and_scan_match_and_nomatch(tmp_path: Path) -> None:
+    _require_yara()
     paths = AppPaths(tmp_path / "data").ensure()
     rule = paths.yara_rules / "demo.yar"
     rule.write_text(
@@ -92,6 +98,7 @@ def test_rule_path_outside_denied(tmp_path: Path) -> None:
 
 
 def test_yara_workflow_job_and_provenance(tmp_path: Path) -> None:
+    _require_yara()
     paths = AppPaths(tmp_path / "data").ensure()
     db = Database(paths.db_path)
     # seed evidence + artifact

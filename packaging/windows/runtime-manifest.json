@@ -1,0 +1,34 @@
+{
+  "python": {
+    "version": "3.12.10",
+    "implementation": "CPython Windows embeddable x64",
+    "filename": "python-3.12.10-embed-amd64.zip",
+    "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
+    "sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+    "spdx": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip.spdx.json"
+  },
+  "engine": {
+    "package": "memscope-engine",
+    "version": "0.1.0",
+    "volatility3": "2.28.0",
+    "pefile": "2024.8.26",
+    "lockfile": "engine/requirements.lock.txt",
+    "yara": "optional, not bundled",
+    "pe_sieve": "user-supplied, not bundled",
+    "mal_unpack": "user-supplied, not bundled"
+  },
+  "wix": {
+    "version": "3.14.1",
+    "filename": "wix314-binaries.zip",
+    "url": "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip",
+    "sha256": "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31",
+    "tauri_cache": "%LOCALAPPDATA%\\tauri\\WixTools314"
+  },
+  "application": {
+    "version": "0.1.0",
+    "identifier": "com.memscope.workbench",
+    "install_nsis": "%LOCALAPPDATA%\\Programs\\MemScope",
+    "install_msi": "%ProgramFiles%\\MemScope",
+    "data_dir": "%LOCALAPPDATA%\\MemScope"
+  }
+}

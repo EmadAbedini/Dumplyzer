@@ -3,8 +3,11 @@
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$Py = Join-Path $Root "engine\.venv\Scripts\python.exe"
-if (-not (Test-Path $Py)) { throw "Missing $Py" }
+$Bundled = Join-Path $Root "app\desktop\resources\runtime\python.exe"
+$Venv = Join-Path $Root "engine\.venv\Scripts\python.exe"
+if (Test-Path $Bundled) { $Py = $Bundled }
+elseif (Test-Path $Venv) { $Py = $Venv }
+else { throw "Missing engine Python (bundled runtime or engine\.venv)" }
 
 $req = '{"jsonrpc":"2.0","id":"1","method":"smoke.e2e","params":{}}'
 $out = $req | & $Py -m memscope_engine

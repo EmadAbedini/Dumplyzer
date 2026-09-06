@@ -1,3 +1,5 @@
 """MemScope analysis engine package."""
 
-__version__ = "0.1.0-dev"
+from memscope_engine.version import APP_VERSION as __version__
+
+__all__ = ["__version__"]

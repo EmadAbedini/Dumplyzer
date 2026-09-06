@@ -20,19 +20,41 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; script-src 'self'",
       "capabilities": ["default"]
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "msi"],
+    "publisher": "MemScope",
+    "shortDescription": "Volatility 3 memory forensics workbench",
+    "longDescription": "MemScope is an offline desktop workbench for Volatility 3 memory forensics. The analysis engine is a bundled Python 3.12 runtime. Optional PE-sieve and mal_unpack executables are user-supplied and are never downloaded or executed against investigation artifacts automatically.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": [
+      "resources/runtime",
+      "resources/tools"
+    ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "template": "../../packaging/windows/nsis/installer.nsi"
+      },
+      "wix": {
+        "language": "en-US",
+        "upgradeCode": "a7349549-6d10-4b69-90e4-b7523e941030"
+      }
+    }
   }
 }

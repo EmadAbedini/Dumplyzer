@@ -1,7 +1,7 @@
 # Pinned core analysis deps (install via pyproject / pip install -e .)
+# Runtime lockfile: requirements.lock.txt
 volatility3==2.28.0
-pefile>=2024.8.26
+pefile==2024.8.26
 
-# Optional providers (not required for core MemScope):
+# Optional providers (not required for core MemScope, not shipped in the Windows runtime):
 # yara-python>=4.5.0
-

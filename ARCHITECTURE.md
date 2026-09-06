@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-06 — **Export / reporting (schema v9, report schema v1) implemented**.
+> Last verified: 2026-09-06 — **Windows release packaging (app 0.1.0, schema v9, report schema v1)**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -125,7 +125,7 @@ Exact package names may shift slightly during scaffolding; this document must be
 
 ### 4.2 Tauri ↔ Python engine
 
-- Engine started as child process: `python -m memscope_engine.server` (or equivalent entrypoint)
+- Engine started as child process: `python -m memscope_engine` (packaged: bundled `runtime\python.exe`)
 - **Transport:** stdin/stdout, **newline-delimited JSON** (NDJSON)
 - **Protocol:** JSON-RPC 2.0 style messages
   - Request: `{ "jsonrpc": "2.0", "id": "...", "method": "...", "params": { } }`
@@ -218,7 +218,7 @@ Provenance: evidence → process → region/module → extraction method → sha
 
 ## 7. Database (SQLite)
 
-- Location: under app data dir (e.g. `%APPDATA%\MemScope\` on Windows), not inside the memory image
+- Database: `%LOCALAPPDATA%\MemScope\memscope.db` on Windows, not inside the memory image and not inside the install directory
 - Stores: evidence metadata, normalized entities, jobs, cache index, findings, IOCs, artifacts metadata, timeline
 - **Does not store** raw memory dump bytes
 - Migrations: sequential SQL or lightweight migration runner from day one
@@ -338,10 +338,13 @@ Interface: `Provider` protocol with `availability()`, `run(request) -> ProviderR
 
 ## 16. Packaging (Windows x64)
 
-- Tauri bundler → installable artifact (MSI and/or NSIS)
-- Engine: ship via **bundled embedded Python** or **first-run venv bootstrap** — decision finalized in Phase 1/7 after size and Volatility packaging trials
-- Do not commit dumps, malware, local DBs, secrets, or build outputs
-- GitHub Actions: lint, typecheck, tests, release artifacts + checksums
+- Tauri 2 bundler produces **NSIS** (per-user, no admin) and **MSI** (WiX 3.14.1).
+- Engine: **official CPython 3.12.10 Windows embeddable** + `Lib\site-packages` containing `memscope-engine` and pinned Volatility 3 **2.28.0**. Not PyInstaller. Not a first-run venv. Not the developer's global Python.
+- Packaged spawn: absolute `runtime\python.exe -m memscope_engine` (argv, no shell, `CREATE_NO_WINDOW`, env scrubbed).
+- Developer spawn: `engine\.venv\Scripts\python.exe` when no bundled runtime is present.
+- User data is `%LOCALAPPDATA%\MemScope\`, never inside the install directory.
+- Do not commit dumps, malware, local DBs, secrets, or generated `resources/runtime` / installer output.
+- Optional YARA / PE-sieve / mal_unpack are not bundled and are never auto-downloaded.
 
 ---
 
@@ -384,7 +387,7 @@ Tests grow with features; no “test only at the end.”
 |-----------|-------------------------|
 | Rust | 1.98.1 `stable-x86_64-pc-windows-msvc` |
 | VS Build Tools | 17.14.39 — MSVC 14.44.35207 |
-| Engine Python | **3.12.10** via `engine/.venv` (host may also have 3.13.7) |
+| Engine Python | **3.12.10** via `engine/.venv` for development; **bundled embeddable 3.12.10** for release |
 | Volatility 3 | **2.28.0** (`volatility3.framework` import + plugin package walk) |
 | Tauri | **2.11.5** — debug `memscope.exe` builds |
 | Node / npm | 22.18.0 / 10.9.3 |
@@ -395,10 +398,14 @@ Tests grow with features; no “test only at the end.”
 ```
 Frontend invoke("smoke_e2e") / engine_call(method, params)
   → Tauri persistent EngineState (app/desktop/src/lib.rs)
-    → engine/.venv/Scripts/python.exe -m memscope_engine  (argv, no shell)
+    → packaged: <install>/runtime/python.exe -m memscope_engine
+       developer: engine/.venv/Scripts/python.exe -m memscope_engine
+      (argv, no shell)
       → NDJSON JSON-RPC
         → SQLite + Volatility 3 APIs
 ```
+
+User data root: `%LOCALAPPDATA%\MemScope\` (`MEMSCOPE_DATA_DIR` from the desktop shell).
 
 ### IPC methods (implemented)
 
@@ -526,9 +533,10 @@ providers/
 ## 21. Open decisions
 
 1. **License:** Apache-2.0 proposed for app code  
-2. **Engine shipping for release:** embedded Python vs first-run venv (Phase 7)  
-3. **Python engine runtime:** **3.12.x venv** (decided)  
+2. **Engine shipping for release:** official CPython 3.12.10 embeddable + site-packages (AD-043)  
+3. **Python engine runtime:** **3.12.10** (decided)  
 4. **PE-sieve / mal_unpack:** user-supplied official EXEs (BSD-2-Clause; not bundled). mal_unpack 1.0 executes `/exe`; MemScope will not invoke it against investigation targets.  
+5. **Code signing / clean-machine VM sign-off:** remaining release blockers  
 
 Ordinary implementation choices proceed without further permission.
 

@@ -1,12 +1,20 @@
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{Manager, RunEvent, State};
 use thiserror::Error;
+
+mod engine;
+
+use engine::{
+    configure_engine_command, memscope_data_dir, resolve_engine, resolve_inputs_from_env,
+    EngineLaunchPlan,
+};
 
 #[derive(Debug, Error)]
 pub enum EngineError {
@@ -23,17 +31,32 @@ impl Serialize for EngineError {
     }
 }
 
+impl From<String> for EngineError {
+    fn from(value: String) -> Self {
+        EngineError::Message(value)
+    }
+}
+
 #[allow(dead_code)]
 struct EngineProcess {
-    child: Child, // kept for future kill/timeout
+    child: Child,
     stdin: std::process::ChildStdin,
     stdout: BufReader<std::process::ChildStdout>,
+}
+
+impl Drop for EngineProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 pub struct EngineState {
     inner: Mutex<Option<EngineProcess>>,
     next_id: AtomicU64,
     data_dir: Mutex<Option<PathBuf>>,
+    exe_dir: Mutex<Option<PathBuf>>,
+    resource_dir: Mutex<Option<PathBuf>>,
 }
 
 impl EngineState {
@@ -42,52 +65,65 @@ impl EngineState {
             inner: Mutex::new(None),
             next_id: AtomicU64::new(1),
             data_dir: Mutex::new(None),
+            exe_dir: Mutex::new(None),
+            resource_dir: Mutex::new(None),
         }
+    }
+
+    fn shutdown(&self) {
+        if let Ok(mut guard) = self.inner.lock() {
+            *guard = None;
+        }
+    }
+
+    fn launch_dirs(&self) -> (Option<PathBuf>, Option<PathBuf>) {
+        let exe = self.exe_dir.lock().ok().and_then(|g| g.clone());
+        let resource = self.resource_dir.lock().ok().and_then(|g| g.clone());
+        (exe, resource)
     }
 }
 
-fn repo_root() -> Result<PathBuf, EngineError> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    Ok(manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .ok_or_else(|| EngineError::Message("cannot resolve repo root".into()))?
-        .to_path_buf())
-}
-
-fn engine_python(root: &Path) -> Result<PathBuf, EngineError> {
-    let candidates = [
-        root.join("engine")
-            .join(".venv")
-            .join("Scripts")
-            .join("python.exe"),
-        root.join("engine").join(".venv").join("bin").join("python"),
-    ];
-    for c in candidates {
-        if c.is_file() {
-            return Ok(c);
+fn drain_stderr(stderr: std::process::ChildStderr, log_path: PathBuf) {
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .ok();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let cleaned = line.replace('\0', "").trim_end().to_string();
+                    if let Some(ref mut f) = file {
+                        let _ = writeln!(f, "{cleaned}");
+                    }
+                }
+                Err(_) => break,
+            }
         }
-    }
-    Err(EngineError::Message(
-        "engine venv python not found (engine/.venv)".into(),
-    ))
+    });
 }
 
-fn spawn_engine(data_dir: &Path) -> Result<EngineProcess, EngineError> {
-    let root = repo_root()?;
-    let python = engine_python(&root)?;
-    let engine_dir = root.join("engine");
+fn launch_plan_for_state(state: &EngineState) -> Result<EngineLaunchPlan, EngineError> {
+    let (exe_dir, resource_dir) = state.launch_dirs();
+    resolve_engine(&resolve_inputs_from_env(exe_dir, resource_dir)).map_err(EngineError::from)
+}
 
-    let mut child = Command::new(&python)
-        .arg("-m")
-        .arg("memscope_engine")
-        .current_dir(&engine_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env("PYTHONUTF8", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("MEMSCOPE_DATA_DIR", data_dir.as_os_str())
+fn spawn_engine(state: &EngineState, data_dir: &Path) -> Result<EngineProcess, EngineError> {
+    let plan = launch_plan_for_state(state)?;
+    std::fs::create_dir_all(data_dir.join("logs"))
+        .map_err(|e| EngineError::Message(format!("create log dir: {e}")))?;
+    std::fs::create_dir_all(data_dir.join("tmp"))
+        .map_err(|e| EngineError::Message(format!("create tmp dir: {e}")))?;
+
+    let mut cmd = Command::new(&plan.python);
+    configure_engine_command(&mut cmd, &plan, data_dir);
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| EngineError::Message(format!("spawn engine failed: {e}")))?;
 
@@ -99,6 +135,9 @@ fn spawn_engine(data_dir: &Path) -> Result<EngineProcess, EngineError> {
         .stdout
         .take()
         .ok_or_else(|| EngineError::Message("engine stdout missing".into()))?;
+    if let Some(stderr) = child.stderr.take() {
+        drain_stderr(stderr, data_dir.join("logs").join("engine-stderr.log"));
+    }
 
     let mut proc = EngineProcess {
         child,
@@ -106,7 +145,6 @@ fn spawn_engine(data_dir: &Path) -> Result<EngineProcess, EngineError> {
         stdout: BufReader::new(stdout),
     };
 
-    // Engine auto-inits on start; ensure data_dir via explicit app.init
     let init_req = json!({
         "jsonrpc": "2.0",
         "id": "init-1",
@@ -134,7 +172,7 @@ fn ensure_engine(state: &EngineState, data_dir: &Path) -> Result<(), EngineError
         .lock()
         .map_err(|_| EngineError::Message("engine lock poisoned".into()))?;
     if guard.is_none() {
-        *guard = Some(spawn_engine(data_dir)?);
+        *guard = Some(spawn_engine(state, data_dir)?);
     }
     Ok(())
 }
@@ -175,12 +213,8 @@ fn call_engine_locked(
         return Err(EngineError::Message(format!("write request failed: {e}")));
     }
 
-    // Read response with timeout on a helper thread holding the line buffer only —
-    // we keep the lock because stdio is not Sync across concurrent callers yet.
-    let mut line = String::new();
-    // Blocking read; callers pass method-appropriate timeout_secs for long work.
-    // A hard wall-clock kill will be added with a dedicated reader thread later.
     let _timeout_secs = timeout_secs;
+    let mut line = String::new();
     loop {
         line.clear();
         match proc.stdout.read_line(&mut line) {
@@ -205,15 +239,11 @@ fn call_engine_locked(
     })?;
 
     if let Some(err) = response.get("error") {
-        // Prefer structured app error message for UI
         let msg = err
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("engine error");
-        let detail = err
-            .get("data")
-            .map(|d| d.to_string())
-            .unwrap_or_default();
+        let detail = err.get("data").map(|d| d.to_string()).unwrap_or_default();
         return Err(EngineError::Message(if detail.is_empty() {
             msg.to_string()
         } else {
@@ -231,9 +261,7 @@ fn call_engine_locked(
 #[cfg(test)]
 fn call_engine_oneshot(method: &str, params: Value) -> Result<Value, EngineError> {
     use std::time::Duration;
-    let root = repo_root()?;
-    let python = engine_python(&root)?;
-    let engine_dir = root.join("engine");
+    let plan = resolve_engine(&resolve_inputs_from_env(None, None))?;
     let tmp = std::env::temp_dir().join(format!(
         "memscope-test-{}-{}",
         std::process::id(),
@@ -242,18 +270,15 @@ fn call_engine_oneshot(method: &str, params: Value) -> Result<Value, EngineError
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    std::fs::create_dir_all(&tmp)
-        .map_err(|e| EngineError::Message(format!("temp dir: {e}")))?;
+    std::fs::create_dir_all(&tmp).map_err(|e| EngineError::Message(format!("temp dir: {e}")))?;
+    std::fs::create_dir_all(tmp.join("logs"))
+        .map_err(|e| EngineError::Message(format!("log dir: {e}")))?;
+    std::fs::create_dir_all(tmp.join("tmp"))
+        .map_err(|e| EngineError::Message(format!("tmp dir: {e}")))?;
 
-    let mut child = Command::new(&python)
-        .arg("-m")
-        .arg("memscope_engine")
-        .current_dir(&engine_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env("PYTHONUTF8", "1")
-        .env("MEMSCOPE_DATA_DIR", &tmp)
+    let mut cmd = Command::new(&plan.python);
+    configure_engine_command(&mut cmd, &plan, &tmp);
+    let mut child = cmd
         .spawn()
         .map_err(|e| EngineError::Message(format!("spawn engine failed: {e}")))?;
 
@@ -265,6 +290,9 @@ fn call_engine_oneshot(method: &str, params: Value) -> Result<Value, EngineError
         .stdout
         .take()
         .ok_or_else(|| EngineError::Message("stdout missing".into()))?;
+    if let Some(stderr) = child.stderr.take() {
+        drain_stderr(stderr, tmp.join("logs").join("engine-stderr.log"));
+    }
     let mut reader = BufReader::new(stdout);
 
     let request = json!({
@@ -273,8 +301,7 @@ fn call_engine_oneshot(method: &str, params: Value) -> Result<Value, EngineError
         "method": method,
         "params": params,
     });
-    writeln!(stdin, "{request}")
-        .map_err(|e| EngineError::Message(format!("write failed: {e}")))?;
+    writeln!(stdin, "{request}").map_err(|e| EngineError::Message(format!("write failed: {e}")))?;
     drop(stdin);
 
     let mut line = String::new();
@@ -301,18 +328,19 @@ fn call_engine_oneshot(method: &str, params: Value) -> Result<Value, EngineError
         .ok_or_else(|| EngineError::Message("missing result".into()))
 }
 
-#[tauri::command]
-fn get_app_paths(app: AppHandle, state: State<'_, EngineState>) -> Result<Value, EngineError> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| EngineError::Message(format!("app_data_dir: {e}")))?;
+fn bind_data_dir(state: &EngineState, dir: PathBuf) -> Result<PathBuf, EngineError> {
     std::fs::create_dir_all(&dir)
         .map_err(|e| EngineError::Message(format!("create app data dir: {e}")))?;
     *state
         .data_dir
         .lock()
         .map_err(|_| EngineError::Message("lock".into()))? = Some(dir.clone());
+    Ok(dir)
+}
+
+#[tauri::command]
+fn get_app_paths(state: State<'_, EngineState>) -> Result<Value, EngineError> {
+    let dir = bind_data_dir(&state, memscope_data_dir()?)?;
     ensure_engine(&state, &dir)?;
     call_engine_locked(&state, "app.paths", json!({}), 30)
 }
@@ -344,21 +372,29 @@ fn smoke_e2e(state: State<'_, EngineState>) -> Result<Value, EngineError> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(EngineState::new())
         .setup(|app| {
-            let dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| std::io::Error::other(format!("app_data_dir: {e}")))?;
-            std::fs::create_dir_all(&dir)?;
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(Path::to_path_buf));
+            let resource_dir = app.path().resource_dir().ok();
             let state = app.state::<EngineState>();
+            *state
+                .exe_dir
+                .lock()
+                .map_err(|_| std::io::Error::other("lock"))? = exe_dir;
+            *state
+                .resource_dir
+                .lock()
+                .map_err(|_| std::io::Error::other("lock"))? = resource_dir;
+            let dir = memscope_data_dir().map_err(std::io::Error::other)?;
+            std::fs::create_dir_all(&dir)?;
             *state
                 .data_dir
                 .lock()
                 .map_err(|_| std::io::Error::other("lock"))? = Some(dir.clone());
-            // Best-effort warm start; UI can retry via get_app_paths
             let _ = ensure_engine(&state, &dir);
             Ok(())
         })
@@ -367,8 +403,14 @@ pub fn run() {
             engine_call,
             smoke_e2e
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while running MemScope");
+
+    app.run(|app_handle, event| {
+        if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+            app_handle.state::<EngineState>().shutdown();
+        }
+    });
 }
 
 #[cfg(test)]
@@ -383,11 +425,29 @@ mod tests {
             result.pointer("/volatility/ok").and_then(|v| v.as_bool()),
             Some(true)
         );
+        assert_eq!(
+            result
+                .pointer("/volatility/engine_version")
+                .and_then(|v| v.as_str()),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]
     fn engine_app_init_and_schema() {
         let result = call_engine_oneshot("app.paths", json!({})).expect("paths");
         assert!(result.get("db_path").is_some());
+        let db = result.get("db_path").and_then(|v| v.as_str()).unwrap();
+        assert!(
+            db.contains("memscope-test-"),
+            "oneshot IPC must use an isolated temp data dir: {db}"
+        );
+    }
+
+    #[test]
+    fn repo_root_is_workspace() {
+        let root = engine::repo_root_from_manifest().expect("repo");
+        assert!(root.join("engine").join("pyproject.toml").is_file());
+        assert!(root.join("app").join("desktop").join("tauri.conf.json").is_file());
     }
 }
