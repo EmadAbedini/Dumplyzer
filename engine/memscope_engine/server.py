@@ -9,6 +9,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Callable
 
 from memscope_engine.analysis import (
+    mal_unpack_workflows,
     memory_artifacts,
     pe_sieve_workflows,
     process_analysis,
@@ -117,9 +118,15 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
             db_, params, cancelled, progress, paths=paths
         )
 
+    def _mal_unpack(db_, params, cancelled, progress):
+        return mal_unpack_workflows.run_mal_unpack_artifact_job(
+            db_, params, cancelled, progress, paths=paths
+        )
+
     jobs.register("vad_extract", _vad_extract)
     jobs.register("yara_artifact_scan", _yara_scan)
     jobs.register("pe_sieve_artifact_scan", _pe_sieve_scan)
+    jobs.register("mal_unpack_artifact", _mal_unpack)
     jobs.start()
     _STATE["paths"] = paths
     _STATE["db"] = db
@@ -132,6 +139,7 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
         "volatility": _vol_init(),
         "yara": yara_workflows.yara_status(paths, db),
         "pe_sieve": pe_sieve_workflows.pe_sieve_status(paths, db),
+        "mal_unpack": mal_unpack_workflows.mal_unpack_status(paths, db),
     }
 
 
@@ -166,6 +174,9 @@ def _artifact_get(artifact_id: str) -> dict[str, Any]:
     pe = pe_sieve_workflows.list_pe_sieve_scans_for_artifact(_db(), artifact_id)
     dto["pe_sieve_scans"] = pe["items"]
     dto["pe_sieve_status"] = pe_sieve_workflows.pe_sieve_status(_paths(), _db())
+    mu = mal_unpack_workflows.list_mal_unpack_scans_for_artifact(_db(), artifact_id)
+    dto["mal_unpack_scans"] = mu["items"]
+    dto["mal_unpack_status"] = mal_unpack_workflows.mal_unpack_status(_paths(), _db())
     return dto
 
 
@@ -297,6 +308,22 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         _db(), p["artifact_id"]
     ),
     "pe_sieve.scan_get": lambda p: pe_sieve_workflows.get_pe_sieve_scan(_db(), p["scan_id"]),
+    "mal_unpack.status": lambda _p: mal_unpack_workflows.mal_unpack_status(_paths(), _db()),
+    "mal_unpack.configure": lambda p: mal_unpack_workflows.configure_mal_unpack(
+        _paths(), _db(), p.get("settings") or p
+    ),
+    "mal_unpack.unpack_artifact": lambda p: _jobs().submit(
+        "mal_unpack_artifact",
+        evidence_id=p.get("evidence_id"),
+        process_id=p.get("process_id"),
+        pid=p.get("pid"),
+        params={"artifact_id": p["artifact_id"], "evidence_id": p.get("evidence_id")},
+        message=f"mal_unpack workflow artifact {p.get('artifact_id')}",
+    ),
+    "mal_unpack.scans_for_artifact": lambda p: mal_unpack_workflows.list_mal_unpack_scans_for_artifact(
+        _db(), p["artifact_id"]
+    ),
+    "mal_unpack.scan_get": lambda p: mal_unpack_workflows.get_mal_unpack_scan(_db(), p["scan_id"]),
     "jobs.submit": handle_job_submit,
     "jobs.get": lambda p: _jobs().get(p["job_id"]),
     "jobs.list": lambda p: {

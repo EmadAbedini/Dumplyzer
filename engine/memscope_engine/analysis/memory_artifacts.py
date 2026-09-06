@@ -918,6 +918,16 @@ def get_artifact(db: Database, artifact_id: str) -> dict[str, Any]:
                 "tool_version": row.get("tool_version"),
             }
         )
+    if isinstance(meta, dict) and meta.get("mal_unpack_scan_id"):
+        chain.append(
+            {
+                "step": "mal_unpack_output",
+                "scan_id": meta.get("mal_unpack_scan_id"),
+                "role": meta.get("mal_unpack_role"),
+                "tool": "mal_unpack",
+                "tool_version": row.get("tool_version"),
+            }
+        )
     dto["provenance_chain"] = chain
     return dto
 

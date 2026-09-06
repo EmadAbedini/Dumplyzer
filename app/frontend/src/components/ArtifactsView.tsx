@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
-import type { Artifact, Job, PeSieveScanBundle, PeSieveStatus, YaraScanBundle, YaraStatus } from "../lib/types";
+import type {
+  Artifact,
+  Job,
+  MalUnpackScanBundle,
+  MalUnpackStatus,
+  PeSieveScanBundle,
+  PeSieveStatus,
+  YaraScanBundle,
+  YaraStatus,
+} from "../lib/types";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 
@@ -21,6 +30,8 @@ export function ArtifactsView({
   const [yaraBundles, setYaraBundles] = useState<YaraScanBundle[]>([]);
   const [peSieveStatus, setPeSieveStatus] = useState<PeSieveStatus | null>(null);
   const [peSieveBundles, setPeSieveBundles] = useState<PeSieveScanBundle[]>([]);
+  const [malUnpackStatus, setMalUnpackStatus] = useState<MalUnpackStatus | null>(null);
+  const [malUnpackBundles, setMalUnpackBundles] = useState<MalUnpackScanBundle[]>([]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -42,6 +53,12 @@ export function ArtifactsView({
       } catch {
         /* optional */
       }
+      try {
+        const st = await engineCall<MalUnpackStatus>("mal_unpack.status");
+        setMalUnpackStatus(st);
+      } catch {
+        /* optional */
+      }
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     }
@@ -59,6 +76,8 @@ export function ArtifactsView({
       setYaraBundles(a.yara_scans ?? []);
       setPeSieveStatus(a.pe_sieve_status ?? peSieveStatus);
       setPeSieveBundles(a.pe_sieve_scans ?? []);
+      setMalUnpackStatus(a.mal_unpack_status ?? malUnpackStatus);
+      setMalUnpackBundles(a.mal_unpack_scans ?? []);
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     }
@@ -90,6 +109,22 @@ export function ArtifactsView({
         { artifact_id: detail.id },
       );
       setYaraBundles(res.items);
+    } catch (e) {
+      onError(e instanceof EngineClientError ? e.message : String(e));
+    }
+  };
+
+  const refreshMalUnpack = async () => {
+    if (!detail) return;
+    try {
+      const [st, res] = await Promise.all([
+        engineCall<MalUnpackStatus>("mal_unpack.status"),
+        engineCall<{ items: MalUnpackScanBundle[] }>("mal_unpack.scans_for_artifact", {
+          artifact_id: detail.id,
+        }),
+      ]);
+      setMalUnpackStatus(st);
+      setMalUnpackBundles(res.items);
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     }
@@ -140,6 +175,20 @@ export function ArtifactsView({
                 : "unavailable"}
             </Badge>
           )}
+          {malUnpackStatus && (
+            <Badge
+              className={
+                malUnpackStatus.available
+                  ? "border-success text-success"
+                  : "border-muted text-muted"
+              }
+            >
+              mal_unpack{" "}
+              {malUnpackStatus.available
+                ? malUnpackStatus.mal_unpack_version || "available"
+                : "unavailable"}
+            </Badge>
+          )}
         </div>
         <table className="w-full text-left">
           <thead className="sticky top-0 bg-surface-2 text-muted">
@@ -181,7 +230,7 @@ export function ArtifactsView({
       </div>
       <aside className="w-[26rem] shrink-0 overflow-auto border-l border-border p-3">
         {!detail ? (
-          <div className="text-muted">Select an artifact for provenance, YARA, and PE-sieve.</div>
+          <div className="text-muted">Select an artifact for provenance, YARA, PE-sieve, and mal_unpack.</div>
         ) : (
           <div className="space-y-3">
             <div className="font-semibold">Provenance</div>
@@ -424,6 +473,122 @@ export function ArtifactsView({
                 </div>
               )}
             </div>
+
+            <div className="border-t border-border pt-3">
+              <div className="mb-2 font-semibold">mal_unpack</div>
+              {!malUnpackStatus ? (
+                <div className="text-muted">Checking mal_unpack…</div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className={malUnpackStateClass(malUnpackStatus.ui_state)}>
+                      {malUnpackStateLabel(
+                        malUnpackStatus.available
+                          ? "unsupported_target"
+                          : "unavailable",
+                      )}
+                    </Badge>
+                    <span className="text-muted">
+                      {malUnpackStatus.available
+                        ? `Version ${malUnpackStatus.mal_unpack_version ?? "unknown"}`
+                        : "Provider unavailable"}
+                    </span>
+                  </div>
+                  {malUnpackStatus.executable_path ? (
+                    <div className="break-all font-mono text-[11px] text-muted">
+                      EXE: {malUnpackStatus.executable_path}
+                    </div>
+                  ) : (
+                    <div className="break-all font-mono text-[11px] text-muted">
+                      Tools dir: {malUnpackStatus.tools_dir ?? "—"}
+                    </div>
+                  )}
+                  <div className="text-[11px] text-muted">
+                    Supported MemScope target types: none. Native mal_unpack 1.0
+                    target is a PE file passed as /exe and executed. Live processes,
+                    memory dumps, VAD regions, and extracted artifacts are not safe
+                    unpack targets here.
+                  </div>
+                  {!malUnpackStatus.available && (
+                    <div className="space-y-1 text-muted">
+                      <div>{malUnpackStatus.reason}</div>
+                      <div>{malUnpackStatus.suggestion}</div>
+                    </div>
+                  )}
+                  <div className="text-muted">
+                    {malUnpackStatus.unsupported_target_explanation}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      disabled
+                      title="mal_unpack executes /exe; MemScope will not unpack artifacts"
+                    >
+                      Unpack with mal_unpack
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void refreshMalUnpack()}>
+                      Refresh results
+                    </Button>
+                  </div>
+                  <div className="text-[11px] text-muted">
+                    The unpack control is disabled so forensic artifacts are never
+                    started as processes. Unpacked output is never auto-executed. No
+                    malware score is assigned.
+                  </div>
+                  {malUnpackBundles.length === 0 ? (
+                    <div className="text-muted">No mal_unpack records for this artifact.</div>
+                  ) : (
+                    malUnpackBundles.map((b) => (
+                      <div
+                        key={b.scan.id}
+                        className="rounded border border-border bg-surface p-2"
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <Badge className={malUnpackStateClass(b.scan.ui_state)}>
+                            {malUnpackStateLabel(b.scan.ui_state)}
+                          </Badge>
+                          <span className="text-muted">{b.scan.mal_unpack_version}</span>
+                          {b.scan.invoked ? (
+                            <span className="text-muted">invoked</span>
+                          ) : (
+                            <span className="text-muted">not invoked</span>
+                          )}
+                        </div>
+                        {b.scan.interpretation && (
+                          <div className="text-muted">
+                            {String(
+                              (b.scan.interpretation as { summary?: string }).summary ??
+                                (b.scan.interpretation as { notes?: string }).notes ??
+                                "",
+                            )}
+                          </div>
+                        )}
+                        {b.scan.error && (
+                          <div className="text-danger">
+                            {String(
+                              (b.scan.error as { message?: string }).message ??
+                                JSON.stringify(b.scan.error),
+                            )}
+                          </div>
+                        )}
+                        {b.outputs.length > 0 && (
+                          <div className="mt-1 border-t border-border/50 pt-1">
+                            <div className="text-muted">Generated artifacts</div>
+                            {b.outputs.map((o) => (
+                              <div key={o.id} className="font-mono text-[11px]">
+                                {o.role}: {o.filename}{" "}
+                                {o.sha256 ? o.sha256.slice(0, 12) : ""}{" "}
+                                {o.dump_mode ? `(${o.dump_mode})` : ""}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </aside>
@@ -458,6 +623,38 @@ function peSieveStateClass(state: string | null | undefined): string {
   if (state === "failed") return "border-danger text-danger";
   if (state === "completed_indicators") return "border-warning text-warning";
   if (state === "completed_no_findings" || state === "unsupported_target") {
+    return "border-success text-success";
+  }
+  return "";
+}
+
+function malUnpackStateLabel(state: string | null | undefined): string {
+  switch (state) {
+    case "unavailable":
+      return "unavailable";
+    case "unsupported_target":
+      return "unsupported target";
+    case "queued":
+      return "queued";
+    case "running":
+      return "running";
+    case "completed_no_output":
+      return "completed / no output";
+    case "completed_output_generated":
+      return "completed / output generated";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return state || "unknown";
+  }
+}
+
+function malUnpackStateClass(state: string | null | undefined): string {
+  if (state === "failed") return "border-danger text-danger";
+  if (state === "completed_output_generated") return "border-warning text-warning";
+  if (state === "completed_no_output" || state === "unsupported_target") {
     return "border-success text-success";
   }
   return "";

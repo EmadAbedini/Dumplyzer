@@ -134,6 +134,8 @@ export type Artifact = {
   yara_status?: YaraStatus;
   pe_sieve_scans?: PeSieveScanBundle[];
   pe_sieve_status?: PeSieveStatus;
+  mal_unpack_scans?: MalUnpackScanBundle[];
+  mal_unpack_status?: MalUnpackStatus;
 };
 
 export type YaraStatus = {
@@ -261,6 +263,77 @@ export type PeSieveOutput = {
 export type PeSieveScanBundle = {
   scan: PeSieveScan;
   outputs: PeSieveOutput[];
+};
+
+export type MalUnpackStatus = {
+  available: boolean;
+  reason?: string | null;
+  suggestion?: string | null;
+  mal_unpack_version?: string | null;
+  executable_path?: string | null;
+  tools_dir?: string | null;
+  timeout_secs?: number;
+  timeout_ms?: number;
+  verified_release?: string;
+  verified_version_str?: string;
+  verified_repo?: string;
+  native_target_kinds?: string[];
+  supported_target_kinds?: string[];
+  memscope_artifact_targets_supported?: boolean;
+  executes_sample?: boolean;
+  unsupported_target_explanation?: string | null;
+  ui_state?: string;
+  license?: {
+    name?: string;
+    redistribution?: string;
+    bundled_in_memscope?: boolean;
+  };
+};
+
+export type MalUnpackScan = {
+  id: string;
+  evidence_id: string | null;
+  artifact_id: string | null;
+  process_id: string | null;
+  pid: number | null;
+  memory_region_id: string | null;
+  analysis_run_id: string | null;
+  job_id: string | null;
+  status: string;
+  ui_state: string | null;
+  target_kind: string | null;
+  mal_unpack_version: string | null;
+  executable_path: string | null;
+  output_dir: string | null;
+  exit_code: number | null;
+  unpack_result: string | null;
+  invoked: boolean;
+  observed?: Record<string, unknown>;
+  interpretation?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type MalUnpackOutput = {
+  id: string;
+  scan_id: string;
+  artifact_id: string;
+  dump_file: string | null;
+  dump_mode: string | null;
+  module_base: string | null;
+  is_shellcode: boolean;
+  role: string;
+  sha256?: string | null;
+  filename?: string | null;
+  size_bytes?: number | null;
+  file_type?: string | null;
+  observed?: Record<string, unknown>;
+};
+
+export type MalUnpackScanBundle = {
+  scan: MalUnpackScan;
+  outputs: MalUnpackOutput[];
 };
 
 export type TimelineEvent = {

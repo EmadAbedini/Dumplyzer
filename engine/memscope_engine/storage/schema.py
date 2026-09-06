@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -351,5 +351,48 @@ MIGRATIONS: dict[int, str] = {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_pe_sieve_outputs_scan ON pe_sieve_outputs(scan_id);
+    """,
+    7: """
+    CREATE TABLE IF NOT EXISTS mal_unpack_scans (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT REFERENCES evidence(id) ON DELETE CASCADE,
+      artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+      process_id TEXT,
+      pid INTEGER,
+      memory_region_id TEXT,
+      analysis_run_id TEXT,
+      job_id TEXT,
+      status TEXT NOT NULL,
+      ui_state TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      mal_unpack_version TEXT,
+      executable_path TEXT,
+      output_dir TEXT,
+      exit_code INTEGER,
+      unpack_result TEXT,
+      invoked INTEGER NOT NULL DEFAULT 0,
+      observed_json TEXT NOT NULL DEFAULT '{}',
+      interpretation_json TEXT NOT NULL DEFAULT '{}',
+      error_json TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_mal_unpack_scans_artifact ON mal_unpack_scans(artifact_id);
+    CREATE INDEX IF NOT EXISTS idx_mal_unpack_scans_evidence ON mal_unpack_scans(evidence_id);
+
+    CREATE TABLE IF NOT EXISTS mal_unpack_outputs (
+      id TEXT PRIMARY KEY,
+      scan_id TEXT NOT NULL REFERENCES mal_unpack_scans(id) ON DELETE CASCADE,
+      artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+      evidence_id TEXT,
+      dump_file TEXT,
+      dump_mode TEXT,
+      module_base TEXT,
+      is_shellcode INTEGER,
+      role TEXT NOT NULL,
+      observed_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mal_unpack_outputs_scan ON mal_unpack_outputs(scan_id);
     """,
 }

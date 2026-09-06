@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-06 — **PE-sieve optional provider (schema v6) implemented**.
+> Last verified: 2026-09-06 — **mal_unpack optional provider (schema v7) implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -302,7 +302,7 @@ Each finding answers **why** and links to evidence fields. Prefer precision over
 |----------|------|----------|
 | YARA | Rule scan on artifacts/process memory where supported | Optional; user rules; `yara-python` or CLI adapter after verification |
 | PE-sieve | Suspicious process PE anomaly detection / dump | **User-supplied** official EXE (BSD-2-Clause; not bundled). Live `/pid` only; artifacts unsupported |
-| mal_unpack | Unpacking workflow | **User-supplied**; configure path; no fake stubs |
+| mal_unpack | Dynamic unpacker (hasherezade/mal_unpack 1.0) | **User-supplied** official EXE (BSD-2-Clause; not bundled). Native `/exe` executes the sample; MemScope never invokes that path |
 
 Interface: `Provider` protocol with `availability()`, `run(request) -> ProviderResult`. Core app runs without any of them.
 
@@ -419,10 +419,13 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 | `pe_sieve.status` / `pe_sieve.configure` | Provider availability + EXE path/timeout |
 | `pe_sieve.scan_artifact` | Queue artifact PE-sieve workflow (records unsupported target; does not invoke the EXE) |
 | `pe_sieve.scans_for_artifact` / `pe_sieve.scan_get` | Results + generated output artifacts |
+| `mal_unpack.status` / `mal_unpack.configure` | Provider availability + EXE path/timeout (no extra CLI) |
+| `mal_unpack.unpack_artifact` | Queue artifact mal_unpack workflow (records unsupported target; does not invoke the EXE) |
+| `mal_unpack.scans_for_artifact` / `mal_unpack.scan_get` | Results + generated output artifacts |
 
 ### SQLite schema version
 
-**v6** — `pe_sieve_scans`, `pe_sieve_outputs`, `artifacts.parent_artifact_id`; prior v5 YARA tables; v4 artifacts/timeline.
+**v7** — `mal_unpack_scans`, `mal_unpack_outputs`; prior v6 PE-sieve tables + `artifacts.parent_artifact_id`; v5 YARA; v4 artifacts/timeline.
 
 ### Optional providers
 
@@ -431,6 +434,7 @@ providers/
   base.py          # AnalysisProvider protocol
   yara_provider.py # yara-python adapter (optional import)
   pe_sieve.py      # user-supplied pe-sieve*.exe adapter (optional)
+  mal_unpack.py    # user-supplied mal_unpack*.exe adapter (optional)
 ```
 
 **YARA**
@@ -459,7 +463,23 @@ providers/
 - UI states: unavailable, unsupported target, queued, running, completed/no findings, completed/indicators, failed, cancelled
 - No malware/threat score
 
-Extension: mal_unpack should implement the same `AnalysisProvider` pattern and job registration without coupling to React.
+**mal_unpack**
+
+- Verified project: **[hasherezade/mal_unpack](https://github.com/hasherezade/mal_unpack)** release tag **1.0** (`MALUNP_VERSION_STR "1.0.0.1"` in `mal_unpack_ver.h`; CLI in `params.h` / `main.cpp`)
+- Related projects not integrated: MalUnpackCompanion (kernel driver), `mal_unpack_py`
+- License: **BSD-2-Clause** (Copyright (c) 2018-2025, hasherezade). Redistribution of source and binary is permitted with copyright notice. **MemScope does not bundle the EXE**; the user copies an official 1.0 zip (`mal_unpack64.zip` / `mal_unpack32.zip`) into `{app_data}/tools/` (or `tools/mal_unpack/`). Allow-listed names: `mal_unpack.exe`, `mal_unpack64.exe`, `mal_unpack32.exe`
+- Real interface (required): `/exe <path_to_the_malware>` and `/timeout <ms>`. Optional output root: `/dir`. Version: `/version` prints `MalUnpack: v.{version}`
+- Native behavior: **creates a live process from `/exe`**, waits, dumps implants via PE-sieve, then kills the process. Upstream: use only on a VM. MemScope **never** passes a forensic artifact as `/exe` and never sets `/cmd`
+- Exit codes (same as PE-sieve, observed not scored): `-1` error, `0` info, `1` not detected, `2` detected
+- Output layout: `{/dir}/{exe_basename}.out/scan_{unix_timestamp}/` with PE-sieve `process_<pid>/scan_report.json`, `dump_report.json`, optional `error_report.json`; `unpack.log` in CWD
+- MemScope-safe targets: **none**. Native kind `executable_file` is unsafe here. Artifacts, live PIDs, VAD regions, and memory dumps are unsupported
+- Job `mal_unpack_artifact` records `unsupported_target` or `unavailable`; `run_unpack(..., confirm_sample_execution=False)` is the default and raises `mal_unpack_execution_forbidden`. Tests may confirm only with a mock runner and must refuse artifact-store paths as `/exe`
+- If dumps are persisted (test/mock ingest): first-class artifacts with SHA-256, `parent_artifact_id`, `extraction_method=mal_unpack_dump`, `mal_unpack_outputs` links. Output is never executed
+- Result model splits `observed` (tool) vs `interpretation` (MemScope). No malware score
+- Security: EXE allow-list (known names, MZ header, tools root only; artifact store denied), argv arrays, no extra user CLI, `/cmd` never passed, controlled tmp `/dir`, timeout, cooperative cancel, logs sanitized
+- Job kind: `mal_unpack_artifact`
+- UI states: unavailable, unsupported target, queued, running, completed/no output, completed/output generated, failed, cancelled
+- Unpack action in Artifacts UI is disabled for all investigation targets
 
 ---
 
@@ -468,7 +488,7 @@ Extension: mal_unpack should implement the same `AnalysisProvider` pattern and j
 1. **License:** Apache-2.0 proposed for app code  
 2. **Engine shipping for release:** embedded Python vs first-run venv (Phase 7)  
 3. **Python engine runtime:** **3.12.x venv** (decided)  
-4. **PE-sieve:** user-supplied official EXE (BSD-2-Clause; not bundled). mal_unpack still pending license/interface verification.  
+4. **PE-sieve / mal_unpack:** user-supplied official EXEs (BSD-2-Clause; not bundled). mal_unpack 1.0 executes `/exe`; MemScope will not invoke it against investigation targets.  
 
 Ordinary implementation choices proceed without further permission.
 

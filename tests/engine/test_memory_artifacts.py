@@ -23,7 +23,7 @@ import pytest
 
 def test_schema_v4(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 6
+    assert db.schema_version() == 7
     db.execute("SELECT COUNT(*) AS c FROM artifacts")
     db.execute("SELECT COUNT(*) AS c FROM timeline_events")
     db.close()
