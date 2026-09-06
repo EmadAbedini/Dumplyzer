@@ -20,3 +20,12 @@ First packaged Windows x64 release train (feature freeze on forensic workflows).
 ### Documentation / versioning
 
 - Unify application, Tauri, engine, and installer metadata at **0.1.0**. Report schema remains v1; SQLite schema remains v9.
+
+### License and release validation
+
+- Add Apache-2.0 `LICENSE` for MemScope application source and `THIRD_PARTY_NOTICES.md` from inspected redistributed metadata (CPython PSF, Volatility 3 VSL, pefile MIT).
+- Document Authenticode signing procedure; 0.1.0 NSIS, MSI, and `MemScope.exe` remain **unsigned**.
+- Document WebView2 Evergreen as required. `embedBootstrapper` can fetch the runtime when missing; offline WebView2-absent machines are not a supported launch environment.
+- Confirm install trees stay separate from `%LOCALAPPDATA%\MemScope\` user data; optional tools are loaded only from the user-data tools allow-list.
+- Confirm the bundled runtime omits yara-python / capstone / pycryptodome and does not mark failed plugin imports as available.
+- Clean-machine VM checklist remains unexecuted on this host.

@@ -28,6 +28,7 @@
     "active": true,
     "targets": ["nsis", "msi"],
     "publisher": "MemScope",
+    "licenseFile": "../../LICENSE",
     "shortDescription": "Volatility 3 memory forensics workbench",
     "longDescription": "MemScope is an offline desktop workbench for Volatility 3 memory forensics. The analysis engine is a bundled Python 3.12 runtime. Optional PE-sieve and mal_unpack executables are user-supplied and are never downloaded or executed against investigation artifacts automatically.",
     "icon": [

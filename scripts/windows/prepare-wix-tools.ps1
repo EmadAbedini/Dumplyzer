@@ -38,7 +38,7 @@ function Test-WixComplete {
 
 if (-not $Force -and (Test-WixComplete)) {
     Write-Host "WiX 3.14 already present: $Dest"
-    exit 0
+    return
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $CacheZip) | Out-Null

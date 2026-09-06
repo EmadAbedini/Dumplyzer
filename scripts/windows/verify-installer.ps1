@@ -47,13 +47,13 @@ $probe = & $Python -c "import memscope_engine, volatility3; from memscope_engine
 if ($LASTEXITCODE -ne 0) { throw "runtime import probe failed" }
 Write-Host "runtime_probe $probe"
 
-$nsis = Get-ChildItem -Path (Join-Path $Bundle "nsis") -Filter "*.exe" -ErrorAction SilentlyContinue
-$msi = Get-ChildItem -Path (Join-Path $Bundle "msi") -Filter "*.msi" -ErrorAction SilentlyContinue
+$nsis = @(Get-ChildItem -Path (Join-Path $Bundle "nsis") -Filter "*.exe" -ErrorAction SilentlyContinue)
+$msi = @(Get-ChildItem -Path (Join-Path $Bundle "msi") -Filter "*.msi" -ErrorAction SilentlyContinue)
 
-if (-not $nsis) { throw "NSIS installer not found under $Bundle\nsis" }
-if (-not $msi) { throw "MSI installer not found under $Bundle\msi" }
+if ($nsis.Count -eq 0) { throw "NSIS installer not found under $Bundle\nsis" }
+if ($msi.Count -eq 0) { throw "MSI installer not found under $Bundle\msi" }
 
-foreach ($item in @($nsis + $msi)) {
+foreach ($item in ($nsis + $msi)) {
     $sizeMb = [math]::Round($item.Length / 1MB, 1)
     Write-Host ("installer {0} {1} MB sha256={2}" -f $item.Name, $sizeMb, (Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant())
 }

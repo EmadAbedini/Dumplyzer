@@ -36,6 +36,21 @@ MemScope is an offline, single-user forensic workstation. Memory images, extract
 - Runtime zip and WiX 3.14.1 zip are pinned by SHA-256 (see `packaging/windows/runtime-manifest.json`).
 - Per-user NSIS install does not require administrator rights. The install directory is still user-writable; the engine is spawned by absolute path and does not add that directory to `PATH`.
 - DLL search for `python.exe` uses the runtime directory. Packaged engine `PATH` is reduced to `System32`.
+- Startup writes logs/tmp/database under `%LOCALAPPDATA%\MemScope\`, not under Program Files or `%LOCALAPPDATA%\Programs\MemScope`.
+
+## WebView2
+
+The desktop UI requires the Microsoft Edge WebView2 Runtime. The Windows bundle uses Tauri `webviewInstallMode.embedBootstrapper` (silent). On a system that already has WebView2, the application can launch without installing another copy. If WebView2 is missing, the embedded bootstrapper downloads Evergreen from Microsoft and therefore needs network access. **A machine that has neither WebView2 nor network connectivity is not a supported launch environment.** This packaging does not switch to the large offline WebView2 installer.
+
+MemScope itself does not phone home. The WebView2 bootstrapper is Microsoft's installer, not MemScope telemetry.
+
+## Authenticode
+
+0.1.0 release artifacts are **unsigned**. There is no `certificateThumbprint` or `signCommand` in `tauri.conf.json`. Unsigned NSIS/MSI/`MemScope.exe` files must not be described as signed. The signing procedure for a future trusted build is in `docs/windows-release.md`.
+
+## License
+
+MemScope application source is Apache-2.0. Redistributed Volatility 3 remains under the Volatility Software License. See `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
 ## Reporting issues
 

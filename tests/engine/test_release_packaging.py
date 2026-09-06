@@ -17,6 +17,7 @@ from memscope_engine.paths import (
     is_canonical_user_data_dir,
     maybe_migrate_legacy_data,
 )
+from memscope_engine.providers.pe_sieve import PeSieveProvider
 from memscope_engine.server import HANDLERS, handle_app_init
 from memscope_engine.storage import Database
 from memscope_engine.storage.schema import MIGRATIONS, SCHEMA_VERSION
@@ -236,3 +237,100 @@ def test_bundled_runtime_isolated_when_prepared(tmp_path: Path) -> None:
     providers = result.get("providers") or {}
     if "yara" in providers:
         assert _provider_unavailable(providers["yara"])
+
+
+def test_user_data_is_separate_from_install_dirs(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("MEMSCOPE_DATA_DIR", raising=False)
+    local = tmp_path / "Local"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    data = default_data_dir()
+    nsis_install = local / "Programs" / "MemScope"
+    program_files = tmp_path / "Program Files" / "MemScope"
+    assert data == local / APP_NAME
+    assert data != nsis_install
+    assert data != program_files
+    nsis_install.mkdir(parents=True)
+    program_files.mkdir(parents=True)
+    AppPaths().ensure()
+    assert data.is_dir()
+    assert (data / "logs").is_dir()
+    assert list(nsis_install.iterdir()) == []
+    assert list(program_files.iterdir()) == []
+
+
+def test_pe_sieve_ignores_install_tree_executables(tmp_path: Path) -> None:
+    install = tmp_path / "Programs" / "MemScope"
+    install.mkdir(parents=True)
+    decoy = install / "pe-sieve64.exe"
+    decoy.write_bytes(b"MZ" + b"\x00" * 256)
+    paths = AppPaths(tmp_path / "data").ensure()
+    provider = PeSieveProvider(tools_dir=paths.tools, artifacts_dir=paths.artifacts)
+    assert provider._resolved_executable() is None
+    avail = provider.availability()
+    assert avail["available"] is False
+    assert avail["executable_path"] in (None, "")
+
+
+def test_bundled_runtime_optional_volatility_extras(tmp_path: Path) -> None:
+    python = bundled_runtime_python()
+    if python is None:
+        pytest.skip("bundled Windows runtime is not prepared")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(tmp_path / "does-not-exist")
+    env["PYTHONNOUSERSITE"] = "1"
+    env["MEMSCOPE_PACKAGED"] = "1"
+    env["MEMSCOPE_DATA_DIR"] = str(tmp_path / "vol-opt")
+    probe = r"""
+import json, importlib
+missing = []
+for name in ("yara", "capstone", "Crypto"):
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        missing.append(name)
+from memscope_engine.volatility.discovery import discover_plugins, plugin_runnable_with_evidence
+catalog = discover_plugins(force_refresh=True)
+available_ids = [i["id"] for i in catalog["items"] if i["available"]]
+unavailable = [i for i in catalog["items"] if not i["available"]]
+failures = catalog["import_failures"]
+pslist = next(i for i in catalog["items"] if i["id"] == "windows.pslist.PsList")
+runnable = plugin_runnable_with_evidence(pslist, None)
+yara_available = [i["id"] for i in catalog["items"] if i["available"] and "yara" in i["id"].lower()]
+print(json.dumps({
+    "missing_extras": missing,
+    "plugin_count": catalog["plugin_count"],
+    "volatility_version": catalog["volatility_version"],
+    "import_failure_count": len(failures),
+    "import_failures": failures[:20],
+    "unavailable_count": len(unavailable),
+    "pslist_available": pslist["available"],
+    "pslist_runnable_without_evidence": runnable["runnable"],
+    "yara_available_ids": yara_available,
+    "available_contains_failed_import": any(
+        str(f) in available_ids for f in failures
+    ),
+}))
+"""
+    proc = subprocess.run(
+        [str(python), "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env=env,
+        cwd=str(python.parent),
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload["volatility_version"]
+    assert payload["plugin_count"] >= 50
+    assert payload["pslist_available"] is True
+    assert payload["pslist_runnable_without_evidence"] is False
+    assert payload["available_contains_failed_import"] is False
+    assert payload["yara_available_ids"] == []
+    assert "yara" in payload["missing_extras"]
+    assert "capstone" in payload["missing_extras"]
+    assert "Crypto" in payload["missing_extras"]
+    # Import failures must be listed, not turned into fake plugin rows.
+    assert isinstance(payload["import_failures"], list)
+

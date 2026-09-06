@@ -254,6 +254,13 @@ mod tests {
         env::remove_var("MEMSCOPE_DATA_DIR");
         let dir = memscope_data_dir().expect("data dir");
         assert!(dir.ends_with("MemScope"));
+        let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        assert_eq!(name, "MemScope");
+        let s = dir.to_string_lossy();
+        assert!(
+            !s.contains(r"\Programs\MemScope") && !s.contains(r"\Program Files\MemScope"),
+            "user data must not be the install directory: {s}"
+        );
         match previous {
             Some(v) => env::set_var("MEMSCOPE_DATA_DIR", v),
             None => env::remove_var("MEMSCOPE_DATA_DIR"),

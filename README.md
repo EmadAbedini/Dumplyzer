@@ -15,7 +15,7 @@ MemScope is not a CLI wrapper, not a cloud product, and does not score malware.
 | App version | **0.1.0** |
 | Engine runtime | CPython **3.12.10** (bundled in the installer) |
 | Volatility 3 | **2.28.0** |
-| WebView2 | Required (Evergreen; installer embeds the bootstrapper) |
+| WebView2 | **Required.** Evergreen Runtime. The installer embeds the bootstrapper, which can download the runtime if it is missing. A system with neither WebView2 nor network connectivity is not a supported launch environment |
 
 Linux is not a supported release target yet.
 
@@ -89,5 +89,12 @@ Clean-machine checklist: [docs/clean-machine-validation.md](docs/clean-machine-v
 
 ## License
 
-Application license is proposed as Apache-2.0 and is not finalized in this repository.
-Volatility 3, PE-sieve, and mal_unpack remain under their upstream licenses. PE-sieve and mal_unpack binaries are not redistributed by MemScope.
+MemScope application source is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
+The Windows installer also redistributes third-party components under their own terms (CPython PSF, Volatility 3 VSL, pefile MIT). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). MemScope does not relicense Volatility 3.
+
+PE-sieve and mal_unpack binaries are not redistributed.
+
+0.1.0 Windows installers are **unsigned**. SmartScreen or organization policy may warn on first run.
+
+Clean-machine installation on a VM without developer toolchains has **not** been executed. See [docs/clean-machine-validation.md](docs/clean-machine-validation.md).

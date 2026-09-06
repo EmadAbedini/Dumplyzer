@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-06 — **Windows release packaging (app 0.1.0, schema v9, report schema v1)**.
+> Last verified: 2026-09-06 — **0.1.0 release validation / hardening (schema v9, report schema v1)**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -391,7 +391,7 @@ Tests grow with features; no “test only at the end.”
 | Volatility 3 | **2.28.0** (`volatility3.framework` import + plugin package walk) |
 | Tauri | **2.11.5** — debug `memscope.exe` builds |
 | Node / npm | 22.18.0 / 10.9.3 |
-| WebView2 | Present |
+| WebView2 | Present on this developer host (Evergreen **152.0.4191.66**). Required at runtime. Installer uses `embedBootstrapper` (can download if missing). A machine without WebView2 and without network is **not** a supported launch environment |
 
 ### Smoke path implemented
 
@@ -532,11 +532,13 @@ providers/
 
 ## 21. Open decisions
 
-1. **License:** Apache-2.0 proposed for app code  
+1. **License:** Apache-2.0 for MemScope application source (`LICENSE`). Redistributed Volatility 3 remains VSL; CPython embeddable is PSF; pefile is MIT. See `THIRD_PARTY_NOTICES.md`.  
 2. **Engine shipping for release:** official CPython 3.12.10 embeddable + site-packages (AD-043)  
 3. **Python engine runtime:** **3.12.10** (decided)  
-4. **PE-sieve / mal_unpack:** user-supplied official EXEs (BSD-2-Clause; not bundled). mal_unpack 1.0 executes `/exe`; MemScope will not invoke it against investigation targets.  
-5. **Code signing / clean-machine VM sign-off:** remaining release blockers  
+4. **PE-sieve / mal_unpack:** user-supplied official EXEs (not bundled). mal_unpack 1.0 executes `/exe`; MemScope will not invoke it against investigation targets.  
+5. **Code signing:** procedure documented in `docs/windows-release.md`. No certificate is in the repository. 0.1.0 artifacts are unsigned.  
+6. **Clean-machine VM sign-off:** remaining public-release blocker (`docs/clean-machine-validation.md`).  
+7. **WebView2:** Evergreen required. Offline machines that do not already have WebView2 are unsupported with the current bootstrapper packaging.  
 
 Ordinary implementation choices proceed without further permission.
 

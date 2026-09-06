@@ -13,13 +13,16 @@ Set-StrictMode -Version Latest
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $Root
 
+# Node's npm.ps1 / npx.ps1 read $MyInvocation.Statement, which StrictMode Latest
+# rejects on Windows PowerShell 5.1. Use the cmd shims instead.
+$NpmCmd = (Get-Command npm.cmd -ErrorAction Stop).Source
+$NpxCmd = (Get-Command npx.cmd -ErrorAction Stop).Source
+
 if (-not $SkipRuntime) {
     & (Join-Path $PSScriptRoot "prepare-engine-runtime.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "prepare-engine-runtime failed" }
 }
 if (-not $SkipWix) {
     & (Join-Path $PSScriptRoot "prepare-wix-tools.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "prepare-wix-tools failed" }
 }
 
 $Frontend = Join-Path $Root "app\frontend"
@@ -27,7 +30,7 @@ $Desktop = Join-Path $Root "app\desktop"
 
 Push-Location $Frontend
 try {
-    npm ci
+    & $NpmCmd ci
     if ($LASTEXITCODE -ne 0) { throw "frontend npm ci failed" }
 } finally {
     Pop-Location
@@ -36,14 +39,14 @@ try {
 Push-Location $Desktop
 try {
     if (-not (Test-Path "node_modules")) {
-        npm ci
+        & $NpmCmd ci
         if ($LASTEXITCODE -ne 0) { throw "desktop npm ci failed" }
     }
-    npx tauri build --bundles nsis,msi
+    & $NpxCmd tauri build --bundles nsis,msi
     if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
 } finally {
     Pop-Location
 }
 
 & (Join-Path $PSScriptRoot "verify-installer.ps1")
-if ($LASTEXITCODE -ne 0) { throw "installer verification failed" }
+if (-not $?) { throw "installer verification failed" }
