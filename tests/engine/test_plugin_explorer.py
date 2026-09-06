@@ -65,7 +65,7 @@ def _seed_evidence(tmp_path: Path) -> tuple[AppPaths, Database, dict]:
 
 def test_schema_v8(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 8
+    assert db.schema_version() == 9
     db.execute("SELECT cache_hit, cache_key, result_path, plugin_id FROM plugin_executions LIMIT 1")
     db.execute("SELECT COUNT(*) AS c FROM analysis_cache")
     db.execute("SELECT COUNT(*) AS c FROM plugin_results")
@@ -545,7 +545,7 @@ def test_ipc_round_trip(tmp_path: Path, monkeypatch) -> None:
     from memscope_engine.server import HANDLERS, handle_app_init
 
     init = handle_app_init({"data_dir": str(tmp_path / "ipcdata")})
-    assert init["schema_version"] == 8
+    assert init["schema_version"] == 9
     listed = HANDLERS["plugins.list"]({})
     assert listed["plugin_count"] >= 50
     assert listed["volatility_version"]

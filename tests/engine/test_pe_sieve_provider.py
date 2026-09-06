@@ -190,7 +190,7 @@ def _scan_runner(
 
 def test_schema_v7_includes_v6(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 8
+    assert db.schema_version() == 9
     db.execute("SELECT COUNT(*) AS c FROM pe_sieve_scans")
     db.execute("SELECT COUNT(*) AS c FROM pe_sieve_outputs")
     db.execute("SELECT parent_artifact_id FROM artifacts LIMIT 1")
@@ -576,7 +576,7 @@ def test_ipc_round_trip(tmp_path: Path, monkeypatch) -> None:
     from memscope_engine.server import HANDLERS, handle_app_init
 
     init = handle_app_init({"data_dir": str(tmp_path / "ipcdata")})
-    assert init["schema_version"] == 8
+    assert init["schema_version"] == 9
     assert "pe_sieve" in init
     status = HANDLERS["pe_sieve.status"]({})
     assert status["available"] is False

@@ -19,6 +19,7 @@ from memscope_engine.analysis import (
     yara_workflows,
 )
 from memscope_engine.errors import AppError, rpc_error_payload
+from memscope_engine.export import workflows as export_workflows
 from memscope_engine.jobs.manager import JobManager
 from memscope_engine.logging_setup import get_logger, setup_logging
 from memscope_engine.paths import AppPaths
@@ -129,11 +130,17 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
             db_, params, cancelled, progress, paths=paths
         )
 
+    def _export_report(db_, params, cancelled, progress):
+        return export_workflows.run_export_job(
+            db_, params, cancelled, progress, paths=paths
+        )
+
     jobs.register("vad_extract", _vad_extract)
     jobs.register("yara_artifact_scan", _yara_scan)
     jobs.register("pe_sieve_artifact_scan", _pe_sieve_scan)
     jobs.register("mal_unpack_artifact", _mal_unpack)
     jobs.register("plugin_advanced", _plugin_advanced)
+    jobs.register("export_report", _export_report)
     jobs.start()
     _STATE["paths"] = paths
     _STATE["db"] = db
@@ -375,6 +382,23 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "plugins.executions": lambda p: plugin_explorer.list_executions(
         _db(), p["evidence_id"], limit=int(p.get("limit", 50))
     ),
+    "export.options": lambda _p: export_workflows.available_options(),
+    "export.generate": lambda p: _jobs().submit(
+        "export_report",
+        evidence_id=p["evidence_id"],
+        params={
+            "evidence_id": p["evidence_id"],
+            "format": p.get("format") or "html",
+            "scope": p.get("scope") or "complete",
+            "sections": p.get("sections"),
+            "filename_hint": p.get("filename_hint"),
+        },
+        message="Generate investigation export",
+    ),
+    "export.list": lambda p: export_workflows.list_exports(
+        _db(), p["evidence_id"], limit=int(p.get("limit", 50))
+    ),
+    "export.get": lambda p: export_workflows.get_export(_db(), p["export_id"]),
     "jobs.submit": handle_job_submit,
     "jobs.get": lambda p: _jobs().get(p["job_id"]),
     "jobs.list": lambda p: {

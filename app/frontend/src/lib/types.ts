@@ -543,6 +543,7 @@ export type NavId =
   | "artifacts"
   | "jobs"
   | "plugins"
+  | "export"
   | "settings";
 
 export type SearchHit = {
@@ -566,4 +567,42 @@ export type Ioc = {
   context: string | null;
   source: string | null;
   created_at: string | null;
+};
+
+export type ExportFormat = "json" | "csv" | "html";
+export type ExportScope = "complete" | "selected";
+export type ExportUiState =
+  | "idle"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ExportRecord = {
+  id: string;
+  evidence_id: string;
+  job_id: string | null;
+  format: ExportFormat | string;
+  scope: ExportScope | string;
+  sections: string[];
+  status: string;
+  output_dir: string | null;
+  primary_path: string | null;
+  files: Array<{ name: string; kind: string; size_bytes?: number }>;
+  size_bytes: number | null;
+  report_schema_version: number | null;
+  error: Record<string, unknown> | null;
+  created_at: string | null;
+  finished_at: string | null;
+};
+
+export type ExportOptions = {
+  formats: ExportFormat[];
+  scopes: ExportScope[];
+  sections: string[];
+  csv_datasets: string[];
+  report_schema_version: number;
+  pdf: boolean;
+  destination: string;
 };

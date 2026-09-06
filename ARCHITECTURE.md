@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-06 — **Plugin Explorer + Advanced Volatility execution (schema v8) implemented**.
+> Last verified: 2026-09-06 — **Export / reporting (schema v9, report schema v1) implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -45,7 +45,7 @@
 
 ### 2.1 React frontend (`app/frontend`)
 
-- Investigation UX: Import, Overview, Processes, Deep Dive, Network, Modules, Memory/VAD, Findings, IOC Search, Timeline, Artifacts, Jobs, Plugin Explorer, Advanced execution
+- Investigation UX: Import, Overview, Processes, Deep Dive, Network, Modules, Memory/VAD, Findings, IOC Search, Timeline, Artifacts, Jobs, Plugin Explorer, Advanced execution, Export / Report
 - Local UI state + server/engine state via Tauri commands and event subscriptions
 - Tables, filters, search, virtualization for large result sets
 - No Volatility imports; no shelling out to `vol`
@@ -57,7 +57,7 @@
 - Spawn/monitor/restart Python engine sidecar with explicit argv (no shell)
 - Bridge: frontend commands → engine JSON-RPC; engine notifications → frontend events
 - Safe file pickers; path canonicalization; evidence path allowlisting concepts
-- App data directories (config, logs, SQLite, artifact store, cache)
+- App data directories (config, logs, SQLite, artifact store, cache, **exports**)
 - Packaging entrypoint (Windows x64)
 
 ### 2.3 Python engine (`engine`)
@@ -66,7 +66,7 @@
 - SQLite persistence of metadata and normalized results
 - Job queue (queued / running / completed / failed / cancelled)
 - Analysis cache keyed by evidence hash + tool versions + params + schema version
-- Findings heuristics, IOC extraction, timeline assembly, artifact provenance
+- Findings heuristics, IOC extraction, timeline assembly, artifact provenance, forensic export/reporting
 - Provider adapters for optional external tools
 - Structured logging (app / analysis / tool)
 
@@ -432,10 +432,13 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 | `plugins.execute` | Queue `plugin_advanced` job (Volatility Python APIs, not CLI) |
 | `plugins.execution_get` | Paginated generic TreeGrid result + structured raw + execution metadata |
 | `plugins.executions` | Recent advanced executions for evidence |
+| `export.options` | Formats, sections, CSV datasets, report schema version |
+| `export.generate` | Queue `export_report` job (HTML / JSON / CSV) |
+| `export.list` / `export.get` | Persisted export records for evidence |
 
 ### SQLite schema version
 
-**v8** — `analysis_cache`, `plugin_results`, `plugin_executions.cache_hit/cache_key/result_path/plugin_id`; prior v7 mal_unpack; v6 PE-sieve; v5 YARA; v4 artifacts/timeline.
+**v9** — `exports` table (format, scope, sections, output paths, report schema version). Prior: v8 analysis_cache + plugin_results; v7 mal_unpack; v6 PE-sieve; v5 YARA; v4 artifacts/timeline.
 
 ### Optional providers
 
@@ -503,6 +506,20 @@ providers/
 - FileHandler writes plugin-emitted files into the artifact store; never executed
 - Navigation: PID column → existing `processes` row only when the PID is already stored
 - No malware score; no vol.py / stdout scraping
+
+**Export / reporting**
+
+- Formats: **JSON** (`memscope-report-v1`, report schema **v1**), **CSV** (tabular datasets), **HTML** (primary human-readable forensic report). No PDF.
+- Job kind `export_report`; records persist in SQLite `exports` (schema **v9**)
+- Output is always under `{app_data}/exports/<sanitized-name>_<id>/`. Client destination paths are rejected. Filenames are sanitized. Source evidence is never overwritten. Path traversal and absolute paths are rejected.
+- JSON complete export writes `investigation.json` plus `manifest.json`. Selected JSON writes per-section documents that still include metadata and provenance.
+- CSV datasets (deterministic columns): processes, network, modules, vad, findings, iocs, timeline, artifacts. Nulls become empty cells; dict/list values are compact JSON. Complete CSV writes one file per dataset.
+- HTML is self-contained (inline CSS, no CDN, no JavaScript). Forensic strings are `html.escape`d. Large tables truncate at 400 rows with a pointer to JSON/CSV. Advanced Volatility executions are summarized (plugin, params, status, cache hit/miss, row counts) — raw TreeGrid output is omitted.
+- Provenance chain recorded on the report: Evidence → AnalysisRun → PluginExecution → Entity/Artifact → Finding/IOC/Timeline. Timeline `classification` is `observed` or `inferred`; inferred events are labeled and not presented as directly observed.
+- Executive summary is factual counts only. **No malware/risk score.**
+- Optional provider results (YARA, PE-sieve, mal_unpack) are included when present; PE-sieve/mal_unpack keep `observed` (tool) vs `interpretation` (MemScope). Missing providers yield empty sections.
+- Limits: HTML 400 rows/section, JSON 20k, CSV 50k. Collection uses existing list DTOs / SQLite, not a raw table dump.
+- Security: no shell, no artifact execution, no network fetches from the report, no secrets added by MemScope. Command lines, paths, usernames, and plugin output are treated as untrusted text.
 
 ---
 

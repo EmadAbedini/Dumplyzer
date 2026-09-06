@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -436,5 +436,26 @@ MIGRATIONS: dict[int, str] = {
     CREATE INDEX IF NOT EXISTS idx_plugin_results_evidence ON plugin_results(evidence_id);
     CREATE INDEX IF NOT EXISTS idx_plugin_results_plugin ON plugin_results(plugin_id);
     CREATE INDEX IF NOT EXISTS idx_plugin_results_exec ON plugin_results(plugin_execution_id);
+    """,
+    9: """
+    CREATE TABLE IF NOT EXISTS exports (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      job_id TEXT,
+      format TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      sections_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      output_dir TEXT,
+      primary_path TEXT,
+      files_json TEXT NOT NULL DEFAULT '[]',
+      size_bytes INTEGER,
+      report_schema_version INTEGER NOT NULL,
+      error_json TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_exports_evidence ON exports(evidence_id);
+    CREATE INDEX IF NOT EXISTS idx_exports_job ON exports(job_id);
     """,
 }

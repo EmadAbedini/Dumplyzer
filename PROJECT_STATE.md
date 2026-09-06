@@ -4,21 +4,21 @@
 
 **Last updated:** 2026-09-06  
 **Version target:** 0.1.0-dev  
-**Current phase:** Phase 6 — Plugin Explorer / Advanced Volatility execution done
+**Current phase:** Phase 7 — Export / reporting done
 
 ---
 
 ## Current Status
 
-**Plugin Explorer** is implemented as generic Volatility 3 execution (Python APIs, not `vol.py`).
+**Export / reporting** is implemented on top of existing MemScope evidence (findings, timeline, IOCs, artifacts, provenance, processes, network, VAD, YARA, PE-sieve, mal_unpack, Advanced Volatility).
 
-- Installed Volatility **2.28.0**: **191** discovered plugins (windows 99, linux 60, mac 23, framework 9)
-- 6 module import failures are recorded and never shown as available
-- Advanced Execution is a real `plugin_advanced` JobManager job bound to imported Evidence
-- Results are a generic TreeGrid table + structured raw JSON; cache hits are labeled
-- Dedicated views (Processes, Memory, …) remain the guided workflow
+- Formats: JSON (`memscope-report-v1`), CSV tabular datasets, self-contained HTML forensic report
+- Report schema **v1**; analysis SQLite schema **v9** (`exports` table)
+- Job kind `export_report` with queued / running / completed / failed / cancelled
+- Files written only under `{app_data}/exports/`; evidence is never overwritten
+- HTML truncates large tables; Advanced plugin TreeGrid is summarized, not dumped
 
-Optional providers (YARA, PE-sieve, mal_unpack) are unchanged.
+Plugin Explorer and optional providers are unchanged.
 
 ---
 
@@ -26,18 +26,18 @@ Optional providers (YARA, PE-sieve, mal_unpack) are unchanged.
 
 - Phases 0–4 forensic core  
 - Optional YARA / PE-sieve / mal_unpack providers  
-- [x] Dynamic Volatility plugin discovery + normalized metadata  
-- [x] Requirement classification (configurable vs framework)  
-- [x] Advanced execution job + AnalysisRun / PluginExecution  
-- [x] Generic TreeGrid result model + cache (schema **v8**)  
-- [x] Plugin Explorer UI (search, categories, parameters, job state, results, raw)
+- Plugin Explorer + Advanced Volatility execution (schema v8)  
+- [x] JSON / CSV / HTML investigation export  
+- [x] Forensic HTML report (metadata, summary, findings, processes, network, modules, VAD, timeline, IOCs, artifacts, malware analysis, Advanced Volatility)  
+- [x] Provenance chain + observed vs inferred timeline  
+- [x] Export UI (complete vs selected sections, generation states, cancel)  
+- [x] Safe output paths, filename sanitization, HTML escaping  
 
 ---
 
 ## In Progress / Next
 
-1. Export/reporting  
-2. Release packaging (MSI deferred)
+1. Release packaging (MSI deferred)
 
 ---
 
@@ -58,6 +58,12 @@ Optional providers (YARA, PE-sieve, mal_unpack) are unchanged.
 | Plugin Explorer is generic | Does not replace dedicated process/memory views |
 | Result preview cap | UI/IPC preview is 500 rows; full table remains in the cache file |
 | 6 Vol3 import failures | Discovery records them; those modules are not listed as available |
+| HTML report row cap | 400 rows per large section; remainder is in JSON/CSV |
+| JSON/CSV row caps | JSON 20000 / CSV 50000 per section; not a full unbounded dump |
+| No PDF export | Intentionally omitted |
+| Export destination | Engine-chosen under app data `exports/` only; client paths rejected |
+| HTML is static | No JavaScript; open as a file. Command lines/paths are escaped text, not executed |
+| No desktop UI browser pass | Export view verified via TypeScript build + engine IPC tests |
 
 ---
 
@@ -76,7 +82,7 @@ Optional providers (YARA, PE-sieve, mal_unpack) are unchanged.
 
 | Check | Result |
 |-------|--------|
-| pytest | **88 passed, 2 skipped** (skips = real PE-sieve and mal_unpack EXEs not installed) |
+| pytest | **105 passed, 2 skipped** (skips = real PE-sieve and mal_unpack EXEs not installed) |
 | cargo test | **Not run** — `cargo` is not installed on this machine |
 | frontend build | **PASS** (`tsc --noEmit && vite build`) |
 | cargo build | **Not run** — `cargo` is not installed on this machine |
@@ -94,3 +100,7 @@ Optional providers (YARA, PE-sieve, mal_unpack) are unchanged.
 | AD-036 | Schema v8 analysis_cache + plugin_results; large TreeGrids live as JSON files under app cache | Accepted |
 | AD-037 | Cache key = evidence SHA-256 + Vol version + plugin id + canonical params + schema version | Accepted |
 | AD-038 | PID→process navigation only when a process row already exists for that PID | Accepted |
+| AD-039 | Export formats are JSON, CSV, and HTML only; no PDF until a dedicated architecture exists | Accepted |
+| AD-040 | Exports write only under `{app_data}/exports/`; client destination paths and traversal are rejected | Accepted |
+| AD-041 | Report schema `memscope-report-v1` is independent of SQLite schema version | Accepted |
+| AD-042 | HTML reports omit raw Advanced plugin TreeGrid; summaries + structured JSON/CSV hold detail | Accepted |

@@ -15,6 +15,7 @@ const NAV: { id: NavId; label: string }[] = [
   { id: "artifacts", label: "Artifacts" },
   { id: "jobs", label: "Jobs" },
   { id: "plugins", label: "Plugins" },
+  { id: "export", label: "Export" },
   { id: "settings", label: "Settings" },
 ];
 

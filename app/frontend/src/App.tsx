@@ -16,6 +16,7 @@ import { MemoryExplorerView } from "./components/MemoryExplorerView";
 import { TimelineView } from "./components/TimelineArtifactsViews";
 import { ArtifactsView } from "./components/ArtifactsView";
 import { PluginExplorerView } from "./components/PluginExplorerView";
+import { ExportView } from "./components/ExportView";
 import { PlaceholderView } from "./components/PlaceholderView";
 import { engineCall, ensureAppPaths, EngineClientError } from "./lib/api";
 import type {
@@ -196,6 +197,11 @@ export default function App() {
     setNav("jobs");
   };
 
+  const onExportJobSubmitted = (job: Job) => {
+    setActiveJobIds((ids) => [...ids, job.id]);
+    setJobTick((t) => t + 1);
+  };
+
   let body: ReactNode;
   switch (nav) {
     case "overview":
@@ -313,6 +319,16 @@ export default function App() {
             setNav("process_dive");
           }}
           refreshToken={jobTick}
+        />
+      );
+      break;
+    case "export":
+      body = (
+        <ExportView
+          evidenceId={evidence?.id ?? null}
+          refreshToken={jobTick}
+          onError={setErr}
+          onJobSubmitted={onExportJobSubmitted}
         />
       );
       break;

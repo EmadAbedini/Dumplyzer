@@ -38,6 +38,7 @@ class AppPaths:
         self.tmp = self.root / "tmp"
         self.yara_rules = self.root / "yara_rules"
         self.tools = self.root / "tools"
+        self.exports = self.root / "exports"
 
     def ensure(self) -> "AppPaths":
         for p in (
@@ -48,6 +49,7 @@ class AppPaths:
             self.tmp,
             self.yara_rules,
             self.tools,
+            self.exports,
         ):
             p.mkdir(parents=True, exist_ok=True)
         (self.tools / "pe-sieve").mkdir(parents=True, exist_ok=True)
@@ -66,4 +68,5 @@ class AppPaths:
             "tmp": str(self.tmp),
             "yara_rules": str(self.yara_rules),
             "tools": str(self.tools),
+            "exports": str(self.exports),
         }
