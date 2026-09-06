@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-06 — **mal_unpack optional provider (schema v7) implemented**.
+> Last verified: 2026-09-06 — **Plugin Explorer + Advanced Volatility execution (schema v8) implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -253,6 +253,8 @@ Cache key components:
 
 Invalidation on schema/version change. Never serve stale forensic results after relevant invalidation.
 
+Implemented for Advanced Execution in `memscope_engine.cache` (`analysis_cache` table + JSON result files). Cache hits remain visible as distinct PluginExecution rows with `cache_hit`.
+
 ---
 
 ## 10. Artifact & provenance architecture
@@ -276,8 +278,10 @@ Memory Image (Evidence)
 ## 11. Plugin system & Advanced Mode
 
 - **Guided Mode:** Recommended Analysis strategies select relevant plugins for the task (e.g. process deep dive) — not “run everything”
-- **Advanced Mode / Plugin Explorer:** discover plugins, show descriptions/params/availability, execute, view structured + optional raw/transparency payload
-- Frontend still only sees MemScope DTOs; Vol3 details appear as transparency metadata
+- **Advanced Mode / Plugin Explorer (implemented):** dynamic discovery from the installed Volatility 3 registry (`framework.import_files` + `framework.list_plugins`). Analysts inspect metadata, configure simple requirements, and run a `plugin_advanced` JobManager job. Results are a generic TreeGrid table plus structured raw JSON — not `vol.py` stdout.
+- Frontend never imports Volatility. Plugin ids resolve only through the discovered registry (no `import_module` of user strings, no shell, no arbitrary Python).
+- Framework requirements (URI/image location, `ModuleRequirement` kernel, translation layers, symbol tables, version dependencies) are filled from MemScope Evidence + automagic. The UI edits only configurable Boolean/Int/String/Choice/List parameters.
+- Dedicated forensic views (Processes, Memory, Network, …) remain the guided path. Plugin Explorer is explicitly labeled generic execution.
 
 ---
 
@@ -422,10 +426,16 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 | `mal_unpack.status` / `mal_unpack.configure` | Provider availability + EXE path/timeout (no extra CLI) |
 | `mal_unpack.unpack_artifact` | Queue artifact mal_unpack workflow (records unsupported target; does not invoke the EXE) |
 | `mal_unpack.scans_for_artifact` / `mal_unpack.scan_get` | Results + generated output artifacts |
+| `plugins.list` | Dynamic Volatility 3 plugin catalog (+ runnable flag for selected evidence) |
+| `plugins.get` | Normalized plugin metadata, requirements, OS constraints |
+| `plugins.validate` | Validate plugin id + configurable parameters against Evidence |
+| `plugins.execute` | Queue `plugin_advanced` job (Volatility Python APIs, not CLI) |
+| `plugins.execution_get` | Paginated generic TreeGrid result + structured raw + execution metadata |
+| `plugins.executions` | Recent advanced executions for evidence |
 
 ### SQLite schema version
 
-**v7** — `mal_unpack_scans`, `mal_unpack_outputs`; prior v6 PE-sieve tables + `artifacts.parent_artifact_id`; v5 YARA; v4 artifacts/timeline.
+**v8** — `analysis_cache`, `plugin_results`, `plugin_executions.cache_hit/cache_key/result_path/plugin_id`; prior v7 mal_unpack; v6 PE-sieve; v5 YARA; v4 artifacts/timeline.
 
 ### Optional providers
 
@@ -480,6 +490,19 @@ providers/
 - Job kind: `mal_unpack_artifact`
 - UI states: unavailable, unsupported target, queued, running, completed/no output, completed/output generated, failed, cancelled
 - Unpack action in Artifacts UI is disabled for all investigation targets
+
+**Plugin Explorer / Advanced execution**
+
+- Discovery: `volatility3.framework.import_files` + `list_plugins` against Volatility **2.28.0** (191 plugins on this machine: windows 99, linux 60, mac 23, framework 9). Import failures are listed and never marked available.
+- Metadata model version 1: id, module path, class, description, requirements, types, defaults, optional/required, version, discovery errors
+- Configurable requirements rendered in UI: Boolean, Int, String, Choice, List. Framework types (URI, TranslationLayer, SymbolTable, Module, Version, Plugin, LayerList, Class) are engine-resolved
+- Evidence image is always `URIRequirement.location_from_file` via `VolatilitySession`; frontend cannot supply arbitrary paths
+- Job kind `plugin_advanced`; AnalysisRun + PluginExecution persisted; TreeGrid stored as versioned JSON under `{app_data}/cache/plugin_results/`
+- Cache key: evidence SHA-256 + Volatility version + plugin id + canonical parameters + schema version. Hits still create execution rows with `cache_hit=1`
+- Cancellation/timeout are cooperative around `construct_plugin` / `run()` — Volatility does not interrupt mid-plugin
+- FileHandler writes plugin-emitted files into the artifact store; never executed
+- Navigation: PID column → existing `processes` row only when the PID is already stored
+- No malware score; no vol.py / stdout scraping
 
 ---
 

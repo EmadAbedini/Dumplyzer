@@ -175,7 +175,7 @@ def _unpack_runner(
 
 def test_schema_v7(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 7
+    assert db.schema_version() == 8
     db.execute("SELECT COUNT(*) AS c FROM mal_unpack_scans")
     db.execute("SELECT COUNT(*) AS c FROM mal_unpack_outputs")
     db.execute("SELECT invoked FROM mal_unpack_scans LIMIT 1")
@@ -624,7 +624,7 @@ def test_ipc_round_trip(tmp_path: Path, monkeypatch) -> None:
     from memscope_engine.server import HANDLERS, handle_app_init
 
     init = handle_app_init({"data_dir": str(tmp_path / "ipcdata")})
-    assert init["schema_version"] == 7
+    assert init["schema_version"] == 8
     assert "mal_unpack" in init
     status = HANDLERS["mal_unpack.status"]({})
     assert status["available"] is False

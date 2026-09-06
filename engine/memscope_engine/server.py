@@ -12,6 +12,7 @@ from memscope_engine.analysis import (
     mal_unpack_workflows,
     memory_artifacts,
     pe_sieve_workflows,
+    plugin_explorer,
     process_analysis,
     search_iocs,
     workflows,
@@ -123,10 +124,16 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
             db_, params, cancelled, progress, paths=paths
         )
 
+    def _plugin_advanced(db_, params, cancelled, progress):
+        return plugin_explorer.run_advanced_plugin_job(
+            db_, params, cancelled, progress, paths=paths
+        )
+
     jobs.register("vad_extract", _vad_extract)
     jobs.register("yara_artifact_scan", _yara_scan)
     jobs.register("pe_sieve_artifact_scan", _pe_sieve_scan)
     jobs.register("mal_unpack_artifact", _mal_unpack)
+    jobs.register("plugin_advanced", _plugin_advanced)
     jobs.start()
     _STATE["paths"] = paths
     _STATE["db"] = db
@@ -140,6 +147,10 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
         "yara": yara_workflows.yara_status(paths, db),
         "pe_sieve": pe_sieve_workflows.pe_sieve_status(paths, db),
         "mal_unpack": mal_unpack_workflows.mal_unpack_status(paths, db),
+        "plugins": {
+            "volatility_version": plugin_explorer.volatility_version(),
+            "model_version": 1,
+        },
     }
 
 
@@ -324,6 +335,46 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         _db(), p["artifact_id"]
     ),
     "mal_unpack.scan_get": lambda p: mal_unpack_workflows.get_mal_unpack_scan(_db(), p["scan_id"]),
+    "plugins.list": lambda p: plugin_explorer.list_plugins_for_ui(
+        _db(), p.get("evidence_id")
+    ),
+    "plugins.get": lambda p: plugin_explorer.get_plugin_for_ui(
+        _db(), p["plugin_id"], p.get("evidence_id")
+    ),
+    "plugins.validate": lambda p: {
+        "ok": True,
+        **{
+            k: v
+            for k, v in plugin_explorer.validate_execution_request(
+                _db(),
+                evidence_id=p.get("evidence_id"),
+                plugin_id=p["plugin_id"],
+                parameters=p.get("parameters") or {},
+            ).items()
+            if k != "evidence"
+        },
+        "evidence_id": p.get("evidence_id"),
+    },
+    "plugins.execute": lambda p: _jobs().submit(
+        "plugin_advanced",
+        evidence_id=p["evidence_id"],
+        params={
+            "evidence_id": p["evidence_id"],
+            "plugin_id": p["plugin_id"],
+            "parameters": p.get("parameters") or {},
+            "timeout_secs": p.get("timeout_secs"),
+        },
+        message=f"Advanced plugin {p.get('plugin_id')}",
+    ),
+    "plugins.execution_get": lambda p: plugin_explorer.get_execution_bundle(
+        _db(),
+        p["execution_id"],
+        preview_limit=int(p.get("limit", 500)),
+        offset=int(p.get("offset", 0)),
+    ),
+    "plugins.executions": lambda p: plugin_explorer.list_executions(
+        _db(), p["evidence_id"], limit=int(p.get("limit", 50))
+    ),
     "jobs.submit": handle_job_submit,
     "jobs.get": lambda p: _jobs().get(p["job_id"]),
     "jobs.list": lambda p: {

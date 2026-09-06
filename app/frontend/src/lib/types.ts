@@ -418,6 +418,117 @@ export type Overview = {
   recent_runs: Array<Record<string, unknown>>;
 };
 
+export type PluginRequirement = {
+  name: string;
+  type: string;
+  classification: string;
+  configurable: boolean;
+  optional: boolean;
+  default?: unknown;
+  description?: string;
+  choices?: string[];
+  element_type?: string;
+  oses?: string[];
+  architectures?: string[];
+  children?: Array<Record<string, unknown>>;
+};
+
+export type PluginListItem = {
+  id: string;
+  name: string;
+  module_path: string;
+  class_name: string;
+  category: string;
+  description: string;
+  available: boolean;
+  version?: string | null;
+  oses?: string[];
+  architectures?: string[];
+  discovery_errors?: string[];
+  configurable_parameter_count?: number;
+  runnable: boolean;
+  runnable_reason?: string;
+  os_match?: string;
+};
+
+export type PluginCatalog = {
+  model_version: number;
+  volatility_version: string;
+  plugin_count: number;
+  import_failures: string[];
+  categories: Array<{ id: string; count: number }>;
+  items: PluginListItem[];
+  evidence_id?: string | null;
+};
+
+export type PluginDetail = {
+  plugin: PluginListItem & {
+    requirements: PluginRequirement[];
+    configurable_parameters: PluginRequirement[];
+    version_tuple?: number[] | null;
+    required_framework_version?: number[] | null;
+    hidden?: boolean;
+  };
+  runnable: { runnable: boolean; reason: string; os_match: string };
+  volatility_version: string;
+  evidence_id?: string | null;
+  notes?: string;
+};
+
+export type PluginResultRow = {
+  depth: number;
+  cells: unknown[];
+  values: Record<string, unknown>;
+};
+
+export type PluginExecutionBundle = {
+  execution: {
+    id: string;
+    analysis_run_id: string;
+    evidence_id: string;
+    plugin: string;
+    plugin_id: string;
+    parameters: Record<string, unknown>;
+    status: string;
+    started_at: string | null;
+    finished_at: string | null;
+    row_count: number | null;
+    cache_hit: boolean;
+    cache_key?: string | null;
+    error?: Record<string, unknown> | null;
+    transparency?: Record<string, unknown>;
+  };
+  result: {
+    model_version?: number;
+    columns: Array<{ name: string; type: string }>;
+    row_count: number;
+    nested?: boolean;
+    rows: PluginResultRow[];
+    files: Array<Record<string, unknown>>;
+    links: Array<{
+      kind: string;
+      pid?: number;
+      process_id?: string;
+      name?: string | null;
+      reliable?: boolean;
+    }>;
+    raw?: Record<string, unknown>;
+    truncated?: boolean;
+    execution?: Record<string, unknown>;
+  };
+};
+
+export type PluginExecutionSummary = {
+  id: string;
+  plugin: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  row_count: number | null;
+  cache_hit: boolean;
+  analysis_run_id: string;
+};
+
 export type NavId =
   | "overview"
   | "processes"

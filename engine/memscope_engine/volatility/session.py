@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Type
 
-from memscope_engine.errors import AppError
+from memscope_engine.volatility.treegrid import treegrid_to_table
 
 vollog = logging.getLogger("memscope.tool")
 
@@ -19,6 +19,7 @@ class PluginResult:
     columns: list[str]
     rows: list[list[Any]]
     transparency: dict[str, Any] = field(default_factory=dict)
+    table: dict[str, Any] = field(default_factory=dict)
 
 
 def _progress_mute(progress: float, description: str | None = None) -> None:
@@ -74,6 +75,9 @@ class VolatilitySession:
         plugin_cls: Type[Any],
         plugin_params: dict[str, Any] | None = None,
         progress_callback: Callable[[float, str | None], None] | None = None,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+        open_method: Type[Any] | None = None,
     ) -> PluginResult:
         plugin_name = f"{plugin_cls.__module__}.{plugin_cls.__name__}"
         started = datetime.now(timezone.utc).isoformat()
@@ -95,6 +99,9 @@ class VolatilitySession:
                 self._interfaces.configuration.path_join(plugin_config_path, key)
             ] = value
 
+        if cancelled and cancelled():
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+
         try:
             constructed = self._plugins.construct_plugin(
                 self.context,
@@ -102,7 +109,7 @@ class VolatilitySession:
                 plugin_cls,
                 self._base_config_path,
                 progress_callback or _progress_mute,
-                None,
+                open_method,
             )
         except self._exceptions.UnsatisfiedException as exc:
             unsat = [str(x) for x in exc.unsatisfied]
@@ -130,6 +137,9 @@ class VolatilitySession:
                 data={"plugin": plugin_name},
             ) from exc
 
+        if cancelled and cancelled():
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+
         try:
             grid = constructed.run()
         except Exception as exc:  # noqa: BLE001
@@ -142,7 +152,9 @@ class VolatilitySession:
                 data={"plugin": plugin_name},
             ) from exc
 
-        columns, rows = _treegrid_to_rows(grid)
+        table = treegrid_to_table(grid)
+        columns = [str(c["name"]) for c in table.get("columns") or []]
+        rows = [list(r.get("cells") or []) for r in table.get("rows") or []]
         finished = datetime.now(timezone.utc).isoformat()
         transparency = {
             "tool": "volatility3",
@@ -164,6 +176,7 @@ class VolatilitySession:
             columns=columns,
             rows=rows,
             transparency=transparency,
+            table=table,
         )
 
 

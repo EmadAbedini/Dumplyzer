@@ -52,6 +52,7 @@ class AppPaths:
             p.mkdir(parents=True, exist_ok=True)
         (self.tools / "pe-sieve").mkdir(parents=True, exist_ok=True)
         (self.tools / "mal_unpack").mkdir(parents=True, exist_ok=True)
+        (self.cache / "plugin_results").mkdir(parents=True, exist_ok=True)
         return self
 
     def as_dict(self) -> dict[str, str]:

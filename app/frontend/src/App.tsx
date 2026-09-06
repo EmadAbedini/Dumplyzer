@@ -15,6 +15,7 @@ import { IocsView, SearchView } from "./components/SearchIocViews";
 import { MemoryExplorerView } from "./components/MemoryExplorerView";
 import { TimelineView } from "./components/TimelineArtifactsViews";
 import { ArtifactsView } from "./components/ArtifactsView";
+import { PluginExplorerView } from "./components/PluginExplorerView";
 import { PlaceholderView } from "./components/PlaceholderView";
 import { engineCall, ensureAppPaths, EngineClientError } from "./lib/api";
 import type {
@@ -298,6 +299,20 @@ export default function App() {
           evidenceId={evidence?.id ?? null}
           refreshToken={jobTick}
           onError={setErr}
+        />
+      );
+      break;
+    case "plugins":
+      body = (
+        <PluginExplorerView
+          evidence={evidence}
+          onError={setErr}
+          onJobSubmitted={onJobSubmitted}
+          onOpenProcess={(id) => {
+            setSelectedProcessId(id);
+            setNav("process_dive");
+          }}
+          refreshToken={jobTick}
         />
       );
       break;

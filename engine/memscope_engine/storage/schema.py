@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -394,5 +394,47 @@ MIGRATIONS: dict[int, str] = {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_mal_unpack_outputs_scan ON mal_unpack_outputs(scan_id);
+    """,
+    8: """
+    ALTER TABLE plugin_executions ADD COLUMN cache_hit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE plugin_executions ADD COLUMN cache_key TEXT;
+    ALTER TABLE plugin_executions ADD COLUMN result_path TEXT;
+    ALTER TABLE plugin_executions ADD COLUMN plugin_id TEXT;
+
+    CREATE TABLE IF NOT EXISTS analysis_cache (
+      id TEXT PRIMARY KEY,
+      cache_key TEXT NOT NULL UNIQUE,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      evidence_sha256 TEXT NOT NULL,
+      volatility_version TEXT NOT NULL,
+      plugin_id TEXT NOT NULL,
+      parameters_json TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      result_path TEXT,
+      row_count INTEGER,
+      analysis_run_id TEXT,
+      plugin_execution_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_analysis_cache_evidence ON analysis_cache(evidence_id);
+    CREATE INDEX IF NOT EXISTS idx_analysis_cache_plugin ON analysis_cache(plugin_id);
+
+    CREATE TABLE IF NOT EXISTS plugin_results (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+      analysis_run_id TEXT,
+      plugin_execution_id TEXT,
+      job_id TEXT,
+      plugin_id TEXT NOT NULL,
+      cache_key TEXT,
+      result_path TEXT,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      columns_json TEXT NOT NULL DEFAULT '[]',
+      from_cache INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_plugin_results_evidence ON plugin_results(evidence_id);
+    CREATE INDEX IF NOT EXISTS idx_plugin_results_plugin ON plugin_results(plugin_id);
+    CREATE INDEX IF NOT EXISTS idx_plugin_results_exec ON plugin_results(plugin_execution_id);
     """,
 }
