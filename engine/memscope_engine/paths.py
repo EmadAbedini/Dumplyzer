@@ -26,7 +26,9 @@ def default_data_dir() -> Path:
 
 
 class AppPaths:
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | str | None = None) -> None:
+        if isinstance(root, str):
+            root = Path(root)
         self.root = (root or default_data_dir()).resolve()
         self.logs = self.root / "logs"
         self.db_path = self.root / "memscope.db"
@@ -35,6 +37,7 @@ class AppPaths:
         self.config_path = self.root / "config.json"
         self.tmp = self.root / "tmp"
         self.yara_rules = self.root / "yara_rules"
+        self.tools = self.root / "tools"
 
     def ensure(self) -> "AppPaths":
         for p in (
@@ -44,8 +47,10 @@ class AppPaths:
             self.cache,
             self.tmp,
             self.yara_rules,
+            self.tools,
         ):
             p.mkdir(parents=True, exist_ok=True)
+        (self.tools / "pe-sieve").mkdir(parents=True, exist_ok=True)
         return self
 
     def as_dict(self) -> dict[str, str]:
@@ -58,4 +63,5 @@ class AppPaths:
             "config_path": str(self.config_path),
             "tmp": str(self.tmp),
             "yara_rules": str(self.yara_rules),
+            "tools": str(self.tools),
         }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -306,5 +306,50 @@ MIGRATIONS: dict[int, str] = {
       value_json TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    """,
+    6: """
+    ALTER TABLE artifacts ADD COLUMN parent_artifact_id TEXT;
+
+    CREATE TABLE IF NOT EXISTS pe_sieve_scans (
+      id TEXT PRIMARY KEY,
+      evidence_id TEXT REFERENCES evidence(id) ON DELETE CASCADE,
+      artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+      process_id TEXT,
+      pid INTEGER,
+      memory_region_id TEXT,
+      analysis_run_id TEXT,
+      job_id TEXT,
+      status TEXT NOT NULL,
+      ui_state TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      live_pid INTEGER,
+      pe_sieve_version TEXT,
+      executable_path TEXT,
+      output_dir TEXT,
+      exit_code INTEGER,
+      pesieve_result TEXT,
+      observed_json TEXT NOT NULL DEFAULT '{}',
+      interpretation_json TEXT NOT NULL DEFAULT '{}',
+      error_json TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pe_sieve_scans_artifact ON pe_sieve_scans(artifact_id);
+    CREATE INDEX IF NOT EXISTS idx_pe_sieve_scans_evidence ON pe_sieve_scans(evidence_id);
+
+    CREATE TABLE IF NOT EXISTS pe_sieve_outputs (
+      id TEXT PRIMARY KEY,
+      scan_id TEXT NOT NULL REFERENCES pe_sieve_scans(id) ON DELETE CASCADE,
+      artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+      evidence_id TEXT,
+      dump_file TEXT,
+      dump_mode TEXT,
+      module_base TEXT,
+      is_shellcode INTEGER,
+      role TEXT NOT NULL,
+      observed_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pe_sieve_outputs_scan ON pe_sieve_outputs(scan_id);
     """,
 }

@@ -24,7 +24,7 @@ from memscope_engine.storage import Database
 
 def test_schema_v5(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 5
+    assert db.schema_version() == 6
     db.execute("SELECT COUNT(*) AS c FROM yara_scans")
     db.execute("SELECT COUNT(*) AS c FROM yara_matches")
     db.close()

@@ -22,7 +22,7 @@ from uuid import uuid4
 
 def test_schema_v2(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 5
+    assert db.schema_version() == 6
     # tables exist
     db.execute("SELECT COUNT(*) AS c FROM modules")
     db.execute("SELECT COUNT(*) AS c FROM network_connections")

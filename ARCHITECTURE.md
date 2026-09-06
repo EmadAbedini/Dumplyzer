@@ -1,7 +1,7 @@
 # MemScope — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-04 — **YARA optional provider (schema v5) implemented**.
+> Last verified: 2026-09-06 — **PE-sieve optional provider (schema v6) implemented**.
 
 **Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
@@ -301,7 +301,7 @@ Each finding answers **why** and links to evidence fields. Prefer precision over
 | Provider | Role | Bundling |
 |----------|------|----------|
 | YARA | Rule scan on artifacts/process memory where supported | Optional; user rules; `yara-python` or CLI adapter after verification |
-| PE-sieve | Suspicious process PE anomaly detection / dump | **User-supplied binary** until redistribution rights verified |
+| PE-sieve | Suspicious process PE anomaly detection / dump | **User-supplied** official EXE (BSD-2-Clause; not bundled). Live `/pid` only; artifacts unsupported |
 | mal_unpack | Unpacking workflow | **User-supplied**; configure path; no fake stubs |
 
 Interface: `Provider` protocol with `availability()`, `run(request) -> ProviderResult`. Core app runs without any of them.
@@ -374,7 +374,7 @@ Tests grow with features; no “test only at the end.”
 
 ---
 
-## 20. Verified environment (2026-09-04)
+## 20. Verified environment (2026-09-06)
 
 | Component | Verified version / path |
 |-----------|-------------------------|
@@ -416,10 +416,13 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 | `yara.status` / `yara.configure` | Provider availability + settings |
 | `yara.scan_artifact` | Queue artifact YARA job |
 | `yara.scans_for_artifact` / `yara.scan_get` / `yara.matches_for_evidence` | Results |
+| `pe_sieve.status` / `pe_sieve.configure` | Provider availability + EXE path/timeout |
+| `pe_sieve.scan_artifact` | Queue artifact PE-sieve workflow (records unsupported target; does not invoke the EXE) |
+| `pe_sieve.scans_for_artifact` / `pe_sieve.scan_get` | Results + generated output artifacts |
 
 ### SQLite schema version
 
-**v5** — `yara_scans`, `yara_matches`, `app_settings`; prior v4 artifacts/timeline.
+**v6** — `pe_sieve_scans`, `pe_sieve_outputs`, `artifacts.parent_artifact_id`; prior v5 YARA tables; v4 artifacts/timeline.
 
 ### Optional providers
 
@@ -427,6 +430,7 @@ Frontend invoke("smoke_e2e") / engine_call(method, params)
 providers/
   base.py          # AnalysisProvider protocol
   yara_provider.py # yara-python adapter (optional import)
+  pe_sieve.py      # user-supplied pe-sieve*.exe adapter (optional)
 ```
 
 **YARA**
@@ -439,7 +443,23 @@ providers/
 - No threat scores; no process live-memory scan unless later explicitly added with a real target
 - Security: path allow-list for rules, artifact path confinement, no shell, timeouts, cooperative cancel
 
-Extension: PE-sieve / mal_unpack should implement the same `AnalysisProvider` pattern and job registration without coupling to React.
+**PE-sieve**
+
+- Verified interface: **hasherezade/pe-sieve v0.4.1.1** (`pe_sieve_ver_short.h`, `params.h`, `main.cpp`, `pe_sieve_return_codes.h`, `ResultsDumper`, wiki JSON reports)
+- License: **BSD-2-Clause** (Copyright (c) 2017-2025, @hasherezade). Redistribution of source and binary is permitted with copyright notice. **MemScope does not bundle the EXE**; the user copies an official release binary into `{app_data}/tools/` (or `tools/pe-sieve/`).
+- Required CLI: `/pid <live process id>` — there is **no file/artifact scan mode**
+- Optional args used by MemScope when invoking: `/dir <controlled tmp>`, `/json`, `/quiet`; version probe: `/version`
+- Default output: `{/dir}/process_<pid>/scan_report.json`, `dump_report.json`, dumped modules, optional `error_report.json`
+- Exit codes (observed, not a MemScope score): `-1` error, `0` info/help, `1` not detected, `2` detected
+- MemScope artifact workflow: **unsupported target**. Dump PIDs are not live PIDs; artifacts are never executed; the UI does not offer a live `/pid` scan from the artifact panel
+- Provider `scan_live_process` exists for the real PE-sieve interface (tests use a mock runner). It is not wired as an evidence/artifact action
+- Generated dumps (when a live scan result is persisted) become artifacts with SHA-256, `parent_artifact_id`, tool metadata, and `pe_sieve_outputs` links
+- Security: EXE allow-list (known names, MZ header, tools root only; artifact store denied), argv arrays, no extra user CLI, controlled tmp `/dir`, timeout, cooperative cancel, logs sanitized
+- Job kind: `pe_sieve_artifact_scan`
+- UI states: unavailable, unsupported target, queued, running, completed/no findings, completed/indicators, failed, cancelled
+- No malware/threat score
+
+Extension: mal_unpack should implement the same `AnalysisProvider` pattern and job registration without coupling to React.
 
 ---
 
@@ -448,7 +468,7 @@ Extension: PE-sieve / mal_unpack should implement the same `AnalysisProvider` pa
 1. **License:** Apache-2.0 proposed for app code  
 2. **Engine shipping for release:** embedded Python vs first-run venv (Phase 7)  
 3. **Python engine runtime:** **3.12.x venv** (decided)  
-4. **PE-sieve / mal_unpack:** user-supplied binaries only after license review  
+4. **PE-sieve:** user-supplied official EXE (BSD-2-Clause; not bundled). mal_unpack still pending license/interface verification.  
 
 Ordinary implementation choices proceed without further permission.
 

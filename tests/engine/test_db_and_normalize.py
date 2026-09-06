@@ -14,7 +14,7 @@ from memscope_engine.volatility.normalize import normalize_pslist, normalize_win
 
 def test_schema_migrates_to_v1(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 5
+    assert db.schema_version() == 6
     db.close()
 
 

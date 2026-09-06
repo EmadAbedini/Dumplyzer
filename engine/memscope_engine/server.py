@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from memscope_engine.analysis import (
     memory_artifacts,
+    pe_sieve_workflows,
     process_analysis,
     search_iocs,
     workflows,
@@ -111,8 +112,14 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
             db_, params, cancelled, progress, paths=paths
         )
 
+    def _pe_sieve_scan(db_, params, cancelled, progress):
+        return pe_sieve_workflows.run_pe_sieve_artifact_scan_job(
+            db_, params, cancelled, progress, paths=paths
+        )
+
     jobs.register("vad_extract", _vad_extract)
     jobs.register("yara_artifact_scan", _yara_scan)
+    jobs.register("pe_sieve_artifact_scan", _pe_sieve_scan)
     jobs.start()
     _STATE["paths"] = paths
     _STATE["db"] = db
@@ -124,6 +131,7 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
         "schema_version": db.schema_version(),
         "volatility": _vol_init(),
         "yara": yara_workflows.yara_status(paths, db),
+        "pe_sieve": pe_sieve_workflows.pe_sieve_status(paths, db),
     }
 
 
@@ -155,6 +163,9 @@ def _artifact_get(artifact_id: str) -> dict[str, Any]:
     yara = yara_workflows.list_yara_scans_for_artifact(_db(), artifact_id)
     dto["yara_scans"] = yara["items"]
     dto["yara_status"] = yara_workflows.yara_status(_paths(), _db())
+    pe = pe_sieve_workflows.list_pe_sieve_scans_for_artifact(_db(), artifact_id)
+    dto["pe_sieve_scans"] = pe["items"]
+    dto["pe_sieve_status"] = pe_sieve_workflows.pe_sieve_status(_paths(), _db())
     return dto
 
 
@@ -270,6 +281,22 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "yara.matches_for_evidence": lambda p: yara_workflows.list_yara_matches_for_evidence(
         _db(), p["evidence_id"]
     ),
+    "pe_sieve.status": lambda _p: pe_sieve_workflows.pe_sieve_status(_paths(), _db()),
+    "pe_sieve.configure": lambda p: pe_sieve_workflows.configure_pe_sieve(
+        _paths(), _db(), p.get("settings") or p
+    ),
+    "pe_sieve.scan_artifact": lambda p: _jobs().submit(
+        "pe_sieve_artifact_scan",
+        evidence_id=p.get("evidence_id"),
+        process_id=p.get("process_id"),
+        pid=p.get("pid"),
+        params={"artifact_id": p["artifact_id"], "evidence_id": p.get("evidence_id")},
+        message=f"PE-sieve workflow artifact {p.get('artifact_id')}",
+    ),
+    "pe_sieve.scans_for_artifact": lambda p: pe_sieve_workflows.list_pe_sieve_scans_for_artifact(
+        _db(), p["artifact_id"]
+    ),
+    "pe_sieve.scan_get": lambda p: pe_sieve_workflows.get_pe_sieve_scan(_db(), p["scan_id"]),
     "jobs.submit": handle_job_submit,
     "jobs.get": lambda p: _jobs().get(p["job_id"]),
     "jobs.list": lambda p: {

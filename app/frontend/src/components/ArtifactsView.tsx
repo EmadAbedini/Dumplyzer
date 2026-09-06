@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
-import type { Artifact, Job, YaraScanBundle, YaraStatus } from "../lib/types";
+import type { Artifact, Job, PeSieveScanBundle, PeSieveStatus, YaraScanBundle, YaraStatus } from "../lib/types";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 
@@ -19,6 +19,8 @@ export function ArtifactsView({
   const [detail, setDetail] = useState<Artifact | null>(null);
   const [yaraStatus, setYaraStatus] = useState<YaraStatus | null>(null);
   const [yaraBundles, setYaraBundles] = useState<YaraScanBundle[]>([]);
+  const [peSieveStatus, setPeSieveStatus] = useState<PeSieveStatus | null>(null);
+  const [peSieveBundles, setPeSieveBundles] = useState<PeSieveScanBundle[]>([]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -31,6 +33,12 @@ export function ArtifactsView({
       try {
         const st = await engineCall<YaraStatus>("yara.status");
         setYaraStatus(st);
+      } catch {
+        /* optional */
+      }
+      try {
+        const st = await engineCall<PeSieveStatus>("pe_sieve.status");
+        setPeSieveStatus(st);
       } catch {
         /* optional */
       }
@@ -49,6 +57,8 @@ export function ArtifactsView({
       setDetail(a);
       setYaraStatus(a.yara_status ?? yaraStatus);
       setYaraBundles(a.yara_scans ?? []);
+      setPeSieveStatus(a.pe_sieve_status ?? peSieveStatus);
+      setPeSieveBundles(a.pe_sieve_scans ?? []);
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     }
@@ -85,6 +95,22 @@ export function ArtifactsView({
     }
   };
 
+  const refreshPeSieve = async () => {
+    if (!detail) return;
+    try {
+      const [st, res] = await Promise.all([
+        engineCall<PeSieveStatus>("pe_sieve.status"),
+        engineCall<{ items: PeSieveScanBundle[] }>("pe_sieve.scans_for_artifact", {
+          artifact_id: detail.id,
+        }),
+      ]);
+      setPeSieveStatus(st);
+      setPeSieveBundles(res.items);
+    } catch (e) {
+      onError(e instanceof EngineClientError ? e.message : String(e));
+    }
+  };
+
   if (!evidenceId) {
     return <div className="p-4 text-sm text-muted">Import evidence first.</div>;
   }
@@ -100,15 +126,18 @@ export function ArtifactsView({
           <span className="text-muted">
             Stored under controlled app data; never auto-executed
           </span>
-          {yaraStatus && (
+          {peSieveStatus && (
             <Badge
               className={
-                yaraStatus.available
+                peSieveStatus.available
                   ? "border-success text-success"
                   : "border-muted text-muted"
               }
             >
-              YARA {yaraStatus.available ? yaraStatus.yara_version : "unavailable"}
+              PE-sieve{" "}
+              {peSieveStatus.available
+                ? peSieveStatus.pe_sieve_version || "available"
+                : "unavailable"}
             </Badge>
           )}
         </div>
@@ -152,7 +181,7 @@ export function ArtifactsView({
       </div>
       <aside className="w-[26rem] shrink-0 overflow-auto border-l border-border p-3">
         {!detail ? (
-          <div className="text-muted">Select an artifact for provenance and YARA.</div>
+          <div className="text-muted">Select an artifact for provenance, YARA, and PE-sieve.</div>
         ) : (
           <div className="space-y-3">
             <div className="font-semibold">Provenance</div>
@@ -268,9 +297,168 @@ export function ArtifactsView({
                 </div>
               )}
             </div>
+
+            <div className="border-t border-border pt-3">
+              <div className="mb-2 font-semibold">PE-sieve</div>
+              {!peSieveStatus ? (
+                <div className="text-muted">Checking PE-sieve…</div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className={peSieveStateClass(peSieveStatus.ui_state)}>
+                      {peSieveStateLabel(
+                        peSieveStatus.available
+                          ? "unsupported_target"
+                          : "unavailable",
+                      )}
+                    </Badge>
+                    <span className="text-muted">
+                      {peSieveStatus.available
+                        ? `Version ${peSieveStatus.pe_sieve_version ?? "unknown"}`
+                        : "Provider unavailable"}
+                    </span>
+                  </div>
+                  {peSieveStatus.executable_path ? (
+                    <div className="break-all font-mono text-[11px] text-muted">
+                      EXE: {peSieveStatus.executable_path}
+                    </div>
+                  ) : (
+                    <div className="break-all font-mono text-[11px] text-muted">
+                      Tools dir: {peSieveStatus.tools_dir ?? "—"}
+                    </div>
+                  )}
+                  <div className="text-[11px] text-muted">
+                    Supported target types: live Windows process (/pid only). Extracted
+                    artifacts and memory-image PIDs are not valid PE-sieve targets.
+                  </div>
+                  {!peSieveStatus.available && (
+                    <div className="space-y-1 text-muted">
+                      <div>{peSieveStatus.reason}</div>
+                      <div>{peSieveStatus.suggestion}</div>
+                    </div>
+                  )}
+                  <div className="text-muted">
+                    {peSieveStatus.unsupported_target_explanation}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" disabled title="PE-sieve cannot scan extracted artifacts">
+                      Scan with PE-sieve
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void refreshPeSieve()}>
+                      Refresh results
+                    </Button>
+                  </div>
+                  <div className="text-[11px] text-muted">
+                    The scan control is disabled so a dump PID is never sent to a live
+                    process scanner. No malware score is assigned.
+                  </div>
+                  {peSieveBundles.length === 0 ? (
+                    <div className="text-muted">No PE-sieve records for this artifact.</div>
+                  ) : (
+                    peSieveBundles.map((b) => (
+                      <div
+                        key={b.scan.id}
+                        className="rounded border border-border bg-surface p-2"
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <Badge className={peSieveStateClass(b.scan.ui_state)}>
+                            {peSieveStateLabel(b.scan.ui_state)}
+                          </Badge>
+                          <span className="text-muted">{b.scan.pe_sieve_version}</span>
+                        </div>
+                        {b.scan.interpretation && (
+                          <div className="text-muted">
+                            {String(
+                              (b.scan.interpretation as { summary?: string }).summary ??
+                                (b.scan.interpretation as { notes?: string }).notes ??
+                                "",
+                            )}
+                          </div>
+                        )}
+                        {b.scan.error && (
+                          <div className="text-danger">
+                            {String(
+                              (b.scan.error as { message?: string }).message ??
+                                JSON.stringify(b.scan.error),
+                            )}
+                          </div>
+                        )}
+                        {b.outputs.length > 0 && (
+                          <div className="mt-1 border-t border-border/50 pt-1">
+                            <div className="text-muted">Generated artifacts</div>
+                            {b.outputs.map((o) => (
+                              <div key={o.id} className="font-mono text-[11px]">
+                                {o.role}: {o.filename}{" "}
+                                {o.sha256 ? o.sha256.slice(0, 12) : ""}{" "}
+                                {o.dump_mode ? `(${o.dump_mode})` : ""}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {Array.isArray(
+                          (b.scan.observed as { scan_report?: { module_scans?: unknown[] } })
+                            ?.scan_report?.module_scans,
+                        ) &&
+                          (
+                            (
+                              b.scan.observed as {
+                                scan_report?: {
+                                  module_scans?: Array<{
+                                    scan_type?: string;
+                                    module?: string;
+                                    status?: number;
+                                  }>;
+                                };
+                              }
+                            ).scan_report?.module_scans ?? []
+                          )
+                            .slice(0, 8)
+                            .map((m, idx) => (
+                              <div key={idx} className="font-mono text-[11px] text-muted">
+                                {m.scan_type} {m.module} status={String(m.status)}
+                              </div>
+                            ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </aside>
     </div>
   );
+}
+
+function peSieveStateLabel(state: string | null | undefined): string {
+  switch (state) {
+    case "unavailable":
+      return "unavailable";
+    case "unsupported_target":
+      return "unsupported target";
+    case "queued":
+      return "queued";
+    case "running":
+      return "running";
+    case "completed_no_findings":
+      return "completed / no findings";
+    case "completed_indicators":
+      return "completed / indicators";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return state || "unknown";
+  }
+}
+
+function peSieveStateClass(state: string | null | undefined): string {
+  if (state === "failed") return "border-danger text-danger";
+  if (state === "completed_indicators") return "border-warning text-warning";
+  if (state === "completed_no_findings" || state === "unsupported_target") {
+    return "border-success text-success";
+  }
+  return "";
 }

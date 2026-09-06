@@ -896,6 +896,8 @@ def get_artifact(db: Database, artifact_id: str) -> dict[str, Any]:
                 "end": row.get("end_vpn"),
             }
         )
+    if row.get("parent_artifact_id"):
+        chain.append({"step": "source_artifact", "id": row["parent_artifact_id"]})
     chain.append(
         {
             "step": "artifact",
@@ -905,6 +907,17 @@ def get_artifact(db: Database, artifact_id: str) -> dict[str, Any]:
             "method": row["extraction_method"],
         }
     )
+    meta = dto.get("metadata") or {}
+    if isinstance(meta, dict) and meta.get("pe_sieve_scan_id"):
+        chain.append(
+            {
+                "step": "pe_sieve_output",
+                "scan_id": meta.get("pe_sieve_scan_id"),
+                "role": meta.get("pe_sieve_role"),
+                "tool": "pe-sieve",
+                "tool_version": row.get("tool_version"),
+            }
+        )
     dto["provenance_chain"] = chain
     return dto
 
@@ -966,6 +979,7 @@ def _artifact_dto(row: dict[str, Any]) -> dict[str, Any]:
         "extracted_at": row.get("extracted_at"),
         "notes": row.get("notes"),
         "metadata": metadata,
+        "parent_artifact_id": row.get("parent_artifact_id"),
     }
 
 

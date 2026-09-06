@@ -129,8 +129,11 @@ export type Artifact = {
   notes: string | null;
   metadata?: Record<string, unknown>;
   provenance_chain?: Array<Record<string, unknown>>;
+  parent_artifact_id?: string | null;
   yara_scans?: YaraScanBundle[];
   yara_status?: YaraStatus;
+  pe_sieve_scans?: PeSieveScanBundle[];
+  pe_sieve_status?: PeSieveStatus;
 };
 
 export type YaraStatus = {
@@ -192,6 +195,72 @@ export type YaraScan = {
 export type YaraScanBundle = {
   scan: YaraScan;
   matches: YaraMatch[];
+};
+
+export type PeSieveStatus = {
+  available: boolean;
+  reason?: string | null;
+  suggestion?: string | null;
+  pe_sieve_version?: string | null;
+  executable_path?: string | null;
+  tools_dir?: string | null;
+  timeout_secs?: number;
+  verified_release?: string;
+  supported_target_kinds?: string[];
+  memscope_artifact_targets_supported?: boolean;
+  unsupported_target_explanation?: string | null;
+  ui_state?: string;
+  license?: {
+    name?: string;
+    redistribution?: string;
+    bundled_in_memscope?: boolean;
+  };
+};
+
+export type PeSieveScan = {
+  id: string;
+  evidence_id: string | null;
+  artifact_id: string | null;
+  process_id: string | null;
+  pid: number | null;
+  memory_region_id: string | null;
+  analysis_run_id: string | null;
+  job_id: string | null;
+  status: string;
+  ui_state: string | null;
+  target_kind: string | null;
+  live_pid: number | null;
+  pe_sieve_version: string | null;
+  executable_path: string | null;
+  output_dir: string | null;
+  exit_code: number | null;
+  pesieve_result: string | null;
+  observed?: Record<string, unknown>;
+  interpretation?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type PeSieveOutput = {
+  id: string;
+  scan_id: string;
+  artifact_id: string;
+  dump_file: string | null;
+  dump_mode: string | null;
+  module_base: string | null;
+  is_shellcode: boolean;
+  role: string;
+  sha256?: string | null;
+  filename?: string | null;
+  size_bytes?: number | null;
+  file_type?: string | null;
+  observed?: Record<string, unknown>;
+};
+
+export type PeSieveScanBundle = {
+  scan: PeSieveScan;
+  outputs: PeSieveOutput[];
 };
 
 export type TimelineEvent = {
