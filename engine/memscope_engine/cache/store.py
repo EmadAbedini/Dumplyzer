@@ -1,7 +1,7 @@
 """File-backed analysis cache indexed in SQLite.
 
 Cache key includes evidence SHA-256, Volatility version, plugin id,
-canonical parameters, and MemScope schema version.
+canonical parameters, and Dumplyzer schema version.
 """
 
 from __future__ import annotations

@@ -94,3 +94,24 @@ def ensure_within_artifacts(paths: AppPaths, candidate: Path) -> Path:
             entity="artifact",
         ) from exc
     return resolved
+
+
+def ensure_within_controlled_data(paths: AppPaths, candidate: Path) -> Path:
+    """Allow artifact store and PE extraction output under analysis/pe_extraction."""
+    resolved = candidate.resolve()
+    roots = [
+        paths.artifacts.resolve(),
+        (paths.analysis / "pe_extraction").resolve(),
+    ]
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            continue
+    raise AppError(
+        code="artifact_path_invalid",
+        message="Refusing path outside controlled artifact / PE extraction directories.",
+        details=str(resolved),
+        entity="artifact",
+    )

@@ -8,6 +8,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -16,12 +17,31 @@ from memscope_engine.storage import Database
 
 log = logging.getLogger("memscope.analysis")
 
+# Side-channel so a running Volatility worker can observe cancel without waiting
+# for the single-threaded RPC loop to acquire the GIL.
+CANCEL_MARKER_DIRNAME = "job-cancel"
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-JobHandler = Callable[[Database, dict[str, Any], Callable[[], bool], Callable[[str], None]], dict[str, Any]]
+def _evidence_filename(row: dict[str, Any]) -> str | None:
+    named = row.get("evidence_filename") or row.get("filename")
+    if isinstance(named, str) and named.strip():
+        return named.strip()
+    return None
+
+
+_JOB_SELECT = """
+SELECT jobs.*,
+  (SELECT filename FROM evidence WHERE evidence.id = jobs.evidence_id) AS evidence_filename
+FROM jobs
+"""
+
+
+ProgressFn = Callable[..., None]
+JobHandler = Callable[[Database, dict[str, Any], Callable[[], bool], ProgressFn], dict[str, Any]]
 
 
 class JobManager:
@@ -33,6 +53,10 @@ class JobManager:
         self._cancel_flags: dict[str, threading.Event] = {}
         self._worker = threading.Thread(target=self._loop, name="memscope-jobs", daemon=True)
         self._started = False
+        # Jobs UI is session/case scoped. Rows may remain in SQLite for job.get
+        # during this process, but historical jobs are never listed after restart
+        # or a new evidence import.
+        self._visible_since = _utcnow()
 
     def register(self, kind: str, handler: JobHandler) -> None:
         self._handlers[kind] = handler
@@ -41,6 +65,21 @@ class JobManager:
         if not self._started:
             self._started = True
             self._worker.start()
+
+    def reset_visible_jobs(self) -> None:
+        """Drop previous-case jobs from the active list without deleting analysis data."""
+        self._visible_since = _utcnow()
+
+    def cancel_active(self) -> None:
+        """Request cancel for queued/running jobs so a new import can take the worker."""
+        rows = self._db.fetchall(
+            "SELECT id FROM jobs WHERE status IN ('queued', 'running')"
+        )
+        for row in rows:
+            try:
+                self.cancel(str(row["id"]))
+            except AppError:
+                continue
 
     def submit(
         self,
@@ -86,12 +125,46 @@ class JobManager:
         log.info("job queued", extra={"channel": "analysis", "job_id": job_id})
         return self.get(job_id)
 
+    def _cancel_marker_dir(self) -> Path:
+        return self._db.path.parent / "tmp" / CANCEL_MARKER_DIRNAME
+
+    def _cancel_marker_path(self, job_id: str) -> Path | None:
+        if not job_id or len(job_id) > 80:
+            return None
+        if any(c not in "0123456789abcdefABCDEF-_" for c in job_id):
+            return None
+        return self._cancel_marker_dir() / job_id
+
+    def _write_cancel_marker(self, job_id: str) -> None:
+        path = self._cancel_marker_path(job_id)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("1", encoding="utf-8")
+        except OSError:
+            log.warning("could not write cancel marker", extra={"channel": "analysis", "job_id": job_id})
+
+    def _clear_cancel_marker(self, job_id: str) -> None:
+        path = self._cancel_marker_path(job_id)
+        if path is None:
+            return
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _cancel_marker_exists(self, job_id: str) -> bool:
+        path = self._cancel_marker_path(job_id)
+        return bool(path and path.is_file())
+
     def cancel(self, job_id: str) -> dict[str, Any]:
         row = self._db.fetchone("SELECT * FROM jobs WHERE id = ?", (job_id,))
         if not row:
             raise AppError(code="job_missing", message="Job not found.", entity="job")
         if row["status"] in ("completed", "failed", "cancelled"):
             return self._dto(row)
+        self._write_cancel_marker(job_id)
         self._db.execute(
             "UPDATE jobs SET cancel_requested = 1, message = ? WHERE id = ?",
             ("Cancel requested", job_id),
@@ -110,10 +183,11 @@ class JobManager:
                     """,
                     (_utcnow(), "Cancelled before start", job_id),
                 )
+                self._clear_cancel_marker(job_id)
         return self.get(job_id)
 
     def get(self, job_id: str) -> dict[str, Any]:
-        row = self._db.fetchone("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        row = self._db.fetchone(f"{_JOB_SELECT} WHERE jobs.id = ?", (job_id,))
         if not row:
             raise AppError(code="job_missing", message="Job not found.", entity="job")
         return self._dto(row)
@@ -121,44 +195,62 @@ class JobManager:
     def list_jobs(
         self, *, evidence_id: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
+        since = self._visible_since
         if evidence_id:
             rows = self._db.fetchall(
-                """
-                SELECT * FROM jobs WHERE evidence_id = ?
-                ORDER BY created_at DESC LIMIT ?
+                f"""
+                {_JOB_SELECT}
+                WHERE jobs.evidence_id = ? AND jobs.created_at >= ?
+                ORDER BY jobs.created_at DESC LIMIT ?
                 """,
-                (evidence_id, limit),
+                (evidence_id, since, limit),
             )
         else:
             rows = self._db.fetchall(
-                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                f"""
+                {_JOB_SELECT}
+                WHERE jobs.created_at >= ?
+                ORDER BY jobs.created_at DESC LIMIT ?
+                """,
+                (since, limit),
             )
         return [self._dto(r) for r in rows]
 
     def _loop(self) -> None:
         while True:
-            with self._cv:
-                while not self._queue:
-                    self._cv.wait()
-                job_id = self._queue.pop(0)
-            self._run_one(job_id)
+            try:
+                with self._cv:
+                    while not self._queue:
+                        self._cv.wait()
+                    job_id = self._queue.pop(0)
+                self._run_one(job_id)
+            except Exception:  # noqa: BLE001
+                log.exception("job worker loop error")
 
     def _run_one(self, job_id: str) -> None:
         row = self._db.fetchone("SELECT * FROM jobs WHERE id = ?", (job_id,))
         if not row:
             return
-        if row["cancel_requested"] or row["status"] == "cancelled":
+        if (
+            row["cancel_requested"]
+            or row["status"] == "cancelled"
+            or self._cancel_marker_exists(job_id)
+        ):
             self._db.execute(
-                "UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                (_utcnow(), job_id),
+                """
+                UPDATE jobs SET status = 'cancelled', cancel_requested = 1,
+                  finished_at = ?, message = ? WHERE id = ?
+                """,
+                (_utcnow(), "Cancelled before start", job_id),
             )
+            self._clear_cancel_marker(job_id)
             return
 
         kind = row["kind"]
         handler = self._handlers.get(kind)
         if not handler:
             self._fail(job_id, AppError(code="unknown_job_kind", message=f"No handler for {kind}"))
+            self._clear_cancel_marker(job_id)
             return
 
         try:
@@ -175,15 +267,53 @@ class JobManager:
         def cancelled() -> bool:
             if cancel_event.is_set():
                 return True
+            if self._cancel_marker_exists(job_id):
+                cancel_event.set()
+                self._db.execute(
+                    """
+                    UPDATE jobs SET cancel_requested = 1, message = ?
+                    WHERE id = ? AND cancel_requested = 0
+                      AND status NOT IN ('completed', 'failed', 'cancelled')
+                    """,
+                    ("Cancel requested", job_id),
+                )
+                return True
             r = self._db.fetchone(
                 "SELECT cancel_requested FROM jobs WHERE id = ?", (job_id,)
             )
             return bool(r and r["cancel_requested"])
 
-        def progress(msg: str) -> None:
+        def progress(msg: str, extra: dict[str, Any] | None = None) -> None:
+            if cancelled():
+                return
+            current = self._db.fetchone(
+                "SELECT progress_kind, result_json FROM jobs WHERE id = ?",
+                (job_id,),
+            )
+            previous: dict[str, Any] = {}
+            raw = current.get("result_json") if current else None
+            if raw:
+                try:
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                except (TypeError, json.JSONDecodeError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    previous = parsed
+            payload = dict(previous)
+            if extra:
+                payload.update(extra)
+            payload["message"] = msg
+            progress_kind = (
+                "determinate"
+                if payload.get("percent") is not None
+                else ((current.get("progress_kind") if current else None) or "indeterminate")
+            )
             self._db.execute(
-                "UPDATE jobs SET message = ? WHERE id = ?",
-                (msg, job_id),
+                """
+                UPDATE jobs SET message = ?, progress_kind = ?, result_json = ?
+                WHERE id = ?
+                """,
+                (msg, progress_kind, json.dumps(payload, default=str), job_id),
             )
 
         self._db.execute(
@@ -220,6 +350,17 @@ class JobManager:
                     (_utcnow(), "Cancelled", job_id),
                 )
             else:
+                log.error(
+                    "job failed: %s (%s)",
+                    exc.message,
+                    exc.code,
+                    extra={
+                        "channel": "analysis",
+                        "job_id": job_id,
+                        "code": exc.code,
+                        "details": exc.details,
+                    },
+                )
                 self._fail(job_id, exc)
         except Exception as exc:  # noqa: BLE001
             if cancelled():
@@ -228,6 +369,11 @@ class JobManager:
                     (_utcnow(), "Cancelled", job_id),
                 )
             else:
+                log.exception(
+                    "job crashed: %s",
+                    kind,
+                    extra={"channel": "analysis", "job_id": job_id},
+                )
                 self._fail(
                     job_id,
                     AppError(
@@ -237,6 +383,8 @@ class JobManager:
                         data={"traceback": traceback.format_exc()},
                     ),
                 )
+        finally:
+            self._clear_cancel_marker(job_id)
 
     def _fail(self, job_id: str, exc: AppError) -> None:
         self._db.execute(
@@ -275,4 +423,5 @@ class JobManager:
             "result": _json(row.get("result_json")),
             "params": _json(row.get("params_json")) or {},
             "cancel_requested": bool(row.get("cancel_requested")),
+            "evidence_filename": _evidence_filename(row),
         }

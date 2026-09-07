@@ -7,10 +7,13 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
+from memscope_engine.analysis.coverage import coverage_for_evidence
 from memscope_engine.errors import AppError
+from memscope_engine.memory_image import require_memory_image
 from memscope_engine.storage import Database
 from memscope_engine.volatility.normalize import normalize_pslist, normalize_windows_info
 from memscope_engine.volatility.session import VolatilitySession
@@ -19,23 +22,113 @@ log = logging.getLogger("memscope.analysis")
 
 CHUNK = 1024 * 1024
 
+# Child tables first so foreign keys stay satisfied. Jobs and evidence stay.
+_EVIDENCE_ANALYSIS_TABLES = (
+    "yara_matches",
+    "capa_capabilities",
+    "floss_strings",
+    "pe_sieve_outputs",
+    "mal_unpack_outputs",
+    "bulk_extractor_features",
+    "bulk_extractor_outputs",
+    "pe_extraction_items",
+    "network_artifacts",
+    "pcap_flow_results",
+    "yara_scans",
+    "capa_scans",
+    "floss_scans",
+    "pe_sieve_scans",
+    "mal_unpack_scans",
+    "bulk_extractor_scans",
+    "pe_extraction_runs",
+    "network_artifact_runs",
+    "pcap_reconstructions",
+    "plugin_results",
+    "analysis_cache",
+    "exports",
+    "timeline_events",
+    "findings",
+    "iocs",
+    "artifacts",
+    "handle_entries",
+    "memory_regions",
+    "network_connections",
+    "modules",
+    "processes",
+    "plugin_executions",
+    "analysis_runs",
+)
+
+
+def _clear_evidence_analysis(db: Database, evidence_id: str) -> None:
+    """Drop derived analysis for this evidence. Import is a new investigation."""
+    with db.transaction() as conn:
+        for table in _EVIDENCE_ANALYSIS_TABLES:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+                (table,),
+            ).fetchone()
+            if not exists:
+                continue
+            cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if not any(str(col["name"]) == "evidence_id" for col in cols):
+                continue
+            conn.execute(f"DELETE FROM {table} WHERE evidence_id = ?", (evidence_id,))
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def sha256_file(path: Path) -> str:
+def sha256_file(
+    path: Path,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    progress: Callable[..., None] | None = None,
+    size: int | None = None,
+) -> str:
+    """Stream SHA-256 in 1 MiB chunks. Never loads the whole file into memory."""
+    total = size if size is not None else path.stat().st_size
     h = hashlib.sha256()
+    done = 0
+    last_report = -1
     with path.open("rb") as f:
         while True:
+            if cancelled and cancelled():
+                raise AppError(
+                    code="job_cancelled",
+                    message="Import was cancelled.",
+                    entity="evidence",
+                )
             chunk = f.read(CHUNK)
             if not chunk:
                 break
             h.update(chunk)
+            done += len(chunk)
+            if progress and total > 0:
+                pct = min(100.0, (done / total) * 100.0)
+                bucket = int(pct)
+                if bucket != last_report and (bucket % 2 == 0 or done == total):
+                    last_report = bucket
+                    progress(
+                        f"Hashing memory image ({bucket}%)",
+                        {
+                            "phase": "hash",
+                            "percent": round(pct, 1),
+                            "bytes_done": done,
+                            "bytes_total": total,
+                        },
+                    )
     return h.hexdigest()
 
 
-def import_evidence(db: Database, path_str: str) -> dict[str, Any]:
+def import_evidence(
+    db: Database,
+    path_str: str,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    progress: Callable[..., None] | None = None,
+) -> dict[str, Any]:
     path = Path(path_str).expanduser()
     try:
         path = path.resolve()
@@ -66,19 +159,65 @@ def import_evidence(db: Database, path_str: str) -> dict[str, Any]:
             entity="evidence",
         )
 
+    if cancelled and cancelled():
+        raise AppError(code="job_cancelled", message="Import was cancelled.", entity="evidence")
+
+    if progress:
+        progress(
+            "Validating memory image",
+            {"phase": "validate", "percent": 0, "bytes_total": size},
+        )
+
+    try:
+        require_memory_image(path)
+    except AppError:
+        raise
+    except OSError as exc:
+        raise AppError(
+            code="invalid_path",
+            message="Could not read the memory image file.",
+            details=str(exc),
+            suggestion="Choose an accessible memory dump file.",
+            entity="evidence",
+        ) from exc
+
+    if cancelled and cancelled():
+        raise AppError(code="job_cancelled", message="Import was cancelled.", entity="evidence")
+
     log.info("hashing evidence", extra={"channel": "analysis"})
-    digest = sha256_file(path)
+    digest = sha256_file(path, cancelled=cancelled, progress=progress, size=size)
+
+    if cancelled and cancelled():
+        raise AppError(code="job_cancelled", message="Import was cancelled.", entity="evidence")
+
+    if progress:
+        progress(
+            "Registering evidence",
+            {"phase": "register", "percent": 100, "bytes_total": size},
+        )
 
     existing = db.fetchone("SELECT * FROM evidence WHERE sha256 = ?", (digest,))
     if existing:
-        # Update path if moved; keep same id
+        evidence_id = str(existing["id"])
+        _clear_evidence_analysis(db, evidence_id)
+        now = _utcnow()
         db.execute(
-            "UPDATE evidence SET path = ?, filename = ?, size_bytes = ? WHERE id = ?",
-            (str(path), path.name, size, existing["id"]),
+            """
+            UPDATE evidence SET
+              path = ?, filename = ?, size_bytes = ?,
+              detected_os = NULL, architecture = NULL, volatility_compatible = NULL,
+              symbol_status = 'unknown', symbol_detail = NULL,
+              import_status = 'imported', import_timestamp = ?, metadata_json = '{}'
+            WHERE id = ?
+            """,
+            (str(path), path.name, size, now, evidence_id),
         )
-        db._conn.commit()
-        row = db.fetchone("SELECT * FROM evidence WHERE id = ?", (existing["id"],))
+        row = db.fetchone("SELECT * FROM evidence WHERE id = ?", (evidence_id,))
         assert row
+        log.info(
+            "evidence reimported",
+            extra={"channel": "analysis", "evidence_id": evidence_id},
+        )
         return _evidence_dto(row)
 
     evidence_id = str(uuid4())
@@ -98,6 +237,34 @@ def import_evidence(db: Database, path_str: str) -> dict[str, Any]:
     assert row
     log.info("evidence imported", extra={"channel": "analysis", "evidence_id": evidence_id})
     return _evidence_dto(row)
+
+
+def run_evidence_import_job(
+    db: Database,
+    params: dict[str, Any],
+    cancelled: Callable[[], bool],
+    progress: Callable[..., None],
+) -> dict[str, Any]:
+    path = params.get("path")
+    if not path:
+        raise AppError(
+            code="invalid_params",
+            message="path is required to import a memory image.",
+            entity="evidence",
+        )
+    progress("Importing memory image…", {"phase": "start", "percent": 0})
+    evidence = import_evidence(db, str(path), cancelled=cancelled, progress=progress)
+    job_id = params.get("job_id")
+    if job_id and evidence.get("id"):
+        db.execute(
+            "UPDATE jobs SET evidence_id = ? WHERE id = ?",
+            (evidence["id"], job_id),
+        )
+    progress(
+        "Import complete",
+        {"phase": "done", "percent": 100, "evidence_id": evidence["id"]},
+    )
+    return {"evidence": evidence}
 
 
 def analyze_evidence_basic(db: Database, evidence_id: str) -> dict[str, Any]:
@@ -398,6 +565,7 @@ def overview(db: Database, evidence_id: str) -> dict[str, Any]:
         "finding_count": _count("findings"),
         "ioc_count": _count("iocs") if _table_exists(db, "iocs") else 0,
         "recent_runs": runs,
+        "coverage": coverage_for_evidence(db, evidence_id),
     }
 
 

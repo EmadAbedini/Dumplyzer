@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Type
 
+from memscope_engine.errors import AppError
+from memscope_engine.memory_image import app_error_for_unsatisfied
 from memscope_engine.volatility.treegrid import treegrid_to_table
 
 vollog = logging.getLogger("memscope.tool")
@@ -102,32 +104,40 @@ class VolatilitySession:
         if cancelled and cancelled():
             raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
 
+        def _progress(progress: float, description: str | None = None) -> None:
+            if cancelled and cancelled():
+                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+            cb = progress_callback or _progress_mute
+            cb(progress, description)
+
         try:
             constructed = self._plugins.construct_plugin(
                 self.context,
                 automagics,
                 plugin_cls,
                 self._base_config_path,
-                progress_callback or _progress_mute,
+                _progress,
                 open_method,
             )
+        except AppError:
+            raise
         except self._exceptions.UnsatisfiedException as exc:
             unsat = [str(x) for x in exc.unsatisfied]
-            raise AppError(
-                code="volatility_unsatisfied",
-                message=(
-                    "Volatility analysis failed because plugin requirements "
-                    "could not be satisfied (often missing or unresolved symbols)."
-                ),
-                details="; ".join(unsat) if unsat else str(exc),
-                suggestion=(
-                    "Verify the image is a supported memory dump, check OS/architecture, "
-                    "and ensure symbol tables can be resolved (online or local symbols)."
-                ),
-                entity="volatility",
-                data={"unsatisfied": unsat, "plugin": plugin_name},
+            vollog.error(
+                "plugin requirements unsatisfied plugin=%s unsatisfied=%s",
+                plugin_name,
+                unsat,
+                extra={"channel": "tool", "plugin": plugin_name, "unsatisfied": unsat},
+            )
+            raise app_error_for_unsatisfied(
+                self.image_path,
+                unsat,
+                plugin_name,
+                self.context,
             ) from exc
         except Exception as exc:  # noqa: BLE001
+            if cancelled and cancelled():
+                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
             raise AppError(
                 code="volatility_construct_failed",
                 message=f"Failed to construct Volatility plugin {plugin_cls.__name__}.",
@@ -142,7 +152,11 @@ class VolatilitySession:
 
         try:
             grid = constructed.run()
+        except AppError:
+            raise
         except Exception as exc:  # noqa: BLE001
+            if cancelled and cancelled():
+                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
             raise AppError(
                 code="volatility_run_failed",
                 message=f"Volatility plugin {plugin_cls.__name__} failed during execution.",
@@ -152,7 +166,28 @@ class VolatilitySession:
                 data={"plugin": plugin_name},
             ) from exc
 
-        table = treegrid_to_table(grid)
+        if cancelled and cancelled():
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+
+        try:
+            table = treegrid_to_table(grid, cancelled=cancelled)
+        except AppError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if cancelled and cancelled():
+                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
+            raise AppError(
+                code="volatility_run_failed",
+                message=f"Volatility plugin {plugin_cls.__name__} failed during execution.",
+                details=f"{type(exc).__name__}: {exc}",
+                suggestion="Retry analysis or try a different plugin/strategy.",
+                entity="volatility",
+                data={"plugin": plugin_name},
+            ) from exc
+
+        if cancelled and cancelled():
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+
         columns = [str(c["name"]) for c in table.get("columns") or []]
         rows = [list(r.get("cells") or []) for r in table.get("rows") or []]
         finished = datetime.now(timezone.utc).isoformat()
