@@ -36,6 +36,34 @@ def _cancelled(check: Callable[[], bool]) -> None:
         raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
 
 
+def _note_plugin_error(
+    db: Database,
+    pe: str,
+    summary: dict[str, Any],
+    plugin: str,
+    exc: AppError,
+    cancelled: Callable[[], bool] | None = None,
+) -> None:
+    is_cancel = exc.code == "job_cancelled"
+    if not is_cancel and cancelled is not None:
+        try:
+            is_cancel = bool(cancelled())
+        except Exception:
+            is_cancel = False
+    _record_plugin_done(
+        db, pe, status="cancelled" if is_cancel else "failed", error=exc.to_dict()
+    )
+    summary["plugins"].append(
+        {
+            "plugin": plugin,
+            "status": "cancelled" if is_cancel else "failed",
+            "error": exc.message,
+        }
+    )
+    if is_cancel:
+        raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
+
+
 def _record_plugin_start(
     db: Database,
     *,
@@ -82,6 +110,20 @@ def _record_plugin_done(
     )
 
 
+def _emit_progress(
+    progress: Callable[..., None],
+    msg: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    if extra is None:
+        progress(msg)
+        return
+    try:
+        progress(msg, extra)
+    except TypeError:
+        progress(msg)
+
+
 def run_basic_triage_job(
     db: Database,
     params: dict[str, Any],
@@ -118,7 +160,12 @@ def run_basic_triage_job(
     vol_version = None
     try:
         _cancelled(cancelled)
-        progress("Opening memory image (Volatility session)")
+        db.execute("DELETE FROM processes WHERE evidence_id = ?", (evidence_id,))
+        _emit_progress(
+            progress,
+            "Opening memory image (Volatility session)",
+            {"phase": "processes", "percent": 5},
+        )
         session = VolatilitySession(path)
         vol_version = session.volatility_version
 
@@ -126,11 +173,11 @@ def run_basic_triage_job(
         from volatility3.plugins.windows.pslist import PsList
 
         _cancelled(cancelled)
-        progress("Running windows.info")
+        _emit_progress(progress, "Running windows.info", {"phase": "processes", "percent": 5})
         info_exec = _record_plugin_start(
             db, run_id=run_id, evidence_id=evidence_id, plugin="windows.info", parameters={}
         )
-        info_result = session.run_plugin(Info)
+        info_result = session.run_plugin(Info, cancelled=cancelled)
         _record_plugin_done(
             db,
             info_exec,
@@ -156,11 +203,11 @@ def run_basic_triage_job(
         )
 
         _cancelled(cancelled)
-        progress("Running windows.pslist")
+        _emit_progress(progress, "Running windows.pslist", {"phase": "processes", "percent": 5})
         ps_exec = _record_plugin_start(
             db, run_id=run_id, evidence_id=evidence_id, plugin="windows.pslist", parameters={}
         )
-        ps_result = session.run_plugin(PsList)
+        ps_result = session.run_plugin(PsList, cancelled=cancelled)
         processes = normalize_pslist(
             ps_result.columns,
             ps_result.rows,
@@ -194,20 +241,25 @@ def run_basic_triage_job(
             "evidence_id": evidence_id,
         }
     except AppError as exc:
+        was_cancelled = exc.code == "job_cancelled" or cancelled()
         db.execute(
             """
             UPDATE analysis_runs SET status = ?, finished_at = ?, error_json = ?,
               volatility_version = ? WHERE id = ?
             """,
             (
-                "cancelled" if exc.code == "job_cancelled" else "failed",
+                "cancelled" if was_cancelled else "failed",
                 _utcnow(),
-                json.dumps(exc.to_dict()),
+                json.dumps(
+                    AppError(code="job_cancelled", message="Job was cancelled.", entity="job").to_dict()
+                    if was_cancelled
+                    else exc.to_dict()
+                ),
                 vol_version,
                 run_id,
             ),
         )
-        if exc.code != "job_cancelled":
+        if not was_cancelled:
             db.execute(
                 """
                 UPDATE evidence SET volatility_compatible = 0, import_status = 'analysis_failed'
@@ -215,6 +267,8 @@ def run_basic_triage_job(
                 """,
                 (evidence_id,),
             )
+        if was_cancelled and exc.code != "job_cancelled":
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
         raise
 
 
@@ -328,7 +382,7 @@ def run_process_recommended_job(
             parameters={"pid": [pid]},
         )
         try:
-            res = session.run_plugin(CmdLine, {"pid": [pid]})
+            res = session.run_plugin(CmdLine, {"pid": [pid]}, cancelled=cancelled)
             rows = normalize_cmdline(res.columns, res.rows, pid_filter=pid)
             if rows and rows[0].get("command_line") is not None:
                 db.execute(
@@ -348,8 +402,7 @@ def run_process_recommended_job(
             )
             summary["plugins"].append({"plugin": "windows.cmdline", "status": "completed", "rows": len(rows)})
         except AppError as exc:
-            _record_plugin_done(db, pe, status="failed", error=exc.to_dict())
-            summary["plugins"].append({"plugin": "windows.cmdline", "status": "failed", "error": exc.message})
+            _note_plugin_error(db, pe, summary, "windows.cmdline", exc, cancelled)
 
         # --- dlllist ---
         from volatility3.plugins.windows.dlllist import DllList
@@ -364,7 +417,7 @@ def run_process_recommended_job(
             parameters={"pid": [pid]},
         )
         try:
-            res = session.run_plugin(DllList, {"pid": [pid]})
+            res = session.run_plugin(DllList, {"pid": [pid]}, cancelled=cancelled)
             mods = normalize_dlllist(
                 res.columns,
                 res.rows,
@@ -395,8 +448,7 @@ def run_process_recommended_job(
             )
             summary["plugins"].append({"plugin": "windows.dlllist", "status": "completed", "rows": len(mods)})
         except AppError as exc:
-            _record_plugin_done(db, pe, status="failed", error=exc.to_dict())
-            summary["plugins"].append({"plugin": "windows.dlllist", "status": "failed", "error": exc.message})
+            _note_plugin_error(db, pe, summary, "windows.dlllist", exc, cancelled)
 
         # --- netscan (image-wide, filter to pid) ---
         from volatility3.plugins.windows.netscan import NetScan
@@ -411,7 +463,7 @@ def run_process_recommended_job(
             parameters={"pid_filter": pid},
         )
         try:
-            res = session.run_plugin(NetScan)
+            res = session.run_plugin(NetScan, cancelled=cancelled)
             pid_map = {pid: process_id}
             conns = normalize_netscan(
                 res.columns,
@@ -434,8 +486,7 @@ def run_process_recommended_job(
             )
             summary["plugins"].append({"plugin": "windows.netscan", "status": "completed", "rows": len(conns)})
         except AppError as exc:
-            _record_plugin_done(db, pe, status="failed", error=exc.to_dict())
-            summary["plugins"].append({"plugin": "windows.netscan", "status": "failed", "error": exc.message})
+            _note_plugin_error(db, pe, summary, "windows.netscan", exc, cancelled)
 
         # --- handles ---
         from volatility3.plugins.windows.handles import Handles
@@ -450,7 +501,7 @@ def run_process_recommended_job(
             parameters={"pid": [pid]},
         )
         try:
-            res = session.run_plugin(Handles, {"pid": [pid]})
+            res = session.run_plugin(Handles, {"pid": [pid]}, cancelled=cancelled)
             handles_rows = normalize_handles(
                 res.columns,
                 res.rows,
@@ -477,8 +528,7 @@ def run_process_recommended_job(
                 {"plugin": "windows.handles", "status": "completed", "rows": len(handles_rows)}
             )
         except AppError as exc:
-            _record_plugin_done(db, pe, status="failed", error=exc.to_dict())
-            summary["plugins"].append({"plugin": "windows.handles", "status": "failed", "error": exc.message})
+            _note_plugin_error(db, pe, summary, "windows.handles", exc, cancelled)
 
         # --- vadinfo ---
         from volatility3.plugins.windows.vadinfo import VadInfo
@@ -493,7 +543,7 @@ def run_process_recommended_job(
             parameters={"pid": [pid]},
         )
         try:
-            res = session.run_plugin(VadInfo, {"pid": [pid]})
+            res = session.run_plugin(VadInfo, {"pid": [pid]}, cancelled=cancelled)
             regions = normalize_vadinfo(
                 res.columns,
                 res.rows,
@@ -534,8 +584,7 @@ def run_process_recommended_job(
                 {"plugin": "windows.vadinfo", "status": "completed", "rows": len(regions)}
             )
         except AppError as exc:
-            _record_plugin_done(db, pe, status="failed", error=exc.to_dict())
-            summary["plugins"].append({"plugin": "windows.vadinfo", "status": "failed", "error": exc.message})
+            _note_plugin_error(db, pe, summary, "windows.vadinfo", exc, cancelled)
 
         db.execute(
             """
@@ -550,19 +599,26 @@ def run_process_recommended_job(
         summary["strategy"] = strategy
         return summary
     except AppError as exc:
+        was_cancelled = exc.code == "job_cancelled" or cancelled()
         db.execute(
             """
             UPDATE analysis_runs SET status = ?, finished_at = ?, error_json = ?,
               volatility_version = ? WHERE id = ?
             """,
             (
-                "cancelled" if exc.code == "job_cancelled" else "failed",
+                "cancelled" if was_cancelled else "failed",
                 _utcnow(),
-                json.dumps(exc.to_dict()),
+                json.dumps(
+                    AppError(code="job_cancelled", message="Job was cancelled.", entity="job").to_dict()
+                    if was_cancelled
+                    else exc.to_dict()
+                ),
                 vol_version,
                 run_id,
             ),
         )
+        if was_cancelled and exc.code != "job_cancelled":
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
         raise
 
 
@@ -654,7 +710,12 @@ def list_network(db: Database, evidence_id: str) -> dict[str, Any]:
         """,
         (evidence_id,),
     )
-    return {"evidence_id": evidence_id, "total": len(rows), "items": [_net_dto(r) for r in rows]}
+    names = _process_names_by_pid(db, evidence_id)
+    return {
+        "evidence_id": evidence_id,
+        "total": len(rows),
+        "items": [_net_dto(r, names) for r in rows],
+    }
 
 
 def list_modules(db: Database, evidence_id: str, pid: int | None = None) -> dict[str, Any]:
@@ -668,7 +729,12 @@ def list_modules(db: Database, evidence_id: str, pid: int | None = None) -> dict
             "SELECT * FROM modules WHERE evidence_id = ? ORDER BY pid, name COLLATE NOCASE LIMIT 20000",
             (evidence_id,),
         )
-    return {"evidence_id": evidence_id, "total": len(rows), "items": [_module_dto(r) for r in rows]}
+    names = _process_names_by_pid(db, evidence_id)
+    return {
+        "evidence_id": evidence_id,
+        "total": len(rows),
+        "items": [_module_dto(r, names) for r in rows],
+    }
 
 
 def list_findings(db: Database, evidence_id: str) -> dict[str, Any]:
@@ -871,12 +937,35 @@ def _process_dto(row: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-def _module_dto(row: dict[str, Any]) -> dict[str, Any]:
+def _process_names_by_pid(db: Database, evidence_id: str) -> dict[int, str]:
+    names: dict[int, str] = {}
+    for row in db.fetchall(
+        """
+        SELECT pid, name FROM processes
+        WHERE evidence_id = ? AND name IS NOT NULL AND TRIM(name) != ''
+        """,
+        (evidence_id,),
+    ):
+        names[int(row["pid"])] = str(row["name"])
+    return names
+
+
+def _process_name_for_pid(pid: Any, names: dict[int, str] | None) -> str | None:
+    if names is None or pid is None:
+        return None
+    try:
+        return names.get(int(pid))
+    except (TypeError, ValueError):
+        return None
+
+
+def _module_dto(row: dict[str, Any], names: dict[int, str] | None = None) -> dict[str, Any]:
     return {
         "id": row["id"],
         "evidence_id": row["evidence_id"],
         "process_id": row.get("process_id"),
         "pid": row["pid"],
+        "process_name": _process_name_for_pid(row.get("pid"), names),
         "name": row.get("name"),
         "path": row.get("path"),
         "base_address": row.get("base_address"),
@@ -887,12 +976,13 @@ def _module_dto(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _net_dto(row: dict[str, Any]) -> dict[str, Any]:
+def _net_dto(row: dict[str, Any], names: dict[int, str] | None = None) -> dict[str, Any]:
     return {
         "id": row["id"],
         "evidence_id": row["evidence_id"],
         "process_id": row.get("process_id"),
         "pid": row.get("pid"),
+        "process_name": _process_name_for_pid(row.get("pid"), names),
         "protocol": row.get("protocol"),
         "local_address": row.get("local_address"),
         "local_port": row.get("local_port"),

@@ -1,10 +1,12 @@
-"""Normalize Volatility plugin rows into MemScope entities."""
+"""Normalize Volatility plugin rows into Dumplyzer entities."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
+
+from memscope_engine.observed_time import is_sane_os_year, parse_observed_datetime
 
 
 def _now() -> str:
@@ -26,9 +28,12 @@ def _get(row: list[Any], cmap: dict[str, int], *names: str) -> Any:
 def _ts(v: Any) -> str | None:
     if v is None or v == "" or str(v) in ("N/A", "-", "None"):
         return None
-    if isinstance(v, datetime):
-        return v.isoformat()
-    return str(v)
+    dt = parse_observed_datetime(v)
+    if dt is None:
+        return str(v)
+    if not is_sane_os_year(dt):
+        return None
+    return dt.isoformat()
 
 
 def _int(v: Any) -> int | None:

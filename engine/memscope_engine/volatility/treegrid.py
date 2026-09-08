@@ -2,13 +2,35 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
+
+from memscope_engine.errors import AppError
 
 RESULT_MODEL_VERSION = 1
 
 
-def treegrid_to_table(grid: Any) -> dict[str, Any]:
+def _cancel_requested(cancelled: Callable[[], bool] | None, *, seen: list[int], last: list[float]) -> bool:
+    if cancelled is None:
+        return False
+    seen[0] += 1
+    now = time.monotonic()
+    if seen[0] > 1 and seen[0] % 8 != 0 and now - last[0] < 0.1:
+        return False
+    last[0] = now
+    try:
+        return bool(cancelled())
+    except Exception:
+        return False
+
+
+def treegrid_to_table(
+    grid: Any,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     """Convert a Volatility TreeGrid into a versioned tabular structure."""
     columns_meta: list[dict[str, Any]] = []
     for col in getattr(grid, "columns", []) or []:
@@ -23,8 +45,12 @@ def treegrid_to_table(grid: Any) -> dict[str, Any]:
             }
         )
     rows: list[dict[str, Any]] = []
+    seen = [0]
+    last = [0.0]
 
     def _visitor(node: Any, accumulator: Any) -> Any:
+        if _cancel_requested(cancelled, seen=seen, last=last):
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
         values = list(node.values) if getattr(node, "values", None) is not None else []
         depth = 0
         path = getattr(node, "path", None)
@@ -48,6 +74,8 @@ def treegrid_to_table(grid: Any) -> dict[str, Any]:
 
     if hasattr(grid, "populate"):
         grid.populate(_visitor, None)
+    if cancelled and cancelled():
+        raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
     nested = any(r["depth"] for r in rows)
     return {
         "model_version": RESULT_MODEL_VERSION,
