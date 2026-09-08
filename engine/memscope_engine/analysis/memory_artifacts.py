@@ -12,6 +12,12 @@ from uuid import uuid4
 
 from memscope_engine.artifacts import store as artifact_store
 from memscope_engine.errors import AppError
+from memscope_engine.observed_time import (
+    evidence_os_time_bounds,
+    is_analysis_clock_event,
+    is_plausible_module_load,
+    keep_timeline_event,
+)
 from memscope_engine.paths import AppPaths
 from memscope_engine.storage import Database
 from memscope_engine.volatility.normalize import (
@@ -255,7 +261,7 @@ def run_vad_scan_job(
         (exec_id, run_id, evidence_id, json.dumps({"pid": [int(pid)]}), _utcnow()),
     )
     try:
-        res = session.run_plugin(VadInfo, {"pid": [int(pid)]})
+        res = session.run_plugin(VadInfo, {"pid": [int(pid)]}, cancelled=cancelled)
         regions = normalize_vadinfo(
             res.columns,
             res.rows,
@@ -665,9 +671,19 @@ def build_timeline(db: Database, evidence_id: str) -> dict[str, Any]:
     if not db.fetchone("SELECT id FROM evidence WHERE id = ?", (evidence_id,)):
         raise AppError(code="evidence_missing", message="Evidence not found.", entity="evidence")
 
-    db.execute("DELETE FROM timeline_events WHERE evidence_id = ?", (evidence_id,))
+    db.execute(
+        """
+        DELETE FROM timeline_events
+        WHERE evidence_id = ?
+          AND IFNULL(source_table, '') IN (
+            'processes', 'network_connections', 'modules', 'findings', 'artifacts'
+          )
+        """,
+        (evidence_id,),
+    )
     events: list[dict[str, Any]] = []
     now = _utcnow()
+    os_bounds = evidence_os_time_bounds(db, evidence_id)
 
     for p in db.fetchall(
         "SELECT * FROM processes WHERE evidence_id = ? ORDER BY pid",
@@ -754,6 +770,8 @@ def build_timeline(db: Database, evidence_id: str) -> dict[str, Any]:
         (evidence_id,),
     ):
         t = m.get("load_time")
+        if not is_plausible_module_load(t, m.get("pid"), os_bounds):
+            continue
         events.append(
             {
                 "id": str(uuid4()),
@@ -778,12 +796,12 @@ def build_timeline(db: Database, evidence_id: str) -> dict[str, Any]:
         "SELECT * FROM findings WHERE evidence_id = ?",
         (evidence_id,),
     ):
-        # Findings are analytical inference; time is when finding was created, not OS time
+        # Findings are analytical inference; they are not OS timestamps.
         events.append(
             {
                 "id": str(uuid4()),
                 "evidence_id": evidence_id,
-                "event_time": f.get("created_at"),
+                "event_time": None,
                 "time_precision": "analysis_time",
                 "classification": "inferred",
                 "event_kind": "finding",
@@ -812,9 +830,9 @@ def build_timeline(db: Database, evidence_id: str) -> dict[str, Any]:
             {
                 "id": str(uuid4()),
                 "evidence_id": evidence_id,
-                "event_time": a.get("extracted_at"),
-                "time_precision": "exact",
-                "classification": "observed",
+                "event_time": None,
+                "time_precision": "analysis_time",
+                "classification": "inferred",
                 "event_kind": "artifact_extraction",
                 "summary": (
                     f"Artifact {a.get('filename')} SHA256={str(a.get('sha256'))[:16]}… "
@@ -847,22 +865,27 @@ def list_timeline(
     db: Database,
     evidence_id: str,
     *,
-    limit: int = 5000,
+    limit: int | None = None,
 ) -> dict[str, Any]:
-    rows = db.fetchall(
-        """
+    sql = """
         SELECT * FROM timeline_events
         WHERE evidence_id = ?
         ORDER BY
           CASE WHEN event_time IS NULL THEN 1 ELSE 0 END,
           event_time ASC,
           created_at ASC
-        LIMIT ?
-        """,
-        (evidence_id, limit),
-    )
-    items = [_timeline_dto(r) for r in rows]
-    return {"evidence_id": evidence_id, "total": len(items), "items": items}
+    """
+    rows = db.fetchall(sql, (evidence_id,))
+    bounds = evidence_os_time_bounds(db, evidence_id)
+    items = [
+        dto
+        for dto in (_timeline_dto(r) for r in rows)
+        if keep_timeline_event(dto, bounds)
+    ]
+    total = len(items)
+    if limit is not None:
+        items = items[: max(0, int(limit))]
+    return {"evidence_id": evidence_id, "total": total, "items": items}
 
 
 def list_artifacts(db: Database, evidence_id: str) -> dict[str, Any]:
@@ -908,24 +931,16 @@ def get_artifact(db: Database, artifact_id: str) -> dict[str, Any]:
         }
     )
     meta = dto.get("metadata") or {}
-    if isinstance(meta, dict) and meta.get("pe_sieve_scan_id"):
+    if isinstance(meta, dict) and meta.get("pe_extraction_run_id"):
         chain.append(
             {
-                "step": "pe_sieve_output",
-                "scan_id": meta.get("pe_sieve_scan_id"),
-                "role": meta.get("pe_sieve_role"),
-                "tool": "pe-sieve",
-                "tool_version": row.get("tool_version"),
-            }
-        )
-    if isinstance(meta, dict) and meta.get("mal_unpack_scan_id"):
-        chain.append(
-            {
-                "step": "mal_unpack_output",
-                "scan_id": meta.get("mal_unpack_scan_id"),
-                "role": meta.get("mal_unpack_role"),
-                "tool": "mal_unpack",
-                "tool_version": row.get("tool_version"),
+                "step": "pe_extraction",
+                "run_id": meta.get("pe_extraction_run_id"),
+                "kind": meta.get("kind"),
+                "pe_kind": meta.get("pe_kind"),
+                "original_path": meta.get("original_path"),
+                "memory_region": meta.get("memory_region"),
+                "label": "extracted_pe_artifact",
             }
         )
     dto["provenance_chain"] = chain
@@ -998,10 +1013,19 @@ def _timeline_dto(row: dict[str, Any]) -> dict[str, Any]:
         prov = json.loads(row.get("provenance_json") or "{}")
     except json.JSONDecodeError:
         prov = {}
+    stored_time = row.get("event_time")
+    analysis = is_analysis_clock_event(
+        {
+            "time_precision": row.get("time_precision"),
+            "event_kind": row.get("event_kind"),
+        }
+    )
     return {
         "id": row["id"],
         "evidence_id": row["evidence_id"],
-        "event_time": row.get("event_time"),
+        "event_time": None if analysis else stored_time,
+        "recorded_at": (stored_time or row.get("created_at")) if analysis else None,
+        "clock": "analysis" if analysis else "dump",
         "time_precision": row.get("time_precision"),
         "classification": row["classification"],
         "event_kind": row["event_kind"],

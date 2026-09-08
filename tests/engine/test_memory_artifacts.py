@@ -18,12 +18,13 @@ from memscope_engine.artifacts import store as artifact_store
 from memscope_engine.errors import AppError
 from memscope_engine.paths import AppPaths
 from memscope_engine.storage import Database
+from memscope_engine.storage.schema import SCHEMA_VERSION
 import pytest
 
 
 def test_schema_v4(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 9
+    assert db.schema_version() == SCHEMA_VERSION
     db.execute("SELECT COUNT(*) AS c FROM artifacts")
     db.execute("SELECT COUNT(*) AS c FROM timeline_events")
     db.close()
@@ -167,4 +168,200 @@ def test_timeline_and_artifact_provenance(tmp_path: Path) -> None:
     steps = [s["step"] for s in art["provenance_chain"]]
     assert steps == ["evidence", "process", "memory_region", "artifact"]
     assert list_artifacts(db, ev["id"])["total"] == 1
+    db.close()
+
+
+def test_list_timeline_total_ignores_limit(tmp_path: Path) -> None:
+    from memscope_engine.analysis.memory_artifacts import list_timeline
+
+    db = Database(tmp_path / "db.db")
+    img = tmp_path / "img.raw"
+    img.write_bytes(b"timeline-limit")
+    ev = import_evidence(db, str(img))
+    now = "2020-01-01T00:00:00+00:00"
+    for i in range(3):
+        db.execute(
+            """
+            INSERT INTO timeline_events (
+              id, evidence_id, event_time, time_precision, classification, event_kind,
+              summary, source_table, provenance_json, created_at
+            ) VALUES (?, ?, ?, 'observed', 'observed', 'process_create', ?, 'processes', '{}', ?)
+            """,
+            (str(uuid4()), ev["id"], now, f"event {i}", now),
+        )
+    listed = list_timeline(db, ev["id"], limit=1)
+    assert listed["total"] == 3
+    assert len(listed["items"]) == 1
+    all_rows = list_timeline(db, ev["id"])
+    assert all_rows["total"] == 3
+    assert len(all_rows["items"]) == 3
+    db.close()
+
+
+def test_rebuild_timeline_keeps_tool_events(tmp_path: Path) -> None:
+    db = Database(tmp_path / "db.db")
+    img = tmp_path / "img.raw"
+    img.write_bytes(b"timeline-keep")
+    ev = import_evidence(db, str(img))
+    now = "2020-01-01T00:00:00+00:00"
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, source_plugin, provenance_json, created_at
+        ) VALUES (?, ?, ?, 'analysis_time', 'inferred', 'yara_scan', 'kept',
+          'yara_scans', 'provider.yara', '{}', ?)
+        """,
+        (str(uuid4()), ev["id"], now, now),
+    )
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, provenance_json, created_at
+        ) VALUES (?, ?, ?, 'observed', 'observed', 'process_create', 'stale',
+          'processes', '{}', ?)
+        """,
+        (str(uuid4()), ev["id"], now, now),
+    )
+    result = build_timeline(db, ev["id"])
+    kinds = {e["event_kind"] for e in result["items"]}
+    summaries = {e["summary"] for e in result["items"]}
+    assert "yara_scan" in kinds
+    assert "kept" in summaries
+    assert "stale" not in summaries
+    yara = next(e for e in result["items"] if e["event_kind"] == "yara_scan")
+    assert yara["event_time"] is None
+    assert yara["clock"] == "analysis"
+    assert yara["recorded_at"] == now
+    db.close()
+
+
+def test_list_timeline_nulls_analysis_wall_clock(tmp_path: Path) -> None:
+    from memscope_engine.analysis.memory_artifacts import list_timeline
+
+    db = Database(tmp_path / "db.db")
+    img = tmp_path / "img.raw"
+    img.write_bytes(b"timeline-clock")
+    ev = import_evidence(db, str(img))
+    analyst_now = "2026-09-14T15:09:51+00:00"
+    dump_time = "2026-09-02T11:23:09+00:00"
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, source_plugin, provenance_json, created_at
+        ) VALUES (?, ?, ?, 'analysis_time', 'inferred', 'network_artifacts',
+          'Network artifact extraction stored 876 artifact(s).',
+          'network_artifact_runs', 'network_artifacts', '{}', ?)
+        """,
+        (str(uuid4()), ev["id"], analyst_now, analyst_now),
+    )
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, provenance_json, created_at
+        ) VALUES (?, ?, ?, 'exact', 'observed', 'pe_extraction',
+          'PE extraction: 1 extracted PE artifact(s)',
+          'pe_extraction_runs', '{}', ?)
+        """,
+        (str(uuid4()), ev["id"], analyst_now, analyst_now),
+    )
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, provenance_json, created_at
+        ) VALUES (?, ?, ?, 'observed', 'observed', 'process_create',
+          'Process app.exe PID 1', 'processes', '{}', ?)
+        """,
+        (str(uuid4()), ev["id"], dump_time, dump_time),
+    )
+    listed = list_timeline(db, ev["id"])
+    net = next(e for e in listed["items"] if e["event_kind"] == "network_artifacts")
+    assert net["event_time"] is None
+    assert net["clock"] == "analysis"
+    assert net["recorded_at"] == analyst_now
+    pe = next(e for e in listed["items"] if e["event_kind"] == "pe_extraction")
+    assert pe["event_time"] is None
+    assert pe["clock"] == "analysis"
+    proc = next(e for e in listed["items"] if e["event_kind"] == "process_create")
+    assert proc["event_time"] == dump_time
+    assert proc["clock"] == "dump"
+    assert proc["recorded_at"] is None
+    db.close()
+
+
+def test_timeline_drops_garbage_dll_load_times(tmp_path: Path) -> None:
+    from memscope_engine.analysis.memory_artifacts import list_timeline
+
+    db = Database(tmp_path / "db.db")
+    img = tmp_path / "img.raw"
+    img.write_bytes(b"timeline-loadtime")
+    ev = import_evidence(db, str(img))
+    run_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'basic_triage', 'completed', '2026-09-02T11:23:09+00:00', 4, '[]')
+        """,
+        (run_id, ev["id"]),
+    )
+    db.execute(
+        "UPDATE evidence SET metadata_json = ? WHERE id = ?",
+        (
+            '{"system_time":"2026-09-02 11:23:09+00:00","raw":{"SystemTime":"2026-09-02 11:23:09+00:00"}}',
+            ev["id"],
+        ),
+    )
+    proc_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, create_time, source_plugin
+        ) VALUES (?, ?, ?, 10716, 4, 'app.exe', '2026-09-01T04:10:34+00:00', 'windows.pslist')
+        """,
+        (proc_id, ev["id"], run_id),
+    )
+    for name, load_time in (
+        ("ntdll.dll", "2026-09-01T04:10:37+00:00"),
+        ("IMM32.DLL", "2257-05-20T03:23:55+00:00"),
+        ("RPCRT4.dll", "2002-05-20T17:37:23+00:00"),
+    ):
+        db.execute(
+            """
+            INSERT INTO modules (
+              id, evidence_id, analysis_run_id, process_id, pid, name, path,
+              base_address, size, load_count, load_time, source_plugin
+            ) VALUES (?, ?, ?, ?, 10716, ?, 'C:\\Windows\\System32\\x.dll',
+              '0x1', '100', 1, ?, 'windows.dlllist')
+            """,
+            (str(uuid4()), ev["id"], run_id, proc_id, name, load_time),
+        )
+
+    built = build_timeline(db, ev["id"])
+    module_events = [e for e in built["items"] if e["event_kind"] == "module_load"]
+    assert [e["summary"] for e in module_events] == [
+        "Module ntdll.dll loaded in PID 10716"
+    ]
+    assert all(e["event_time"].startswith("2026-") for e in module_events)
+
+    now = "2026-09-02T12:00:00+00:00"
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, pid, source_table, provenance_json, created_at
+        ) VALUES (?, ?, '2257-05-20T03:23:55+00:00', 'observed', 'observed', 'module_load',
+          'stale garbage', 10716, 'modules', '{}', ?)
+        """,
+        (str(uuid4()), ev["id"], now),
+    )
+    listed = list_timeline(db, ev["id"])
+    assert all(
+        not (e["event_kind"] == "module_load" and e["event_time"] and e["event_time"].startswith("2257"))
+        for e in listed["items"]
+    )
     db.close()
