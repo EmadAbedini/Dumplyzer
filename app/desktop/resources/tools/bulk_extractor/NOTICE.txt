@@ -1,0 +1,15 @@
+Dumplyzer redistributes bulk_extractor as a separate program.
+
+Project: https://github.com/simsong/bulk_extractor
+Release: v2.2.0
+Windows asset: bulk_extractor64.exe (official GitHub release)
+
+bulk_extractor is licensed under GPL-3.0-or-later. See LICENSE.md and
+LICENSE.GPLv3. Original NPS material described in LICENSE.md is not
+subject to U.S. copyright; later project-authored code is GPL-3.0-or-later.
+
+Dumplyzer (Apache-2.0) starts bulk_extractor with an argument array. It does
+not statically or dynamically link against bulk_extractor.
+
+Corresponding Source for this binary is bulk_extractor-2.2.0.tar.gz in this
+directory, taken from the same GitHub release.

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from memscope_engine.jobs.manager import JobManager
 from memscope_engine.storage import Database
+from memscope_engine.storage.schema import SCHEMA_VERSION
 from memscope_engine.volatility.normalize import (
     findings_from_cmdline,
     normalize_cmdline,
@@ -22,7 +23,7 @@ from uuid import uuid4
 
 def test_schema_v2(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 9
+    assert db.schema_version() == SCHEMA_VERSION
     # tables exist
     db.execute("SELECT COUNT(*) AS c FROM modules")
     db.execute("SELECT COUNT(*) AS c FROM network_connections")

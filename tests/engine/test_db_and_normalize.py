@@ -9,12 +9,13 @@ from pathlib import Path
 from memscope_engine.analysis.workflows import import_evidence, list_processes, overview
 from memscope_engine.paths import AppPaths
 from memscope_engine.storage import Database
+from memscope_engine.storage.schema import SCHEMA_VERSION
 from memscope_engine.volatility.normalize import normalize_pslist, normalize_windows_info
 
 
 def test_schema_migrates_to_v1(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 9
+    assert db.schema_version() == SCHEMA_VERSION
     db.close()
 
 

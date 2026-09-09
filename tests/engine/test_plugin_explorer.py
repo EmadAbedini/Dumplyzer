@@ -65,7 +65,7 @@ def _seed_evidence(tmp_path: Path) -> tuple[AppPaths, Database, dict]:
 
 def test_schema_v8(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
-    assert db.schema_version() == 9
+    assert db.schema_version() == SCHEMA_VERSION
     db.execute("SELECT cache_hit, cache_key, result_path, plugin_id FROM plugin_executions LIMIT 1")
     db.execute("SELECT COUNT(*) AS c FROM analysis_cache")
     db.execute("SELECT COUNT(*) AS c FROM plugin_results")
@@ -273,6 +273,38 @@ def test_treegrid_normalization() -> None:
     assert empty["rows"] == []
 
 
+def test_treegrid_stops_when_cancelled() -> None:
+    visited = []
+
+    class _TrackingGrid(_Grid):
+        def populate(self, fn, acc, fail_on_errors=True):
+            for node in self._nodes:
+                visited.append(node.values[0])
+                acc = fn(node, acc)
+            return None
+
+    nodes = [_Node([i], ["r"]) for i in range(40)]
+    with pytest.raises(AppError) as ei:
+        treegrid_to_table(_TrackingGrid([_Col("A", int)], nodes), cancelled=lambda: True)
+    assert ei.value.code == "job_cancelled"
+    assert visited == [0]
+
+
+def test_treegrid_cancel_after_partial_populate() -> None:
+    class _SlowCancel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self) -> bool:
+            self.calls += 1
+            return self.calls >= 2
+
+    nodes = [_Node([i], ["r"]) for i in range(40)]
+    with pytest.raises(AppError) as ei:
+        treegrid_to_table(_Grid([_Col("A", int)], nodes), cancelled=_SlowCancel())
+    assert ei.value.code == "job_cancelled"
+
+
 def test_treegrid_structured_and_bytes() -> None:
     grid = _Grid(
         [_Col("Data", bytes), _Col("Meta", dict)],
@@ -331,6 +363,7 @@ def test_dummy_image_structured_unsatisfied(tmp_path: Path) -> None:
     assert got["status"] == "failed"
     assert got["error"]
     assert got["error"].get("code") in {
+        "evidence_not_memory_image",
         "volatility_unsatisfied",
         "volatility_construct_failed",
         "plugin_execution_failed",
@@ -545,7 +578,7 @@ def test_ipc_round_trip(tmp_path: Path, monkeypatch) -> None:
     from memscope_engine.server import HANDLERS, handle_app_init
 
     init = handle_app_init({"data_dir": str(tmp_path / "ipcdata")})
-    assert init["schema_version"] == 9
+    assert init["schema_version"] == SCHEMA_VERSION
     listed = HANDLERS["plugins.list"]({})
     assert listed["plugin_count"] >= 50
     assert listed["volatility_version"]

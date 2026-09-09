@@ -1,3 +1,11 @@
+# Official bulk_extractor Windows EXE + corresponding source (fetched by
+# scripts/windows/prepare-bulk-extractor.ps1). License texts are committed.
+app/desktop/resources/tools/bulk_extractor/*.exe
+app/desktop/resources/tools/bulk_extractor/*.tar.gz
+app/desktop/resources/tools/bulk_extractor/*.tar.gz.sha256
+app/desktop/resources/tools/capa/*.exe
+app/desktop/resources/tools/floss/*.exe
+
 # Dependencies
 node_modules/
 app/frontend/dist/

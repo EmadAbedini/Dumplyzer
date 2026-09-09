@@ -7,7 +7,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class AnalysisProvider(Protocol):
-    """Extensible adapter surface (YARA, PE-sieve, mal_unpack)."""
+    """Extensible adapter surface (YARA, PE Extraction, CAPA, FLOSS, bulk_extractor)."""
 
     name: str
 
