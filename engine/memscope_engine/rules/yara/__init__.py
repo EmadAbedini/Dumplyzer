@@ -1,0 +1,1 @@
+"""YARA rule package layout."""
