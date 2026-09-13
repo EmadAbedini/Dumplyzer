@@ -7,6 +7,7 @@ from memscope_engine.export.constants import (
     REPORT_SECTIONS,
 )
 from memscope_engine.export.workflows import (
+    delete_exports,
     generate_export,
     get_export,
     list_exports,
@@ -18,6 +19,7 @@ __all__ = [
     "REPORT_FORMAT",
     "REPORT_SCHEMA_VERSION",
     "REPORT_SECTIONS",
+    "delete_exports",
     "generate_export",
     "get_export",
     "list_exports",

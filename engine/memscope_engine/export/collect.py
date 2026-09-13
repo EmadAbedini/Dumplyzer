@@ -1,4 +1,4 @@
-"""Assemble a versioned investigation document from normalized MemScope data."""
+"""Assemble a versioned investigation document from normalized Dumplyzer data."""
 
 from __future__ import annotations
 
@@ -9,9 +9,13 @@ from typing import Any
 
 from memscope_engine import __version__ as MEMSCOPE_VERSION
 from memscope_engine.analysis import (
-    mal_unpack_workflows,
+    bulk_extractor_workflows,
+    capa_workflows,
+    floss_workflows,
     memory_artifacts,
-    pe_sieve_workflows,
+    network_artifacts,
+    pcap_reconstruction,
+    pe_extraction_workflows,
     process_analysis,
     search_iocs,
     workflows,
@@ -27,6 +31,7 @@ from memscope_engine.export.constants import (
     REPORT_SCHEMA_VERSION,
     REPORT_SECTIONS,
 )
+from memscope_engine.export.shape import coerce_sections, shape_investigation
 from memscope_engine.storage import Database
 from memscope_engine.storage.schema import SCHEMA_VERSION
 
@@ -59,7 +64,7 @@ def _count(db: Database, table: str, evidence_id: str) -> int:
 def _limit_for(fmt: str) -> int:
     if fmt == "html":
         return HTML_MAX_ROWS
-    if fmt == "csv":
+    if fmt in {"csv", "xlsx"}:
         return CSV_MAX_ROWS
     return JSON_MAX_ROWS
 
@@ -87,12 +92,12 @@ def _parse_json(raw: Any, default: Any) -> Any:
 
 
 def normalize_sections(scope: str, sections: list[str] | None) -> list[str]:
-    if scope == "complete" or not sections:
+    requested = coerce_sections(sections)
+    if scope == "complete" or not requested:
         return list(REPORT_SECTIONS)
     out: list[str] = []
     unknown: list[str] = []
-    for s in sections:
-        name = str(s).strip()
+    for name in requested:
         if name not in REPORT_SECTIONS:
             unknown.append(name)
             continue
@@ -281,30 +286,92 @@ def _collect_malware(db: Database, evidence_id: str, limit: int) -> dict[str, An
         yara_scans = [yara_workflows._scan_dto(r) for r in scan_rows]
 
     pe_items: list[dict[str, Any]] = []
-    if _table_exists(db, "pe_sieve_scans"):
+    if _table_exists(db, "pe_extraction_runs"):
         rows = db.fetchall(
-            "SELECT * FROM pe_sieve_scans WHERE evidence_id = ? ORDER BY started_at DESC LIMIT ?",
+            "SELECT * FROM pe_extraction_runs WHERE evidence_id = ? ORDER BY started_at DESC LIMIT ?",
             (evidence_id, min(limit, 500)),
         )
         for r in rows:
             pe_items.append(
                 {
-                    "scan": pe_sieve_workflows._scan_dto(r),
-                    "observation_kind": "tool_observed_and_memscope_interpretation",
+                    "run": pe_extraction_workflows._run_dto(r),
+                    "observation_kind": "extracted_pe_artifact",
                 }
             )
 
-    mu_items: list[dict[str, Any]] = []
-    if _table_exists(db, "mal_unpack_scans"):
+    capa_items: list[dict[str, Any]] = []
+    if _table_exists(db, "capa_scans"):
         rows = db.fetchall(
-            "SELECT * FROM mal_unpack_scans WHERE evidence_id = ? ORDER BY started_at DESC LIMIT ?",
+            "SELECT * FROM capa_scans WHERE evidence_id = ? ORDER BY started_at DESC LIMIT ?",
             (evidence_id, min(limit, 500)),
         )
         for r in rows:
-            mu_items.append(
+            capa_items.append(
                 {
-                    "scan": mal_unpack_workflows._scan_dto(r),
-                    "observation_kind": "tool_observed_and_memscope_interpretation",
+                    "scan": capa_workflows._scan_dto(r),
+                    "observation_kind": "capability",
+                }
+            )
+
+    floss_items: list[dict[str, Any]] = []
+    if _table_exists(db, "floss_scans"):
+        rows = db.fetchall(
+            "SELECT * FROM floss_scans WHERE evidence_id = ? ORDER BY started_at DESC LIMIT ?",
+            (evidence_id, min(limit, 500)),
+        )
+        for r in rows:
+            floss_items.append(
+                {
+                    "scan": floss_workflows._scan_dto(r),
+                    "observation_kind": "extracted_string",
+                }
+            )
+
+    be_items: list[dict[str, Any]] = []
+    if _table_exists(db, "bulk_extractor_scans"):
+        rows = db.fetchall(
+            "SELECT * FROM bulk_extractor_scans WHERE evidence_id = ? ORDER BY started_at DESC LIMIT ?",
+            (evidence_id, min(limit, 500)),
+        )
+        for r in rows:
+            scan = bulk_extractor_workflows._scan_dto(r)
+            samples: dict[str, list[dict[str, Any]]] = {}
+            if _table_exists(db, "bulk_extractor_features"):
+                feat_rows = db.fetchall(
+                    """
+                    SELECT category, scanner, value, offset, occurrence_count, extra_json
+                    FROM bulk_extractor_features
+                    WHERE scan_id = ?
+                    ORDER BY occurrence_count DESC, value
+                    LIMIT 400
+                    """,
+                    (r["id"],),
+                )
+                for feat in feat_rows:
+                    cid = str(feat.get("category") or "other")
+                    bucket = samples.setdefault(cid, [])
+                    if len(bucket) >= 25:
+                        continue
+                    extra = {}
+                    try:
+                        extra = json.loads(feat.get("extra_json") or "{}")
+                    except json.JSONDecodeError:
+                        extra = {}
+                    bucket.append(
+                        {
+                            "scanner": feat.get("scanner"),
+                            "value": feat.get("value"),
+                            "offset": feat.get("offset"),
+                            "count": feat.get("occurrence_count") or 1,
+                            "extra": extra,
+                        }
+                    )
+            be_items.append(
+                {
+                    "scan": scan,
+                    "observation_kind": "extracted_artifact",
+                    "categories": scan.get("categories") or [],
+                    "samples": samples,
                 }
             )
 
@@ -316,19 +383,39 @@ def _collect_malware(db: Database, evidence_id: str, limit: int) -> dict[str, An
             "truncated": False,
             "items": yara_scans,
         },
-        "pe_sieve": {
+        "pe_extraction": {
             "total": len(pe_items),
             "shown": len(pe_items),
             "truncated": False,
             "items": pe_items,
-            "note": "observed is tool output; interpretation is MemScope commentary, not a score.",
+            "note": (
+                "Extracted PE artifacts reconstructed from the memory dump. "
+                "Not a malware verdict."
+            ),
         },
-        "mal_unpack": {
-            "total": len(mu_items),
-            "shown": len(mu_items),
+        "capa": {
+            "total": len(capa_items),
+            "shown": len(capa_items),
             "truncated": False,
-            "items": mu_items,
-            "note": "observed is tool output; interpretation is MemScope commentary, not a score.",
+            "items": capa_items,
+            "note": "CAPA capabilities are static analysis results, not confirmed malware.",
+        },
+        "floss": {
+            "total": len(floss_items),
+            "shown": len(floss_items),
+            "truncated": False,
+            "items": floss_items,
+            "note": "FLOSS strings are extracted/deobfuscated strings, not malicious findings.",
+        },
+        "bulk_extractor": {
+            "total": len(be_items),
+            "shown": len(be_items),
+            "truncated": False,
+            "items": be_items,
+            "note": (
+                "Source: bulk_extractor. Type: Extracted Artifact / IOC Candidate. "
+                "Raw feature files are preserved. Strings are not confirmed malicious indicators."
+            ),
         },
     }
 
@@ -354,6 +441,19 @@ def collect_investigation(
         if progress:
             progress(msg)
 
+    names: dict[int, str] = {}
+    for row in db.fetchall(
+        """
+        SELECT pid, name FROM processes
+        WHERE evidence_id = ? AND name IS NOT NULL AND TRIM(name) != ''
+        """,
+        (evidence_id,),
+    ):
+        try:
+            names[int(row["pid"])] = str(row["name"])
+        except (TypeError, ValueError):
+            continue
+
     generated_at = _utcnow()
     doc: dict[str, Any] = {
         "format": REPORT_FORMAT,
@@ -372,7 +472,7 @@ def collect_investigation(
             ],
             "note": (
                 "Inferred timeline events are labeled classification=inferred. "
-                "They are MemScope reconstructions and are not presented as directly observed evidence."
+                "They are Dumplyzer reconstructions and are not presented as directly observed evidence."
             ),
         },
     }
@@ -444,6 +544,61 @@ def collect_investigation(
             ]
             items.append(row)
         doc["network"] = _cap(items, listed["total"], limit)
+        if _table_exists(db, "network_artifacts"):
+            harvested = network_artifacts.list_network_artifacts(db, evidence_id, limit=limit)
+            artifact_items = []
+            for a in harvested.get("items") or []:
+                artifact_items.append(
+                    {
+                        "artifact_type": a.get("artifact_type"),
+                        "value": a.get("value"),
+                        "pid": a.get("pid"),
+                        "process_name": a.get("process_name"),
+                        "protocol": a.get("protocol"),
+                        "local_address": a.get("local_address"),
+                        "local_port": a.get("local_port"),
+                        "remote_address": a.get("remote_address"),
+                        "remote_port": a.get("remote_port"),
+                        "source": a.get("source"),
+                        "extraction_method": a.get("extraction_method"),
+                        "source_plugin": a.get("source_plugin"),
+                        "source_address": a.get("source_address") or a.get("offset_hex"),
+                        "context": a.get("context"),
+                    }
+                )
+            artifacts_block = _cap(artifact_items, harvested.get("total") or 0, limit)
+            artifacts_block["type_counts"] = harvested.get("type_counts") or {}
+            doc["network"]["artifacts"] = artifacts_block
+            doc["network_artifacts"] = artifacts_block
+        if _table_exists(db, "pcap_reconstructions"):
+            pcap_list = pcap_reconstruction.list_pcap_reconstructions(db, evidence_id)
+            latest = pcap_list.get("latest")
+            recon = (latest or {}).get("reconstruction") if latest else None
+            if recon:
+                doc["network"]["pcap"] = {
+                    "reconstruction_status": recon.get("reconstruction_status"),
+                    "display_status": recon.get("display_status"),
+                    "packet_count": recon.get("packet_count") or 0,
+                    "truncated_count": recon.get("truncated_count") or 0,
+                    "output_path": recon.get("output_path"),
+                    "files": [
+                        {k: f.get(k) for k in ("name", "kind", "packet_count", "size_bytes")}
+                        for f in (recon.get("files") or [])
+                        if isinstance(f, dict)
+                    ],
+                    "limitations": recon.get("limitations") or [],
+                    "pcap_embedded": False,
+                    "flows_with_packets": sum(
+                        1
+                        for flow in (latest.get("flows") or [])
+                        if int((flow or {}).get("packet_count") or 0) > 0
+                    ),
+                    "metadata_only_flows": sum(
+                        1
+                        for flow in (latest.get("flows") or [])
+                        if (flow or {}).get("status") == "metadata_only"
+                    ),
+                }
 
     if "modules" in sections:
         _prog("Collecting modules")
@@ -532,8 +687,18 @@ def collect_investigation(
         _prog("Building executive summary")
         proc_total = processes_payload["total"] if processes_payload else _count(db, "processes", evidence_id)
         yara_n = _count(db, "yara_matches", evidence_id) if _table_exists(db, "yara_matches") else 0
-        pe_n = _count(db, "pe_sieve_scans", evidence_id) if _table_exists(db, "pe_sieve_scans") else 0
-        mu_n = _count(db, "mal_unpack_scans", evidence_id) if _table_exists(db, "mal_unpack_scans") else 0
+        pe_n = (
+            _count(db, "pe_extraction_runs", evidence_id)
+            if _table_exists(db, "pe_extraction_runs")
+            else 0
+        )
+        capa_n = _count(db, "capa_scans", evidence_id) if _table_exists(db, "capa_scans") else 0
+        floss_n = _count(db, "floss_scans", evidence_id) if _table_exists(db, "floss_scans") else 0
+        be_n = (
+            _count(db, "bulk_extractor_scans", evidence_id)
+            if _table_exists(db, "bulk_extractor_scans")
+            else 0
+        )
         adv_n = 0
         if _table_exists(db, "plugin_executions"):
             adv = db.fetchone(
@@ -546,18 +711,37 @@ def collect_investigation(
             )
             adv_n = int(adv["c"]) if adv else 0
         finding_n = _count(db, "findings", evidence_id)
+        pcap_status = None
+        pcap_path = None
+        if _table_exists(db, "pcap_reconstructions"):
+            latest = db.fetchone(
+                """
+                SELECT reconstruction_status, output_path, packet_count
+                FROM pcap_reconstructions
+                WHERE evidence_id = ? AND status = 'completed'
+                ORDER BY started_at DESC LIMIT 1
+                """,
+                (evidence_id,),
+            )
+            if latest:
+                pcap_status = latest.get("reconstruction_status")
+                pcap_path = latest.get("output_path")
         doc["summary"] = {
             "text": (
                 f"Investigation of {evidence.get('filename') or 'unnamed evidence'} "
                 f"(SHA-256 {evidence.get('sha256')}). "
                 f"{proc_total} process(es), {finding_n} finding(s), "
                 f"{_count(db, 'network_connections', evidence_id)} network connection(s), "
+                f"{_count(db, 'network_artifacts', evidence_id) if _table_exists(db, 'network_artifacts') else 0} network artifact(s), "
                 f"{_count(db, 'artifacts', evidence_id)} artifact(s), "
                 f"{_count(db, 'iocs', evidence_id) if _table_exists(db, 'iocs') else 0} IOC(s)."
             ),
             "process_count": proc_total,
             "finding_count": finding_n,
             "network_count": _count(db, "network_connections", evidence_id),
+            "network_artifact_count": _count(db, "network_artifacts", evidence_id)
+            if _table_exists(db, "network_artifacts")
+            else 0,
             "module_count": _count(db, "modules", evidence_id),
             "memory_region_count": _count(db, "memory_regions", evidence_id)
             if _table_exists(db, "memory_regions")
@@ -570,9 +754,14 @@ def collect_investigation(
             else 0,
             "ioc_count": _count(db, "iocs", evidence_id) if _table_exists(db, "iocs") else 0,
             "yara_match_count": yara_n,
-            "pe_sieve_scan_count": pe_n,
-            "mal_unpack_scan_count": mu_n,
+            "pe_extraction_run_count": pe_n,
+            "capa_scan_count": capa_n,
+            "floss_scan_count": floss_n,
+            "bulk_extractor_scan_count": be_n,
             "advanced_execution_count": adv_n,
+            "pcap_reconstruction_status": pcap_status,
+            "pcap_output_path": pcap_path,
+            "pcap_embedded": False,
             "no_risk_score": True,
         }
 
@@ -597,4 +786,4 @@ def collect_investigation(
             if isinstance(sub, dict) and sub.get("truncated"):
                 any_trunc = True
     doc["truncated"] = any_trunc
-    return doc
+    return shape_investigation(doc, names=names)

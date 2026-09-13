@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import zipfile
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,17 +21,19 @@ from memscope_engine.export.constants import (
     SCOPES,
 )
 from memscope_engine.export.csv_export import (
+    CSV_COLUMNS,
     dataset_rows,
     datasets_for_sections,
-    write_csv_file,
 )
-from memscope_engine.export.html_report import write_html_file
+from memscope_engine.export.xlsx_export import write_xlsx_workbook
 from memscope_engine.export.json_export import write_json_exports, write_json_file
+from memscope_engine.export.shape import file_meta
 from memscope_engine.export.safe_paths import (
     allocate_export_dir,
+    ensure_within_exports,
+    exports_root,
     parse_optional_basename,
     reject_user_destination,
-    sanitize_filename,
 )
 from memscope_engine.paths import AppPaths
 from memscope_engine.storage import Database
@@ -39,6 +43,16 @@ log = logging.getLogger("memscope.analysis")
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _write_html_report(path: Path, doc: dict[str, Any]) -> int:
+    """Reload the HTML renderer each export so template edits apply without restarting the engine."""
+    import importlib
+
+    from memscope_engine.export import html_report as html_report_mod
+
+    importlib.reload(html_report_mod)
+    return html_report_mod.write_html_file(path, doc)
 
 
 def available_options() -> dict[str, Any]:
@@ -90,15 +104,112 @@ def list_exports(db: Database, evidence_id: str, *, limit: int = 50) -> dict[str
     return {"evidence_id": evidence_id, "total": len(rows), "items": [_dto(r) for r in rows]}
 
 
+_ACTIVE_EXPORT = frozenset({"queued", "running"})
+_DELETE_LIMIT = 100
+
+
+def _remove_export_dir(paths: AppPaths, row: dict[str, Any]) -> str | None:
+    raw = row.get("output_dir") or ""
+    if not raw and row.get("primary_path"):
+        try:
+            raw = str(Path(str(row["primary_path"])).parent)
+        except (OSError, TypeError, ValueError):
+            raw = ""
+    if not raw:
+        return None
+    try:
+        dest = Path(str(raw))
+        resolved = ensure_within_exports(paths, dest)
+        root = exports_root(paths)
+        if resolved == root:
+            return "exports_root"
+        if resolved.is_dir():
+            shutil.rmtree(resolved)
+        elif resolved.is_file():
+            resolved.unlink()
+    except FileNotFoundError:
+        return None
+    except AppError:
+        return "path_rejected"
+    except OSError:
+        return "io_error"
+    return None
+
+
+def delete_exports(
+    db: Database,
+    paths: AppPaths,
+    *,
+    evidence_id: str,
+    export_ids: list[str] | None,
+) -> dict[str, Any]:
+    evidence_workflows.get_evidence(db, evidence_id)
+    ids: list[str] = []
+    seen: set[str] = set()
+    for raw in export_ids or []:
+        item = str(raw or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ids.append(item)
+        if len(ids) >= _DELETE_LIMIT:
+            break
+    if not ids:
+        raise AppError(
+            code="export_delete_empty",
+            message="Select at least one export to delete.",
+            entity="export",
+        )
+
+    deleted: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for export_id in ids:
+        row = db.fetchone(
+            "SELECT * FROM exports WHERE id = ? AND evidence_id = ?",
+            (export_id, evidence_id),
+        )
+        if not row:
+            skipped.append({"id": export_id, "reason": "missing"})
+            continue
+        if str(row.get("status") or "") in _ACTIVE_EXPORT:
+            skipped.append({"id": export_id, "reason": "in_progress"})
+            continue
+        file_reason = _remove_export_dir(paths, row)
+        db.execute("DELETE FROM exports WHERE id = ?", (export_id,))
+        deleted.append(export_id)
+        if file_reason:
+            log.warning(
+                "export record deleted without removing files",
+                extra={
+                    "channel": "analysis",
+                    "export_id": export_id,
+                    "reason": file_reason,
+                },
+            )
+
+    log.info(
+        "exports deleted",
+        extra={"channel": "analysis", "deleted": len(deleted), "skipped": len(skipped)},
+    )
+    return {
+        "evidence_id": evidence_id,
+        "deleted": deleted,
+        "skipped": skipped,
+        "deleted_count": len(deleted),
+    }
+
+
 def _validate_format_scope(fmt: str, scope: str) -> tuple[str, str]:
     fmt_n = str(fmt or "").strip().lower()
+    if fmt_n in {"excel", "csv"}:
+        fmt_n = "xlsx"
     scope_n = str(scope or "complete").strip().lower()
     if fmt_n not in FORMATS:
         raise AppError(
             code="export_format_unsupported",
             message="Unsupported export format.",
             details=fmt_n,
-            suggestion="Use json, csv, or html.",
+            suggestion="Use json, xlsx, or html.",
             entity="export",
         )
     if scope_n not in SCOPES:
@@ -130,12 +241,12 @@ def generate_export(
     hint = parse_optional_basename(filename_hint)
     section_list = normalize_sections(scope_n, sections)
 
-    if fmt_n == "csv":
+    if fmt_n == "xlsx":
         ds = datasets_for_sections(section_list, scope=scope_n)
         if not ds:
             raise AppError(
-                code="export_csv_empty",
-                message="CSV export requires at least one tabular section.",
+                code="export_xlsx_empty",
+                message="Excel export requires at least one tabular section.",
                 suggestion="Choose processes, network, modules, memory, findings, IOCs, timeline, or artifacts.",
                 entity="export",
             )
@@ -197,16 +308,17 @@ def generate_export(
             primary = out_dir / files[0]["name"]
         elif fmt_n == "html":
             primary = out_dir / "report.html"
-            size = write_html_file(primary, doc)
+            size = _write_html_report(primary, doc)
             files = [{"name": primary.name, "kind": "html_report", "size_bytes": size}]
-        elif fmt_n == "csv":
+        elif fmt_n == "xlsx":
             datasets = datasets_for_sections(section_list, scope=scope_n)
-            for ds in datasets:
-                path = out_dir / f"{sanitize_filename(ds)}.csv"
-                size = write_csv_file(path, ds, dataset_rows(doc, ds))
-                files.append({"name": path.name, "kind": ds, "size_bytes": size})
-                if primary is None:
-                    primary = path
+            meta = file_meta(doc)
+            sheets = [
+                (ds, CSV_COLUMNS[ds], dataset_rows(doc, ds)) for ds in datasets
+            ]
+            primary = out_dir / "investigation.xlsx"
+            size = write_xlsx_workbook(primary, sheets, meta=meta)
+            files.append({"name": primary.name, "kind": "xlsx_workbook", "size_bytes": size})
 
         manifest = {
             "format": fmt_n,
@@ -222,6 +334,17 @@ def generate_export(
         man_path = out_dir / "manifest.json"
         write_json_file(man_path, manifest)
         files.append({"name": man_path.name, "kind": "manifest", "size_bytes": man_path.stat().st_size})
+
+        if fmt_n == "json":
+            zip_path = out_dir / f"investigation-{fmt_n}.zip"
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for info in files:
+                    src = out_dir / str(info["name"])
+                    if src.is_file():
+                        zf.write(src, arcname=src.name)
+            zip_size = zip_path.stat().st_size
+            files.append({"name": zip_path.name, "kind": "zip", "size_bytes": zip_size})
+            primary = zip_path
 
         total_size = sum(int(f.get("size_bytes") or 0) for f in files)
         finished = _utcnow()

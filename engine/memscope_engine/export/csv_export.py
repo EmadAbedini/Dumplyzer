@@ -11,24 +11,26 @@ from memscope_engine.export.constants import CSV_DATASETS, SECTION_TO_CSV
 
 CSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "processes": (
-        "id",
         "pid",
         "ppid",
         "name",
         "image_path",
         "command_line",
         "username",
+        "create_time",
+        "exit_time",
         "parent_pid",
         "parent_name",
         "child_pids",
+        "threads",
+        "handles",
+        "session_id",
+        "wow64",
         "source_plugin",
-        "analysis_run_id",
-        "evidence_id",
     ),
     "network": (
-        "id",
         "pid",
-        "process_id",
+        "process_name",
         "protocol",
         "local_address",
         "local_port",
@@ -37,23 +39,34 @@ CSV_COLUMNS: dict[str, tuple[str, ...]] = {
         "state",
         "owner",
         "source_plugin",
-        "evidence_id",
+    ),
+    "network_artifacts": (
+        "artifact_type",
+        "value",
+        "pid",
+        "process_name",
+        "protocol",
+        "local_address",
+        "local_port",
+        "remote_address",
+        "remote_port",
+        "source",
+        "extraction_method",
+        "source_plugin",
+        "source_address",
+        "context",
     ),
     "modules": (
-        "id",
         "pid",
-        "process_id",
+        "process_name",
         "name",
         "path",
         "base_address",
         "size",
-        "load_count",
         "load_time",
         "source_plugin",
-        "evidence_id",
     ),
     "vad": (
-        "id",
         "pid",
         "process_name",
         "start_vpn",
@@ -62,68 +75,54 @@ CSV_COLUMNS: dict[str, tuple[str, ...]] = {
         "protection",
         "tag",
         "file_path",
-        "indicator_codes",
+        "private_memory",
+        "indicators",
         "source_plugin",
-        "analysis_run_id",
-        "evidence_id",
     ),
     "findings": (
-        "id",
         "title",
         "severity",
         "explanation",
         "plugin",
         "pid",
-        "process_id",
+        "process_name",
         "field_name",
         "field_value",
         "confidence",
         "created_at",
-        "evidence_id",
     ),
     "iocs": (
-        "id",
         "ioc_type",
         "value",
         "pid",
-        "process_id",
-        "context",
+        "process_name",
         "source",
-        "created_at",
-        "evidence_id",
     ),
     "timeline": (
-        "id",
         "event_time",
+        "recorded_at",
+        "clock",
         "time_precision",
         "classification",
         "event_kind",
         "summary",
         "pid",
-        "process_id",
-        "related_entity_type",
-        "related_entity_id",
+        "process_name",
         "source_plugin",
-        "source_table",
-        "evidence_id",
     ),
     "artifacts": (
-        "id",
         "filename",
         "sha256",
         "size_bytes",
         "file_type",
         "extraction_method",
         "pid",
-        "process_id",
-        "memory_region_id",
-        "parent_artifact_id",
+        "process_name",
         "source_plugin",
         "tool_name",
         "tool_version",
         "source_address",
         "extracted_at",
-        "evidence_id",
     ),
 }
 
@@ -138,37 +137,18 @@ def csv_cell(value: Any) -> str:
     return str(value)
 
 
-def _process_row(item: dict[str, Any]) -> dict[str, Any]:
-    parent = item.get("parent") or {}
-    return {
-        **item,
-        "parent_pid": parent.get("pid") if isinstance(parent, dict) else None,
-        "parent_name": parent.get("name") if isinstance(parent, dict) else None,
-        "child_pids": item.get("child_pids") or [],
-    }
-
-
-def _vad_row(item: dict[str, Any]) -> dict[str, Any]:
-    indicators = item.get("indicators") or []
-    codes = []
-    if isinstance(indicators, list):
-        for i in indicators:
-            if isinstance(i, dict) and i.get("code"):
-                codes.append(i["code"])
-            elif isinstance(i, str):
-                codes.append(i)
-    return {**item, "indicator_codes": codes}
-
-
 def dataset_rows(doc: dict[str, Any], dataset: str) -> list[dict[str, Any]]:
     if dataset == "processes":
-        return [_process_row(i) for i in (doc.get("processes") or {}).get("items") or []]
+        return list((doc.get("processes") or {}).get("items") or [])
     if dataset == "network":
         return list((doc.get("network") or {}).get("items") or [])
+    if dataset == "network_artifacts":
+        block = doc.get("network_artifacts") or (doc.get("network") or {}).get("artifacts") or {}
+        return list(block.get("items") or [])
     if dataset == "modules":
         return list((doc.get("modules") or {}).get("items") or [])
     if dataset == "vad":
-        return [_vad_row(i) for i in (doc.get("memory") or {}).get("items") or []]
+        return list((doc.get("memory") or {}).get("items") or [])
     if dataset == "findings":
         return list((doc.get("findings") or {}).get("items") or [])
     if dataset == "iocs":
@@ -180,10 +160,22 @@ def dataset_rows(doc: dict[str, Any], dataset: str) -> list[dict[str, Any]]:
     return []
 
 
-def write_csv_file(path: Path, dataset: str, rows: list[dict[str, Any]]) -> int:
+def write_csv_file(
+    path: Path,
+    dataset: str,
+    rows: list[dict[str, Any]],
+    *,
+    meta: dict[str, Any] | None = None,
+) -> int:
+    from memscope_engine.export.shape import EXPORT_META_KEYS
+
     columns = CSV_COLUMNS[dataset]
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
+        if meta:
+            for key in EXPORT_META_KEYS:
+                writer.writerow([key, csv_cell(meta.get(key))])
+            writer.writerow([])
         writer.writerow(columns)
         for row in rows:
             writer.writerow([csv_cell(row.get(col)) for col in columns])
@@ -198,4 +190,6 @@ def datasets_for_sections(sections: list[str], *, scope: str) -> list[str]:
         ds = SECTION_TO_CSV.get(section)
         if ds and ds not in out:
             out.append(ds)
+        if section == "network" and "network_artifacts" not in out:
+            out.append("network_artifacts")
     return out

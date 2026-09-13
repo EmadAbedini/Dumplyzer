@@ -29,6 +29,7 @@ REPORT_SECTIONS: tuple[str, ...] = (
 CSV_DATASETS: tuple[str, ...] = (
     "processes",
     "network",
+    "network_artifacts",
     "modules",
     "vad",
     "findings",
@@ -49,5 +50,5 @@ SECTION_TO_CSV: dict[str, str] = {
     "artifacts": "artifacts",
 }
 
-FORMATS: tuple[str, ...] = ("json", "csv", "html")
+FORMATS: tuple[str, ...] = ("json", "xlsx", "html")
 SCOPES: tuple[str, ...] = ("complete", "selected")
