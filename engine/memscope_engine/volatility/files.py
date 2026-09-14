@@ -1,6 +1,6 @@
 """Controlled FileHandler for Volatility plugins that emit files.
 
-Writes only under a MemScope-controlled directory. Never executes output.
+Writes only under a Dumplyzer-controlled directory. Never executes output.
 """
 
 from __future__ import annotations

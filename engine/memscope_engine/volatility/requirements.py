@@ -170,7 +170,7 @@ def validate_user_parameters(
         if key in FORBIDDEN_PARAM_NAMES:
             raise AppError(
                 code="plugin_param_forbidden",
-                message=f"Parameter '{key}' is resolved by MemScope, not the analyst.",
+                message=f"Parameter '{key}' is resolved by Dumplyzer, not the analyst.",
                 suggestion="Evidence location and kernel/layer requirements are filled from the imported image.",
                 entity="plugin",
             )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -123,7 +124,7 @@ def get_plugin_for_ui(
         "evidence_id": evidence_id,
         "notes": (
             "Framework requirements (kernel, layers, symbols, image URI) are filled from "
-            "the selected MemScope evidence. This is generic plugin execution, not a dedicated forensic view."
+            "the selected Dumplyzer evidence. This is generic plugin execution, not a dedicated forensic view."
         ),
     }
 
@@ -368,6 +369,7 @@ def run_advanced_plugin_job(
     ingested = _ingest_plugin_files(
         db, paths, evidence=evidence, files=collected_files, exec_id=exec_id, plugin_id=ident
     )
+    shutil.rmtree(file_dir, ignore_errors=True)
     payload = {
         "model_version": RESULT_MODEL_VERSION,
         "plugin_id": ident,
