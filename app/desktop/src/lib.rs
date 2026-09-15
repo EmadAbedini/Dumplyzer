@@ -4,16 +4,18 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use tauri::{Manager, RunEvent, State};
+use std::time::Duration;
+use tauri::{Manager, RunEvent, State, WebviewEvent, WindowEvent};
 use thiserror::Error;
 
 mod engine;
+mod drag_drop;
 
 use engine::{
-    configure_engine_command, memscope_data_dir, resolve_engine, resolve_inputs_from_env,
-    EngineLaunchPlan,
+    cleanup_session_temp, configure_engine_command, memscope_data_dir, resolve_engine,
+    resolve_inputs_from_env, user_data_subdir, EngineLaunchPlan,
 };
 
 #[derive(Debug, Error)]
@@ -74,6 +76,11 @@ impl EngineState {
         if let Ok(mut guard) = self.inner.lock() {
             *guard = None;
         }
+        if let Ok(dir_guard) = self.data_dir.lock() {
+            if let Some(dir) = dir_guard.as_ref() {
+                cleanup_session_temp(dir);
+            }
+        }
     }
 
     fn launch_dirs(&self) -> (Option<PathBuf>, Option<PathBuf>) {
@@ -111,6 +118,114 @@ fn drain_stderr(stderr: std::process::ChildStderr, log_path: PathBuf) {
 fn launch_plan_for_state(state: &EngineState) -> Result<EngineLaunchPlan, EngineError> {
     let (exe_dir, resource_dir) = state.launch_dirs();
     resolve_engine(&resolve_inputs_from_env(exe_dir, resource_dir)).map_err(EngineError::from)
+}
+
+const SPLASH_MS: u64 = 2000;
+/// Minimum time the native splash window stays visible before the main UI is shown.
+static SPLASH_PHASE: AtomicBool = AtomicBool::new(true);
+
+const MAIN_WIDTH: f64 = 960.0;
+const MAIN_HEIGHT: f64 = 640.0;
+const MAIN_MIN_WIDTH: f64 = 900.0;
+/// Sidebar at the default 13px font: top bar + evidence + 16 nav items + one
+/// extra item of space below About (~625px). 640px covers DPI rounding.
+const MAIN_MIN_HEIGHT: f64 = 640.0;
+
+fn reveal_main_window(app: &tauri::AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.set_min_size(Some(tauri::LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
+        let _ = main.set_size(tauri::LogicalSize::new(MAIN_WIDTH, MAIN_HEIGHT));
+        let _ = main.center();
+        let _ = main.unminimize();
+        apply_windows_shell_icons(&main);
+        disable_default_context_menu(&main);
+        let _ = main.show();
+        let _ = main.set_focus();
+        drag_drop::attach_after_show(app, &main);
+    }
+    SPLASH_PHASE.store(false, Ordering::SeqCst);
+    if let Some(splash) = app.get_webview_window("splash") {
+        let _ = splash.hide();
+        let _ = splash.close();
+    }
+}
+
+/// Taskbar / Alt+Tab use ICON_BIG. Tauri only sets ICON_SMALL, and historically
+/// that bitmap was the first ICO frame (16×16), which Windows then stretched.
+#[cfg(windows)]
+fn apply_windows_shell_icons(window: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetAncestor, GetSystemMetrics, LoadImageW, SendMessageW, GA_ROOT, ICON_BIG, ICON_SMALL,
+        IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXSMICON, WM_SETICON,
+    };
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(hwnd.0 as *mut c_void);
+    unsafe {
+        let root = GetAncestor(hwnd, GA_ROOT);
+        let target = if root.is_invalid() { hwnd } else { root };
+        let Ok(hinst) = GetModuleHandleW(PCWSTR::null()) else {
+            return;
+        };
+        // Caption icons are drawn at SM_CXSMICON (16×16 at 96 DPI). A larger
+        // HICON makes Windows reserve extra width before the title while still
+        // painting a tiny glyph — the logo looks small and a gap appears.
+        let small = GetSystemMetrics(SM_CXSMICON).max(16);
+        if let Ok(handle) = LoadImageW(
+            Some(hinst.into()),
+            IDI_APPLICATION,
+            IMAGE_ICON,
+            small,
+            small,
+            LR_DEFAULTCOLOR,
+        ) {
+            SendMessageW(
+                target,
+                WM_SETICON,
+                Some(WPARAM(ICON_SMALL as usize)),
+                Some(LPARAM(handle.0 as isize)),
+            );
+        }
+        if let Ok(handle) = LoadImageW(
+            Some(hinst.into()),
+            IDI_APPLICATION,
+            IMAGE_ICON,
+            256,
+            256,
+            LR_DEFAULTCOLOR,
+        ) {
+            SendMessageW(
+                target,
+                WM_SETICON,
+                Some(WPARAM(ICON_BIG as usize)),
+                Some(LPARAM(handle.0 as isize)),
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_windows_shell_icons(_window: &tauri::WebviewWindow) {}
+
+fn disable_default_context_menu(window: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    {
+        let _ = window.with_webview(|webview| unsafe {
+            if let Ok(core) = webview.controller().CoreWebView2() {
+                if let Ok(settings) = core.Settings() {
+                    let _ = settings.SetAreDefaultContextMenusEnabled(false);
+                }
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    let _ = window;
 }
 
 fn spawn_engine(state: &EngineState, data_dir: &Path) -> Result<EngineProcess, EngineError> {
@@ -171,6 +286,13 @@ fn ensure_engine(state: &EngineState, data_dir: &Path) -> Result<(), EngineError
         .inner
         .lock()
         .map_err(|_| EngineError::Message("engine lock poisoned".into()))?;
+    let dead = match guard.as_mut() {
+        Some(proc) => !matches!(proc.child.try_wait(), Ok(None)),
+        None => false,
+    };
+    if dead {
+        *guard = None;
+    }
     if guard.is_none() {
         *guard = Some(spawn_engine(state, data_dir)?);
     }
@@ -339,29 +461,243 @@ fn bind_data_dir(state: &EngineState, dir: PathBuf) -> Result<PathBuf, EngineErr
 }
 
 #[tauri::command]
-fn get_app_paths(state: State<'_, EngineState>) -> Result<Value, EngineError> {
+async fn get_app_paths(state: State<'_, EngineState>) -> Result<Value, EngineError> {
     let dir = bind_data_dir(&state, memscope_data_dir()?)?;
     ensure_engine(&state, &dir)?;
     call_engine_locked(&state, "app.paths", json!({}), 30)
 }
 
+const ALLOWED_EXTERNAL_URLS: &[&str] = &[
+    "https://github.com/EmadAbedini/Dumplyzer",
+    "https://www.linkedin.com/in/emad-abedini",
+];
+
 #[tauri::command]
-fn engine_call(
-    state: State<'_, EngineState>,
+fn open_external_url(url: String) -> Result<(), EngineError> {
+    if !ALLOWED_EXTERNAL_URLS.contains(&url.as_str()) {
+        return Err(EngineError::Message("URL is not allowed.".into()));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| EngineError::Message(format!("open url: {e}")))?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        Err(EngineError::Message(
+            "Opening links is only implemented on Windows.".into(),
+        ))
+    }
+}
+
+#[tauri::command]
+fn open_user_folder(kind: String) -> Result<(), EngineError> {
+    let root = memscope_data_dir()?;
+    let target = user_data_subdir(&kind).map_err(EngineError::from)?;
+    std::fs::create_dir_all(&target)
+        .map_err(|e| EngineError::Message(format!("create folder: {e}")))?;
+    let root_abs = root.canonicalize().unwrap_or(root);
+    let target_abs = target.canonicalize().unwrap_or(target);
+    if !target_abs.starts_with(&root_abs) {
+        return Err(EngineError::Message(
+            "Folder is outside the Dumplyzer data directory.".into(),
+        ));
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(&target_abs)
+            .spawn()
+            .map_err(|e| EngineError::Message(format!("open folder: {e}")))?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        Err(EngineError::Message(
+            "Opening folders is only implemented on Windows.".into(),
+        ))
+    }
+}
+
+#[tauri::command]
+fn open_local_folder(path: String) -> Result<(), EngineError> {
+    let requested = PathBuf::from(path.trim());
+    if requested.as_os_str().is_empty() {
+        return Err(EngineError::Message("Folder path is empty.".into()));
+    }
+    let root = memscope_data_dir()?;
+    let root_abs = root.canonicalize().unwrap_or(root);
+    let target = if requested.is_file() {
+        requested
+            .parent()
+            .map(PathBuf::from)
+            .ok_or_else(|| EngineError::Message("Folder path is empty.".into()))?
+    } else {
+        requested
+    };
+    if !target.exists() {
+        return Err(EngineError::Message("Folder was not found.".into()));
+    }
+    let target_abs = target
+        .canonicalize()
+        .map_err(|e| EngineError::Message(format!("open folder: {e}")))?;
+    if !path_is_within(&target_abs, &root_abs) {
+        return Err(EngineError::Message(
+            "Folder is outside the Dumplyzer data directory.".into(),
+        ));
+    }
+    let to_open = if target_abs.is_dir() {
+        target_abs
+    } else {
+        target_abs
+            .parent()
+            .map(PathBuf::from)
+            .ok_or_else(|| EngineError::Message("Folder was not found.".into()))?
+    };
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(&to_open)
+            .spawn()
+            .map_err(|e| EngineError::Message(format!("open folder: {e}")))?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        Err(EngineError::Message(
+            "Opening folders is only implemented on Windows.".into(),
+        ))
+    }
+}
+
+fn path_is_within(child: &Path, parent: &Path) -> bool {
+    child.starts_with(parent)
+}
+
+/// Copy a generated export ZIP (under application data / exports) to a user Save As path.
+
+#[tauri::command]
+fn copy_export_file(source: String, destination: String) -> Result<(), EngineError> {
+    let dest = PathBuf::from(destination.trim());
+    if dest.as_os_str().is_empty() {
+        return Err(EngineError::Message("Save location is empty.".into()));
+    }
+    if !dest.is_absolute() {
+        return Err(EngineError::Message("Save location must be an absolute path.".into()));
+    }
+    let dest_name = dest
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !dest_name.ends_with(".zip") {
+        return Err(EngineError::Message("Save location must be a .zip file.".into()));
+    }
+    if dest.is_dir() {
+        return Err(EngineError::Message("Save location is a folder.".into()));
+    }
+    let parent = dest.parent().ok_or_else(|| {
+        EngineError::Message("Save location has no parent folder.".into())
+    })?;
+    if !parent.is_dir() {
+        return Err(EngineError::Message("Save folder does not exist.".into()));
+    }
+
+    let data = memscope_data_dir()?;
+    let exports = data.join("exports");
+    std::fs::create_dir_all(&exports)
+        .map_err(|e| EngineError::Message(format!("create exports folder: {e}")))?;
+    let exports_abs = exports.canonicalize().unwrap_or(exports);
+    let src = PathBuf::from(source.trim());
+    let src_abs = src
+        .canonicalize()
+        .map_err(|e| EngineError::Message(format!("export file not found: {e}")))?;
+    if !src_abs.is_file() {
+        return Err(EngineError::Message("Export file is missing.".into()));
+    }
+    if !path_is_within(&src_abs, &exports_abs) {
+        return Err(EngineError::Message(
+            "Refusing to copy a file outside the exports directory.".into(),
+        ));
+    }
+    let src_ext = src_abs
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .eq_ignore_ascii_case("zip");
+    if !src_ext {
+        return Err(EngineError::Message("Export file is not a ZIP archive.".into()));
+    }
+    if let Ok(dest_abs) = dest.canonicalize() {
+        if dest_abs == src_abs {
+            return Ok(());
+        }
+    }
+    std::fs::copy(&src_abs, &dest)
+        .map_err(|e| EngineError::Message(format!("save copy failed: {e}")))?;
+    Ok(())
+}
+
+fn write_job_cancel_marker(state: &EngineState, job_id: &str) -> Result<(), EngineError> {
+    if job_id.is_empty()
+        || job_id.len() > 80
+        || !job_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(EngineError::Message("Invalid job id.".into()));
+    }
+    let data_dir = state
+        .data_dir
+        .lock()
+        .map_err(|_| EngineError::Message("data_dir lock poisoned".into()))?
+        .clone()
+        .ok_or_else(|| EngineError::Message("app data directory not set".into()))?;
+    let dir = data_dir.join("tmp").join("job-cancel");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| EngineError::Message(format!("create cancel marker dir: {e}")))?;
+    std::fs::write(dir.join(job_id), b"1")
+        .map_err(|e| EngineError::Message(format!("write cancel marker: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn engine_call(
+    app: tauri::AppHandle,
     method: String,
     params: Option<Value>,
     timeout_secs: Option<u64>,
 ) -> Result<Value, EngineError> {
+    // Import and analysis are queued as engine jobs and return immediately.
+    // Long timeouts remain only for methods that still wait on the RPC result.
+    let params = params.unwrap_or_else(|| json!({}));
     let timeout = timeout_secs.unwrap_or(match method.as_str() {
-        "evidence.analyze_basic" => 600,
-        "evidence.import" => 600,
+        "smoke.e2e" => 90,
         _ => 120,
     });
-    call_engine_locked(&state, &method, params.unwrap_or_else(|| json!({})), timeout)
+    // Marker is visible to the Python worker without waiting for the GIL-bound RPC loop.
+    if method == "jobs.cancel" {
+        if let Some(job_id) = params.get("job_id").and_then(|v| v.as_str()) {
+            let state = app.state::<EngineState>();
+            let _ = write_job_cancel_marker(&state, job_id);
+        }
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<EngineState>();
+        call_engine_locked(&state, &method, params, timeout)
+    })
+    .await
+    .map_err(|e| EngineError::Message(format!("engine worker failed: {e}")))?
 }
 
 #[tauri::command]
-fn smoke_e2e(state: State<'_, EngineState>) -> Result<Value, EngineError> {
+async fn smoke_e2e(state: State<'_, EngineState>) -> Result<Value, EngineError> {
     let engine = call_engine_locked(&state, "smoke.e2e", json!({}), 60)?;
     let vol_ok = engine
         .pointer("/volatility/ok")
@@ -375,6 +711,37 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(EngineState::new())
+        .on_window_event(|window, event| {
+            if window.label().starts_with("plugin-output-") {
+                if matches!(event, WindowEvent::Focused(true)) {
+                    if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                        apply_windows_shell_icons(&webview);
+                        disable_default_context_menu(&webview);
+                    }
+                }
+                return;
+            }
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
+                    drag_drop::teardown();
+                }
+                WindowEvent::DragDrop(drag) => {
+                    drag_drop::emit_tauri_drag(window.app_handle(), drag);
+                }
+                _ => {}
+            }
+        })
+        .on_webview_event(|webview, event| {
+            if webview.label() != "main" {
+                return;
+            }
+            if let WebviewEvent::DragDrop(drag) = event {
+                drag_drop::emit_tauri_drag(webview.app_handle(), drag);
+            }
+        })
         .setup(|app| {
             let exe_dir = std::env::current_exe()
                 .ok()
@@ -395,21 +762,80 @@ pub fn run() {
                 .data_dir
                 .lock()
                 .map_err(|_| std::io::Error::other("lock"))? = Some(dir.clone());
-            let _ = ensure_engine(&state, &dir);
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.set_min_size(Some(tauri::LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
+                let _ = main.hide();
+                apply_windows_shell_icons(&main);
+                disable_default_context_menu(&main);
+            }
+            if let Some(splash) = app.get_webview_window("splash") {
+                let _ = splash.set_decorations(false);
+                let _ = splash.set_shadow(false);
+                let _ = splash.set_always_on_top(true);
+                let _ = splash.center();
+                disable_default_context_menu(&splash);
+                let _ = splash.show();
+                let _ = splash.set_focus();
+            }
+            let engine_handle = app.handle().clone();
+            let engine_dir = dir.clone();
+            std::thread::spawn(move || {
+                let state = engine_handle.state::<EngineState>();
+                let _ = ensure_engine(&state, &engine_dir);
+            });
+            let splash_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(SPLASH_MS));
+                let handle = splash_handle.clone();
+                let _ = splash_handle.run_on_main_thread(move || {
+                    reveal_main_window(&handle);
+                });
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_app_paths,
+            open_user_folder,
+            open_local_folder,
+            open_external_url,
+            copy_export_file,
             engine_call,
             smoke_e2e
         ])
         .build(tauri::generate_context!())
-        .expect("error while running MemScope");
+        .expect("error while running Dumplyzer");
 
-    app.run(|app_handle, event| {
-        if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+    app.run(|app_handle, event| match event {
+        RunEvent::ExitRequested { api, .. } => {
+            if SPLASH_PHASE.load(Ordering::SeqCst) {
+                api.prevent_exit();
+                reveal_main_window(app_handle);
+                return;
+            }
+            drag_drop::teardown();
             app_handle.state::<EngineState>().shutdown();
         }
+        RunEvent::Exit => {
+            drag_drop::teardown();
+            app_handle.state::<EngineState>().shutdown();
+        }
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::Destroyed,
+            ..
+        } => {
+            if label == "splash" && SPLASH_PHASE.load(Ordering::SeqCst) {
+                reveal_main_window(app_handle);
+            }
+            if label == "main" {
+                for window in app_handle.webview_windows().values() {
+                    if window.label().starts_with("plugin-output-") {
+                        let _ = window.close();
+                    }
+                }
+            }
+        }
+        _ => {}
     });
 }
 
@@ -449,5 +875,66 @@ mod tests {
         let root = engine::repo_root_from_manifest().expect("repo");
         assert!(root.join("engine").join("pyproject.toml").is_file());
         assert!(root.join("app").join("desktop").join("tauri.conf.json").is_file());
+        let conf = std::fs::read_to_string(root.join("app").join("desktop").join("tauri.conf.json"))
+            .expect("tauri.conf.json");
+        assert!(
+            conf.contains("\"minWidth\": 900") && conf.contains("\"minHeight\": 640"),
+            "main window must declare a native minimum size"
+        );
+        assert!(
+            conf.contains("\"theme\": \"Light\""),
+            "main window default theme must be Light"
+        );
+        let frontend = root.join("app").join("frontend");
+        assert!(frontend.join("splash.html").is_file(), "missing splash.html");
+        assert!(
+            frontend
+                .join("src")
+                .join("assets")
+                .join("dumplyzer-splash.jpg")
+                .is_file(),
+            "missing dumplyzer-splash.jpg"
+        );
+    }
+
+    #[test]
+    fn windows_icon_assets_are_present() {
+        let root = engine::repo_root_from_manifest().expect("repo");
+        let icons = root.join("app").join("desktop").join("icons");
+        for name in ["32x32.png", "128x128.png", "128x128@2x.png", "icon.ico", "icon.icns", "Dumplyzer.png"] {
+            let path = icons.join(name);
+            assert!(path.is_file(), "missing {}", path.display());
+        }
+        let ico = std::fs::read(icons.join("icon.ico")).expect("icon.ico");
+        assert!(ico.len() > 64, "icon.ico too small");
+        assert_eq!(&ico[0..4], &[0, 0, 1, 0], "icon.ico must be a Windows ICO");
+        let png32 = std::fs::read(icons.join("32x32.png")).expect("32 png");
+        assert_eq!(&png32[0..8], b"\x89PNG\r\n\x1a\n");
+        assert_eq!(png32[25], 6, "32x32.png must be RGBA");
+        assert!(ico.len() > 64);
+        let count = u16::from_le_bytes([ico[4], ico[5]]) as usize;
+        assert!(
+            count >= 9,
+            "icon.ico needs 16/20/24/32/40/48/64/128/256 frames, got {count}"
+        );
+        let first_width = ico[6];
+        assert_eq!(first_width, 0, "first ICO frame must be 256 PNG for Tauri window icon");
+        let mut seen = std::collections::BTreeSet::new();
+        for i in 0..count {
+            let entry = 6 + 16 * i;
+            let width = ico[entry];
+            let offset = u32::from_le_bytes(ico[entry + 12..entry + 16].try_into().unwrap()) as usize;
+            if width == 0 {
+                seen.insert(256u32);
+                assert_eq!(&ico[offset..offset + 8], b"\x89PNG\r\n\x1a\n");
+            } else {
+                seen.insert(width as u32);
+                let header = u32::from_le_bytes(ico[offset..offset + 4].try_into().unwrap());
+                assert_eq!(header, 40, "small ICO frames must be 32bpp BMP, not PNG");
+            }
+        }
+        for size in [16u32, 20, 24, 32, 40, 48, 64, 128, 256] {
+            assert!(seen.contains(&size), "icon.ico missing {size}x{size} frame");
+        }
     }
 }

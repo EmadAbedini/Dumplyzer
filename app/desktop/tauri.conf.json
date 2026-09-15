@@ -1,22 +1,47 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MemScope",
+  "productName": "Dumplyzer",
   "version": "0.1.0",
-  "identifier": "com.memscope.workbench",
+  "identifier": "com.dumplyzer.workbench",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../frontend/dist"
   },
   "app": {
     "windows": [
       {
+        "label": "splash",
+        "title": "",
+        "url": "splash.html",
+        "width": 688,
+        "height": 384,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "center": true,
+        "fullscreen": false,
+        "focus": true,
+        "visible": true,
+        "skipTaskbar": true,
+        "alwaysOnTop": true
+      },
+      {
         "label": "main",
-        "title": "MemScope",
+        "title": "Dumplyzer",
         "width": 960,
         "height": 640,
-        "resizable": true
+        "minWidth": 900,
+        "minHeight": 640,
+        "theme": "Light",
+        "resizable": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {
@@ -27,10 +52,10 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],
-    "publisher": "MemScope",
+    "publisher": "Dumplyzer",
     "licenseFile": "../../LICENSE",
     "shortDescription": "Volatility 3 memory forensics workbench",
-    "longDescription": "MemScope is an offline desktop workbench for Volatility 3 memory forensics. The analysis engine is a bundled Python 3.12 runtime. Optional PE-sieve and mal_unpack executables are user-supplied and are never downloaded or executed against investigation artifacts automatically.",
+    "longDescription": "Dumplyzer is an offline desktop workbench for Volatility 3 memory forensics. The analysis engine is a bundled Python 3.12 runtime with yara-python 4.5.4. bulk_extractor 2.2.0, Mandiant CAPA 9.4.0, and Mandiant FLOSS 3.1.1 are bundled as separate programs. PE Extraction reconstructs EXE/DLL artifacts from memory dumps.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,7 +65,8 @@
     ],
     "resources": [
       "resources/runtime",
-      "resources/tools"
+      "resources/tools",
+      "resources/rules"
     ],
     "windows": {
       "digestAlgorithm": "sha256",
