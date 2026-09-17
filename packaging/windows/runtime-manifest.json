@@ -12,10 +12,51 @@
     "version": "0.1.0",
     "volatility3": "2.28.0",
     "pefile": "2024.8.26",
+    "yara_python": "4.5.4",
     "lockfile": "engine/requirements.lock.txt",
-    "yara": "optional, not bundled",
-    "pe_sieve": "user-supplied, not bundled",
-    "mal_unpack": "user-supplied, not bundled"
+    "yara": "bundled yara-python 4.5.4",
+    "pe_extraction": "Volatility 3 workflow, bundled with the engine runtime",
+    "capa": "bundled v9.4.0 Apache-2.0",
+    "floss": "bundled v3.1.1 Apache-2.0",
+    "bulk_extractor": "bundled v2.2.0 GPL-3.0-or-later"
+  },
+  "bulk_extractor": {
+    "version": "2.2.0",
+    "project": "https://github.com/simsong/bulk_extractor",
+    "release": "https://github.com/simsong/bulk_extractor/releases/tag/v2.2.0",
+    "license": "GPL-3.0-or-later",
+    "exe_filename": "bulk_extractor64-2.2.0.exe",
+    "exe_url": "https://github.com/simsong/bulk_extractor/releases/download/v2.2.0/bulk_extractor64.exe",
+    "exe_sha256": "dfcc678ee3b7da111e8fba6259c4e842ffffcbe42dd96e6c6e6cc238d74bd911",
+    "source_filename": "bulk_extractor-2.2.0.tar.gz",
+    "source_url": "https://github.com/simsong/bulk_extractor/releases/download/v2.2.0/bulk_extractor-2.2.0.tar.gz",
+    "source_sha256": "b9e15d40d711aa43590e1bf1a25d30943e3bad8371281d7c80d3803a6f34c268",
+    "windows_asset": "bulk_extractor64.exe",
+    "bundled": true
+  },
+  "capa": {
+    "version": "9.4.0",
+    "project": "https://github.com/mandiant/capa",
+    "release": "https://github.com/mandiant/capa/releases/tag/v9.4.0",
+    "license": "Apache-2.0",
+    "license_url": "https://raw.githubusercontent.com/mandiant/capa/v9.4.0/LICENSE.txt",
+    "zip_filename": "capa-v9.4.0-windows.zip",
+    "zip_url": "https://github.com/mandiant/capa/releases/download/v9.4.0/capa-v9.4.0-windows.zip",
+    "zip_sha256": "670ab1a58b81f59cb57533bf4021ac1e7033fbe9b5d5cc180f796976081e3bb5",
+    "windows_asset": "capa.exe",
+    "bundled": true
+  },
+  "floss": {
+    "version": "3.1.1",
+    "project": "https://github.com/mandiant/flare-floss",
+    "release": "https://github.com/mandiant/flare-floss/releases/tag/v3.1.1",
+    "license": "Apache-2.0",
+    "license_url": "https://raw.githubusercontent.com/mandiant/flare-floss/v3.1.1/LICENSE.txt",
+    "zip_filename": "floss-v3.1.1-windows.zip",
+    "zip_url": "https://github.com/mandiant/flare-floss/releases/download/v3.1.1/floss-v3.1.1-windows.zip",
+    "zip_sha256": "6c71089b8c629c69424b042769f1565f71adc6cd24b2f8d3713c96fa7fdac2fb",
+    "windows_asset": "floss.exe",
+    "bundled": true
   },
   "wix": {
     "version": "3.14.1",
@@ -26,9 +67,9 @@
   },
   "application": {
     "version": "0.1.0",
-    "identifier": "com.memscope.workbench",
-    "install_nsis": "%LOCALAPPDATA%\\Programs\\MemScope",
-    "install_msi": "%ProgramFiles%\\MemScope",
-    "data_dir": "%LOCALAPPDATA%\\MemScope"
+    "identifier": "com.dumplyzer.workbench",
+    "install_nsis": "%LOCALAPPDATA%\\Programs\\Dumplyzer",
+    "install_msi": "%ProgramFiles%\\Dumplyzer",
+    "data_dir": "%LOCALAPPDATA%\\Dumplyzer"
   }
 }

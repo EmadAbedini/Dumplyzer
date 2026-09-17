@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def engine_python() -> Path:
-    env = os.environ.get("MEMSCOPE_ENGINE_PYTHON")
+    env = os.environ.get("DUMPLYZER_ENGINE_PYTHON") or os.environ.get("MEMSCOPE_ENGINE_PYTHON")
     if env:
         candidate = Path(env)
         if candidate.is_file():

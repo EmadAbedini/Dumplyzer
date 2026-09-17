@@ -5,33 +5,81 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import struct
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from memscope_engine.paths import (
-    APP_NAME,
     AppPaths,
     default_data_dir,
     is_canonical_user_data_dir,
     maybe_migrate_legacy_data,
 )
-from memscope_engine.providers.pe_sieve import PeSieveProvider
+from memscope_engine.providers.capa import CapaProvider
+from memscope_engine.providers.yara_provider import detect_yara
 from memscope_engine.server import HANDLERS, handle_app_init
 from memscope_engine.storage import Database
 from memscope_engine.storage.schema import MIGRATIONS, SCHEMA_VERSION
-from memscope_engine.version import APP_VERSION
+from memscope_engine.version import APP_NAME, APP_VERSION
 from support import bundled_runtime_python, engine_python
 
 
+def test_windows_icon_assets_exist() -> None:
+    icons = Path(__file__).resolve().parents[2] / "app" / "desktop" / "icons"
+    ico = icons / "icon.ico"
+    png32 = icons / "32x32.png"
+    assert ico.is_file()
+    assert png32.is_file()
+    assert (icons / "Dumplyzer.png").is_file()
+    splash = Path(__file__).resolve().parents[2] / "app" / "frontend" / "src" / "assets" / "dumplyzer-splash.jpg"
+    assert splash.is_file()
+    assert splash.read_bytes()[:3] == b"\xff\xd8\xff"
+    assert (splash.parents[2] / "splash.html").is_file()
+    assert (icons / "128x128.png").is_file()
+    assert (icons / "128x128@2x.png").is_file()
+    data = ico.read_bytes()
+    assert data[:4] == b"\x00\x00\x01\x00"
+    png32_bytes = png32.read_bytes()
+    assert png32_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+    # 32x32 must be RGBA PNG so the taskbar/window icon can be transparent.
+    assert png32_bytes[25] == 6
+    # Desktop shortcuts use 16/32/48. Those frames must be 32bpp BMP+AND,
+    # not PNG-in-ICO (Explorer often paints PNG frames as an opaque square).
+    count = struct.unpack_from("<H", data, 4)[0]
+    assert count >= 9
+    # Tauri uses ICO entries[0] as the live window/taskbar bitmap.
+    assert data[6] == 0
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    seen: set[int] = set()
+    for i in range(count):
+        width, _height, _cc, _res, _planes, bpp, size, offset = struct.unpack_from(
+            "<BBBBHHII", data, 6 + 16 * i
+        )
+        assert bpp == 32
+        assert size > 0
+        payload = data[offset : offset + max(8, size)]
+        if width == 0:
+            seen.add(256)
+            assert payload[:8] == png_magic
+        else:
+            seen.add(width)
+            assert struct.unpack_from("<I", payload, 0)[0] == 40
+            bitcount = struct.unpack_from("<H", payload, 14)[0]
+            assert bitcount == 32
+    assert seen >= {16, 20, 24, 32, 40, 48, 64, 128, 256}
+
+
 def test_app_version_is_release_coherent() -> None:
+    assert APP_NAME == "Dumplyzer"
     assert APP_VERSION == "0.1.0"
-    assert SCHEMA_VERSION == 9
+    assert SCHEMA_VERSION == 14
 
 
 def test_first_launch_creates_directories(tmp_path: Path) -> None:
-    paths = AppPaths(tmp_path / "MemScope").ensure()
+    paths = AppPaths(tmp_path / "Dumplyzer").ensure()
     for attr in (
         "root",
         "logs",
@@ -41,10 +89,22 @@ def test_first_launch_creates_directories(tmp_path: Path) -> None:
         "yara_rules",
         "tools",
         "exports",
+        "analysis",
     ):
         assert getattr(paths, attr).is_dir()
-    assert (paths.tools / "pe-sieve").is_dir()
-    assert (paths.tools / "mal_unpack").is_dir()
+    assert paths.yara_rules_bundled.is_dir()
+    assert paths.yara_rules_custom.is_dir()
+    assert (paths.yara_rules_bundled / "memory").is_dir()
+    assert (paths.yara_rules_bundled / "artifact").is_dir()
+    assert (paths.yara_rules_bundled / "catalog.json").is_file()
+    assert list((paths.yara_rules_bundled / "memory").glob("*.yar"))
+    assert (paths.yara_rules_custom / "README.txt").is_file()
+    assert (paths.tools / "capa").is_dir()
+    assert (paths.tools / "floss").is_dir()
+    assert (paths.tools / "bulk_extractor").is_dir()
+    assert (paths.analysis / "bulk_extractor").is_dir()
+    assert (paths.analysis / "pe_extraction").is_dir()
+    assert (paths.analysis / "pcap").is_dir()
     assert (paths.cache / "plugin_results").is_dir()
     assert (paths.tools / "README.txt").is_file()
     assert not paths.db_path.exists()
@@ -52,10 +112,10 @@ def test_first_launch_creates_directories(tmp_path: Path) -> None:
 
 def test_default_data_dir_is_localappdata_memscope(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("MEMSCOPE_DATA_DIR", raising=False)
+    monkeypatch.delenv("DUMPLYZER_DATA_DIR", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
     got = default_data_dir()
     assert got == (tmp_path / "Local" / APP_NAME)
-    assert "Rootman" not in str(got)
 
 
 def test_explicit_root_does_not_use_developer_home(tmp_path: Path) -> None:
@@ -79,6 +139,7 @@ def test_legacy_migration_preserves_source(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(local))
     monkeypatch.setenv("APPDATA", str(roaming))
     monkeypatch.delenv("MEMSCOPE_DATA_DIR", raising=False)
+    monkeypatch.delenv("DUMPLYZER_DATA_DIR", raising=False)
     legacy = roaming / "com.memscope.workbench"
     legacy.mkdir(parents=True)
     (legacy / "memscope.db").write_text("keep-me", encoding="utf-8")
@@ -90,6 +151,21 @@ def test_legacy_migration_preserves_source(tmp_path: Path, monkeypatch) -> None:
     assert (legacy / "memscope.db").read_text(encoding="utf-8") == "keep-me"
     again = maybe_migrate_legacy_data(dest)
     assert again is None
+
+
+def test_memscope_data_dir_migrates_into_dumplyzer(tmp_path: Path, monkeypatch) -> None:
+    local = tmp_path / "Local"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.delenv("MEMSCOPE_DATA_DIR", raising=False)
+    monkeypatch.delenv("DUMPLYZER_DATA_DIR", raising=False)
+    old = local / "MemScope"
+    old.mkdir(parents=True)
+    (old / "memscope.db").write_text("from-memscope", encoding="utf-8")
+    dest = local / APP_NAME
+    migrated = maybe_migrate_legacy_data(dest)
+    assert migrated == old.resolve()
+    assert (dest / "memscope.db").read_text(encoding="utf-8") == "from-memscope"
+    assert (old / "memscope.db").read_text(encoding="utf-8") == "from-memscope"
 
 
 def test_canonical_flag(tmp_path: Path, monkeypatch) -> None:
@@ -151,18 +227,40 @@ def _provider_unavailable(payload: dict) -> bool:
     return payload.get("exe_path") in (None, "") and "yara-python" not in blob
 
 
-def test_optional_providers_unavailable_by_default(tmp_path: Path) -> None:
+def test_optional_providers_unavailable_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUMPLYZER_BUNDLE_TOOLS", raising=False)
+    isolated = tmp_path / "isolated-python.exe"
+    isolated.write_bytes(b"")
+    monkeypatch.setattr(sys, "executable", str(isolated))
     init = handle_app_init({"data_dir": str(tmp_path / "ipc")})
-    pe = init["pe_sieve"]
-    mu = init["mal_unpack"]
-    yara = init["yara"]
-    assert pe.get("available") is False
-    assert pe.get("executable_path") in (None, "")
-    assert mu.get("available") is False
-    assert mu.get("executable_path") in (None, "")
-    # YARA is an optional Python extra. Report availability honestly; never bundle an EXE.
+    assert "pe_extraction" in init
+    assert "capa" in init
+    assert "floss" in init
+    assert "bulk_extractor" in init
+    pe = HANDLERS["pe_extraction.status"]({})
+    capa = HANDLERS["capa.status"]({})
+    floss = HANDLERS["floss.status"]({})
+    yara = HANDLERS["yara.status"]({})
+    be = HANDLERS["bulk_extractor.status"]({})
+    assert "available" in pe
+    assert capa.get("available") is False
+    assert capa.get("executable_path") in (None, "")
+    assert floss.get("available") is False
+    assert floss.get("executable_path") in (None, "")
+    assert be.get("available") is False
+    assert be.get("executable_path") in (None, "")
+    assert be.get("license", {}).get("bundled_in_memscope") is True
+    assert capa.get("license", {}).get("bundled_in_memscope") is True
+    assert floss.get("license", {}).get("bundled_in_memscope") is True
+    # Signature Detection is bundled (yara-python 4.5.4). Report availability honestly.
     assert "available" in yara
     assert yara.get("provider") == "yara" or yara.get("available") in (True, False)
+    if detect_yara()["available"]:
+        assert yara.get("available") is True
+        assert yara.get("yara_version") == "4.5.4"
+        assert int(yara.get("bundled_rule_file_count") or 0) >= 1
+        assert int(yara.get("custom_rule_file_count") or 0) == 0
+        assert "bundled" in (yara.get("status_summary") or "")
 
 
 def test_plugin_explorer_discovers_without_evidence(tmp_path: Path) -> None:
@@ -206,6 +304,16 @@ def test_smoke_ipc_subprocess(tmp_path: Path, monkeypatch) -> None:
     assert result["volatility"]["engine_version"] == APP_VERSION
 
 
+def test_bundled_runtime_exposes_yara_reload() -> None:
+    python = bundled_runtime_python()
+    if python is None:
+        pytest.skip("bundled Windows runtime is not prepared")
+    server = python.parent / "Lib" / "site-packages" / "memscope_engine" / "server.py"
+    assert server.is_file(), server
+    text = server.read_text(encoding="utf-8")
+    assert '"yara.reload"' in text
+
+
 def test_bundled_runtime_isolated_when_prepared(tmp_path: Path) -> None:
     python = bundled_runtime_python()
     if python is None:
@@ -236,16 +344,23 @@ def test_bundled_runtime_isolated_when_prepared(tmp_path: Path) -> None:
     assert packaged is True
     providers = result.get("providers") or {}
     if "yara" in providers:
-        assert _provider_unavailable(providers["yara"])
+        assert providers["yara"].get("available") is True
+        assert providers["yara"].get("yara_version") == "4.5.4"
+    be = providers.get("bulk_extractor")
+    be_exe = python.parent.parent / "tools" / "bulk_extractor" / "bulk_extractor64.exe"
+    if isinstance(be, dict) and "available" in be and be_exe.is_file():
+        assert be.get("available") is True
+        assert be.get("source") == "bundled"
 
 
 def test_user_data_is_separate_from_install_dirs(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("MEMSCOPE_DATA_DIR", raising=False)
+    monkeypatch.delenv("DUMPLYZER_DATA_DIR", raising=False)
     local = tmp_path / "Local"
     monkeypatch.setenv("LOCALAPPDATA", str(local))
     data = default_data_dir()
-    nsis_install = local / "Programs" / "MemScope"
-    program_files = tmp_path / "Program Files" / "MemScope"
+    nsis_install = local / "Programs" / "Dumplyzer"
+    program_files = tmp_path / "Program Files" / "Dumplyzer"
     assert data == local / APP_NAME
     assert data != nsis_install
     assert data != program_files
@@ -258,13 +373,13 @@ def test_user_data_is_separate_from_install_dirs(monkeypatch, tmp_path: Path) ->
     assert list(program_files.iterdir()) == []
 
 
-def test_pe_sieve_ignores_install_tree_executables(tmp_path: Path) -> None:
-    install = tmp_path / "Programs" / "MemScope"
+def test_capa_ignores_install_tree_executables(tmp_path: Path) -> None:
+    install = tmp_path / "Programs" / "Dumplyzer"
     install.mkdir(parents=True)
-    decoy = install / "pe-sieve64.exe"
+    decoy = install / "capa.exe"
     decoy.write_bytes(b"MZ" + b"\x00" * 256)
     paths = AppPaths(tmp_path / "data").ensure()
-    provider = PeSieveProvider(tools_dir=paths.tools, artifacts_dir=paths.artifacts)
+    provider = CapaProvider(tools_dir=paths.tools, artifacts_dir=paths.artifacts)
     assert provider._resolved_executable() is None
     avail = provider.availability()
     assert avail["available"] is False
@@ -327,10 +442,33 @@ print(json.dumps({
     assert payload["pslist_available"] is True
     assert payload["pslist_runnable_without_evidence"] is False
     assert payload["available_contains_failed_import"] is False
-    assert payload["yara_available_ids"] == []
-    assert "yara" in payload["missing_extras"]
+    assert "yara" not in payload["missing_extras"]
     assert "capstone" in payload["missing_extras"]
     assert "Crypto" in payload["missing_extras"]
     # Import failures must be listed, not turned into fake plugin rows.
     assert isinstance(payload["import_failures"], list)
+
+
+def test_release_scripts_pin_cargo_target_dir() -> None:
+    root = Path(__file__).resolve().parents[2]
+    build = (root / "scripts" / "windows" / "build-release.ps1").read_text(encoding="utf-8")
+    verify = (root / "scripts" / "windows" / "verify-installer.ps1").read_text(encoding="utf-8")
+    prepare = (root / "scripts" / "windows" / "prepare-engine-runtime.ps1").read_text(encoding="utf-8")
+    assert "CARGO_TARGET_DIR" in build
+    assert "Join-Path $Desktop" in build
+    assert "target" in build
+    assert r"release\resources" in build
+    assert "Removing stale release resources" in build
+    assert "Refusing to verify a different directory" in verify
+    assert "Removing previous runtime" in prepare
+    assert "3.12.10" in verify
+    assert "2.28.0" in verify
+    assert "9.4.0" in verify
+    assert "3.1.1" in verify
+    assert "4.5.4" in verify
+    assert "pe_sieve" in verify
+    assert "mal_unpack" in verify
+    assert "4.5.4" in prepare
+    assert "yara-python" in prepare
+    assert "resources\\rules" in prepare or "resources/rules" in prepare or "bundled_yara_rules" in prepare
 

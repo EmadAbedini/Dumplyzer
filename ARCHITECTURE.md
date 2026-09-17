@@ -1,9 +1,9 @@
-# MemScope — Architecture
+# Dumplyzer — Architecture
 
 > Describes the **intended and implemented** architecture. Update when the implementation changes.  
-> Last verified: 2026-09-06 — **0.1.0 release validation / hardening (schema v9, report schema v1)**.
+> Last verified: 2026-09-09 — PE Extraction + CAPA + FLOSS (schema v11, report schema v1).
 
-**Product:** MemScope — focused desktop workbench for Volatility 3 memory forensics  
+**Product:** Dumplyzer — focused desktop workbench for Volatility 3 memory forensics  
 **Platform primary:** Windows x64 (portable design for Linux later)  
 **Character:** Professional analyst workstation — not a CLI wrapper, not a SOC dashboard
 
@@ -30,7 +30,7 @@
 │  - Job manager, cache, SQLite storage                           │
 │  - Normalized forensic models                                   │
 │  - Volatility 3 API adapter                                     │
-│  - Optional providers: YARA, PE-sieve, mal_unpack               │
+│  - Providers: Volatility 3, PE Extraction, YARA, CAPA, FLOSS, bulk_extractor │
 └────────────────────────────┬────────────────────────────────────┘
                              │ Volatility 3 frameworks / plugins
                              ▼
@@ -90,7 +90,7 @@ memscope/
 │   │   ├── artifacts/     # Extraction + provenance
 │   │   ├── findings/      # Heuristics engine
 │   │   ├── ioc/           # IOC extraction
-│   │   ├── providers/     # yara, pe_sieve, mal_unpack adapters
+│   │   ├── providers/     # yara, pe_extraction, capa, floss, bulk_extractor adapters
 │   │   ├── storage/       # SQLite, migrations
 │   │   └── logging/       # Structured logs
 │   ├── pyproject.toml
@@ -218,7 +218,7 @@ Provenance: evidence → process → region/module → extraction method → sha
 
 ## 7. Database (SQLite)
 
-- Database: `%LOCALAPPDATA%\MemScope\memscope.db` on Windows, not inside the memory image and not inside the install directory
+- Database: `%LOCALAPPDATA%\Dumplyzer\memscope.db` on Windows, not inside the memory image and not inside the install directory
 - Stores: evidence metadata, normalized entities, jobs, cache index, findings, IOCs, artifacts metadata, timeline
 - **Does not store** raw memory dump bytes
 - Migrations: sequential SQL or lightweight migration runner from day one
@@ -248,7 +248,7 @@ Cache key components:
 1. Evidence SHA-256  
 2. Volatility version  
 3. Plugin name + normalized parameters  
-4. MemScope analysis/schema version  
+4. Dumplyzer analysis/schema version  
 5. Provider tool version when applicable  
 
 Invalidation on schema/version change. Never serve stale forensic results after relevant invalidation.
@@ -261,12 +261,14 @@ Implemented for Advanced Execution in `memscope_engine.cache` (`analysis_cache` 
 
 ```
 Memory Image (Evidence)
-  → Process
-    → Memory Region / Module
-      → Extracted Artifact (bytes on disk under controlled artifact store)
-        → SHA-256
-        → optional YARA matches
-        → optional PE-sieve / mal_unpack results
+  → Process / memory region / module
+    → PE Extraction → Extracted PE Artifact (EXE/DLL under analysis/pe_extraction)
+      → Signature Detection matches (memory dump and/or extracted artifacts)
+      → optional CAPA capabilities
+      → optional FLOSS strings
+  → optional bulk_extractor feature extraction on the memory image
+  → Network Artifact Extraction (harvested indicators with provenance)
+  → optional PCAP Reconstruction (carved packet records → analysis/pcap/*.pcap)
 ```
 
 - Artifact store path under app data; quarantine semantics (never auto-execute)
@@ -280,7 +282,7 @@ Memory Image (Evidence)
 - **Guided Mode:** Recommended Analysis strategies select relevant plugins for the task (e.g. process deep dive) — not “run everything”
 - **Advanced Mode / Plugin Explorer (implemented):** dynamic discovery from the installed Volatility 3 registry (`framework.import_files` + `framework.list_plugins`). Analysts inspect metadata, configure simple requirements, and run a `plugin_advanced` JobManager job. Results are a generic TreeGrid table plus structured raw JSON — not `vol.py` stdout.
 - Frontend never imports Volatility. Plugin ids resolve only through the discovered registry (no `import_module` of user strings, no shell, no arbitrary Python).
-- Framework requirements (URI/image location, `ModuleRequirement` kernel, translation layers, symbol tables, version dependencies) are filled from MemScope Evidence + automagic. The UI edits only configurable Boolean/Int/String/Choice/List parameters.
+- Framework requirements (URI/image location, `ModuleRequirement` kernel, translation layers, symbol tables, version dependencies) are filled from Dumplyzer Evidence + automagic. The UI edits only configurable Boolean/Int/String/Choice/List parameters.
 - Dedicated forensic views (Processes, Memory, Network, …) remain the guided path. Plugin Explorer is explicitly labeled generic execution.
 
 ---
@@ -300,15 +302,17 @@ Each finding answers **why** and links to evidence fields. Prefer precision over
 
 ---
 
-## 13. Optional providers
+## 13. Analysis capabilities (providers)
 
-| Provider | Role | Bundling |
+| Capability | Role | Bundling |
 |----------|------|----------|
-| YARA | Rule scan on artifacts/process memory where supported | Optional; user rules; `yara-python` or CLI adapter after verification |
-| PE-sieve | Suspicious process PE anomaly detection / dump | **User-supplied** official EXE (BSD-2-Clause; not bundled). Live `/pid` only; artifacts unsupported |
-| mal_unpack | Dynamic unpacker (hasherezade/mal_unpack 1.0) | **User-supplied** official EXE (BSD-2-Clause; not bundled). Native `/exe` executes the sample; MemScope never invokes that path |
+| Signature Detection | Rule scan of the original memory dump and/or extracted PE artifacts | **Bundled** yara-python 4.5.4 plus a small curated rule set. User rules: `%LOCALAPPDATA%\Dumplyzer\rules\yara\custom\` |
+| PE Extraction | Reconstruct EXE/DLL from the memory dump | Bundled Volatility 3 workflow (`windows.pedump` / VAD / dumpfiles) |
+| CAPA | Capabilities on extracted PE artifacts | **Bundled** official Windows standalone v9.4.0 (Apache-2.0) |
+| FLOSS | Static / deobfuscated strings on extracted PE | **Bundled** official Windows standalone v3.1.1 (Apache-2.0) |
+| bulk_extractor | Raw feature / artifact extraction from the memory image | **Bundled** official Windows EXE (GPL-3.0-or-later). Complements Volatility; invoked as a separate process |
 
-Interface: `Provider` protocol with `availability()`, `run(request) -> ProviderResult`. Core app runs without any of them.
+Interface: `Provider` protocol with `availability()`, `run(request) -> ProviderResult`. Signature Detection, CAPA, FLOSS, PE Extraction, and bulk_extractor remain explicit jobs; PE extraction does not auto-run the others.
 
 ---
 
@@ -339,12 +343,13 @@ Interface: `Provider` protocol with `availability()`, `run(request) -> ProviderR
 ## 16. Packaging (Windows x64)
 
 - Tauri 2 bundler produces **NSIS** (per-user, no admin) and **MSI** (WiX 3.14.1).
-- Engine: **official CPython 3.12.10 Windows embeddable** + `Lib\site-packages` containing `memscope-engine` and pinned Volatility 3 **2.28.0**. Not PyInstaller. Not a first-run venv. Not the developer's global Python.
+- Engine: **official CPython 3.12.10 Windows embeddable** + `Lib\site-packages` containing `memscope-engine`, pinned Volatility 3 **2.28.0**, and **yara-python 4.5.4**. Not PyInstaller. Not a first-run venv. Not the developer's global Python.
 - Packaged spawn: absolute `runtime\python.exe -m memscope_engine` (argv, no shell, `CREATE_NO_WINDOW`, env scrubbed).
-- Developer spawn: `engine\.venv\Scripts\python.exe` when no bundled runtime is present.
-- User data is `%LOCALAPPDATA%\MemScope\`, never inside the install directory.
+- Developer spawn: source-tree `app/desktop/resources/runtime/python.exe` when present (`tauri dev`); otherwise `engine\.venv\Scripts\python.exe`. Packaged spawn is unchanged.
+- User data is `%LOCALAPPDATA%\Dumplyzer\`, never inside the install directory.
 - Do not commit dumps, malware, local DBs, secrets, or generated `resources/runtime` / installer output.
-- Optional YARA / PE-sieve / mal_unpack are not bundled and are never auto-downloaded.
+- Signature Detection (yara-python 4.5.4) is bundled and is never auto-downloaded. User custom rules under `%LOCALAPPDATA%\Dumplyzer\rules\yara\custom\` survive upgrades.
+- bulk_extractor v2.2.0, CAPA v9.4.0, and FLOSS v3.1.1 official Windows binaries are bundled in application resources and invoked as separate programs. They are never downloaded at runtime.
 
 ---
 
@@ -389,7 +394,7 @@ Tests grow with features; no “test only at the end.”
 | VS Build Tools | 17.14.39 — MSVC 14.44.35207 |
 | Engine Python | **3.12.10** via `engine/.venv` for development; **bundled embeddable 3.12.10** for release |
 | Volatility 3 | **2.28.0** (`volatility3.framework` import + plugin package walk) |
-| Tauri | **2.11.5** — debug `memscope.exe` builds |
+| Tauri | **2.11.5** — debug `dumplyzer.exe` builds |
 | Node / npm | 22.18.0 / 10.9.3 |
 | WebView2 | Present on this developer host (Evergreen **152.0.4191.66**). Required at runtime. Installer uses `embedBootstrapper` (can download if missing). A machine without WebView2 and without network is **not** a supported launch environment |
 
@@ -399,13 +404,13 @@ Tests grow with features; no “test only at the end.”
 Frontend invoke("smoke_e2e") / engine_call(method, params)
   → Tauri persistent EngineState (app/desktop/src/lib.rs)
     → packaged: <install>/runtime/python.exe -m memscope_engine
-       developer: engine/.venv/Scripts/python.exe -m memscope_engine
+       developer: app/desktop/resources/runtime/python.exe or engine/.venv/Scripts/python.exe -m memscope_engine
       (argv, no shell)
       → NDJSON JSON-RPC
         → SQLite + Volatility 3 APIs
 ```
 
-User data root: `%LOCALAPPDATA%\MemScope\` (`MEMSCOPE_DATA_DIR` from the desktop shell).
+User data root: `%LOCALAPPDATA%\Dumplyzer\` (`MEMSCOPE_DATA_DIR` from the desktop shell).
 
 ### IPC methods (implemented)
 
@@ -424,15 +429,23 @@ User data root: `%LOCALAPPDATA%\MemScope\` (`MEMSCOPE_DATA_DIR` from the desktop
 | `process.analyze_recommended` | Queue `process_recommended` job |
 | `overview.get` | Investigation summary |
 | `network.list` / `modules.list` / `findings.list` | Entity lists |
+| `network.artifacts` / `network.extract_artifacts` / `network.artifact_runs` | Network artifact harvest from stored analysis |
+| `pcap.reconstructions` / `pcap.reconstruct` / `pcap.get` / `pcap.export_flow` | On-demand packet-record reconstruction to `.pcap` |
 | `yara.status` / `yara.configure` | Provider availability + settings |
 | `yara.scan_artifact` | Queue artifact YARA job |
 | `yara.scans_for_artifact` / `yara.scan_get` / `yara.matches_for_evidence` | Results |
-| `pe_sieve.status` / `pe_sieve.configure` | Provider availability + EXE path/timeout |
-| `pe_sieve.scan_artifact` | Queue artifact PE-sieve workflow (records unsupported target; does not invoke the EXE) |
-| `pe_sieve.scans_for_artifact` / `pe_sieve.scan_get` | Results + generated output artifacts |
-| `mal_unpack.status` / `mal_unpack.configure` | Provider availability + EXE path/timeout (no extra CLI) |
-| `mal_unpack.unpack_artifact` | Queue artifact mal_unpack workflow (records unsupported target; does not invoke the EXE) |
-| `mal_unpack.scans_for_artifact` / `mal_unpack.scan_get` | Results + generated output artifacts |
+| `pe_extraction.status` | Volatility 3 PE reconstruction availability |
+| `pe_extraction.run` | Queue PE Extraction against the imported memory dump |
+| `pe_extraction.runs` / `pe_extraction.run_get` / `pe_extraction.artifacts` | Extraction runs, counts, extracted PE artifacts |
+| `capa.status` / `capa.configure` | Provider availability + EXE path/timeout |
+| `capa.scan_artifact` | Queue CAPA against an extracted PE artifact |
+| `capa.scans_for_artifact` / `capa.scan_get` | Capability results |
+| `floss.status` / `floss.configure` | Provider availability + EXE path/timeout |
+| `floss.scan_artifact` | Queue FLOSS against an extracted PE artifact |
+| `floss.scans_for_artifact` / `floss.scan_get` | String results |
+| `bulk_extractor.status` / `bulk_extractor.configure` | Provider availability + EXE path/timeout (no extra CLI) |
+| `bulk_extractor.scan` | Queue evidence-scoped bulk_extractor job against the imported memory image |
+| `bulk_extractor.scans` / `bulk_extractor.scan_get` | Scan records, raw output file index, feature summary |
 | `plugins.list` | Dynamic Volatility 3 plugin catalog (+ runnable flag for selected evidence) |
 | `plugins.get` | Normalized plugin metadata, requirements, OS constraints |
 | `plugins.validate` | Validate plugin id + configurable parameters against Evidence |
@@ -445,61 +458,69 @@ User data root: `%LOCALAPPDATA%\MemScope\` (`MEMSCOPE_DATA_DIR` from the desktop
 
 ### SQLite schema version
 
-**v9** — `exports` table (format, scope, sections, output paths, report schema version). Prior: v8 analysis_cache + plugin_results; v7 mal_unpack; v6 PE-sieve; v5 YARA; v4 artifacts/timeline.
+**v13** — `network_artifacts` / `network_artifact_runs`, `pcap_reconstructions` / `pcap_flow_results`. **v12** — YARA memory-dump scans (`artifact_id` nullable, `target_kind`). **v11** — `pe_extraction_runs/items`, `capa_scans/capabilities`, `floss_scans/strings`. Prior: v10 `bulk_extractor_*`; v9 `exports`; v8 analysis_cache + plugin_results; v7 mal_unpack tables retained; v6 PE-sieve tables retained; v5 YARA; v4 artifacts/timeline.
 
 ### Optional providers
 
 ```
 providers/
-  base.py          # AnalysisProvider protocol
-  yara_provider.py # yara-python adapter (optional import)
-  pe_sieve.py      # user-supplied pe-sieve*.exe adapter (optional)
-  mal_unpack.py    # user-supplied mal_unpack*.exe adapter (optional)
+  base.py               # AnalysisProvider protocol
+  yara_provider.py      # yara-python adapter (optional import)
+  pe_extraction.py      # Volatility 3 PE reconstruction helpers
+  capa.py               # bundled capa.exe adapter
+  floss.py              # bundled floss.exe adapter
+  bulk_extractor.py     # bundled/user-supplied bulk_extractor*.exe adapter
+  process_run.py        # shared subprocess helper
 ```
 
 **YARA**
 
 - Optional: `pip install yara-python` / `pip install -e ".[yara]"`
 - Rules directory: `{app_data}/yara_rules/` (`.yar` / `.yara`)
-- Scan target: **artifact file paths** under controlled artifact store only
+- Scan target: **artifact file paths** under the artifact store and `analysis/pe_extraction/` only
 - Job kind: `yara_artifact_scan`
 - Results: rule name, namespace, source file, tags, meta, string identifiers + offsets
 - No threat scores; no process live-memory scan unless later explicitly added with a real target
 - Security: path allow-list for rules, artifact path confinement, no shell, timeouts, cooperative cancel
 
-**PE-sieve**
+**PE Extraction**
 
-- Verified interface: **hasherezade/pe-sieve v0.4.1.1** (`pe_sieve_ver_short.h`, `params.h`, `main.cpp`, `pe_sieve_return_codes.h`, `ResultsDumper`, wiki JSON reports)
-- License: **BSD-2-Clause** (Copyright (c) 2017-2025, @hasherezade). Redistribution of source and binary is permitted with copyright notice. **MemScope does not bundle the EXE**; the user copies an official release binary into `{app_data}/tools/` (or `tools/pe-sieve/`).
-- Required CLI: `/pid <live process id>` — there is **no file/artifact scan mode**
-- Optional args used by MemScope when invoking: `/dir <controlled tmp>`, `/json`, `/quiet`; version probe: `/version`
-- Default output: `{/dir}/process_<pid>/scan_report.json`, `dump_report.json`, dumped modules, optional `error_report.json`
-- Exit codes (observed, not a MemScope score): `-1` error, `0` info/help, `1` not detected, `2` detected
-- MemScope artifact workflow: **unsupported target**. Dump PIDs are not live PIDs; artifacts are never executed; the UI does not offer a live `/pid` scan from the artifact panel
-- Provider `scan_live_process` exists for the real PE-sieve interface (tests use a mock runner). It is not wired as an evidence/artifact action
-- Generated dumps (when a live scan result is persisted) become artifacts with SHA-256, `parent_artifact_id`, tool metadata, and `pe_sieve_outputs` links
-- Security: EXE allow-list (known names, MZ header, tools root only; artifact store denied), argv arrays, no extra user CLI, controlled tmp `/dir`, timeout, cooperative cancel, logs sanitized
-- Job kind: `pe_sieve_artifact_scan`
-- UI states: unavailable, unsupported target, queued, running, completed/no findings, completed/indicators, failed, cancelled
-- No malware/threat score
+- Volatility 3 workflow, not an external EXE. Reconstructs PE images from the imported Windows dump using `IMAGE_DOS_HEADER.reconstruct` via `windows.pedump`, plus VAD MZ scans and optional `windows.dumpfiles` for cached PE.
+- Candidates: process EXE, loaded DLLs, mapped PE, unlinked/manual-mapped executable MZ regions, and cached FILE_OBJECT PE files.
+- Output: `{app_data}/analysis/pe_extraction/<run-id>/` with collision-resistant filenames. Original evidence is fingerprinted and must not change.
+- Artifacts are labeled **extracted PE artifact**, never malware. They are never executed.
+- Provenance: dump → process/PID → memory region/VAD → extraction method/plugin → stored file SHA-256.
+- Job kind: `pe_extraction`
 
-**mal_unpack**
+**CAPA**
 
-- Verified project: **[hasherezade/mal_unpack](https://github.com/hasherezade/mal_unpack)** release tag **1.0** (`MALUNP_VERSION_STR "1.0.0.1"` in `mal_unpack_ver.h`; CLI in `params.h` / `main.cpp`)
-- Related projects not integrated: MalUnpackCompanion (kernel driver), `mal_unpack_py`
-- License: **BSD-2-Clause** (Copyright (c) 2018-2025, hasherezade). Redistribution of source and binary is permitted with copyright notice. **MemScope does not bundle the EXE**; the user copies an official 1.0 zip (`mal_unpack64.zip` / `mal_unpack32.zip`) into `{app_data}/tools/` (or `tools/mal_unpack/`). Allow-listed names: `mal_unpack.exe`, `mal_unpack64.exe`, `mal_unpack32.exe`
-- Real interface (required): `/exe <path_to_the_malware>` and `/timeout <ms>`. Optional output root: `/dir`. Version: `/version` prints `MalUnpack: v.{version}`
-- Native behavior: **creates a live process from `/exe`**, waits, dumps implants via PE-sieve, then kills the process. Upstream: use only on a VM. MemScope **never** passes a forensic artifact as `/exe` and never sets `/cmd`
-- Exit codes (same as PE-sieve, observed not scored): `-1` error, `0` info, `1` not detected, `2` detected
-- Output layout: `{/dir}/{exe_basename}.out/scan_{unix_timestamp}/` with PE-sieve `process_<pid>/scan_report.json`, `dump_report.json`, optional `error_report.json`; `unpack.log` in CWD
-- MemScope-safe targets: **none**. Native kind `executable_file` is unsafe here. Artifacts, live PIDs, VAD regions, and memory dumps are unsupported
-- Job `mal_unpack_artifact` records `unsupported_target` or `unavailable`; `run_unpack(..., confirm_sample_execution=False)` is the default and raises `mal_unpack_execution_forbidden`. Tests may confirm only with a mock runner and must refuse artifact-store paths as `/exe`
-- If dumps are persisted (test/mock ingest): first-class artifacts with SHA-256, `parent_artifact_id`, `extraction_method=mal_unpack_dump`, `mal_unpack_outputs` links. Output is never executed
-- Result model splits `observed` (tool) vs `interpretation` (MemScope). No malware score
-- Security: EXE allow-list (known names, MZ header, tools root only; artifact store denied), argv arrays, no extra user CLI, `/cmd` never passed, controlled tmp `/dir`, timeout, cooperative cancel, logs sanitized
-- Job kind: `mal_unpack_artifact`
-- UI states: unavailable, unsupported target, queued, running, completed/no output, completed/output generated, failed, cancelled
-- Unpack action in Artifacts UI is disabled for all investigation targets
+- Official Mandiant CAPA **v9.4.0** Windows standalone (`capa.exe`). Apache-2.0. Bundled from the GitHub zip with pinned SHA-256.
+- Target: extracted PE artifacts only. CLI: `capa.exe -q -j --color never <pe>`.
+- Results are capabilities (injection, network, persistence, …), not malware verdicts. Provenance includes `pe_extraction_run_id` when present.
+- Job kind: `capa_artifact`. No runtime download.
+
+**FLOSS**
+
+- Official Mandiant FLOSS **v3.1.1** Windows standalone (`floss.exe`). Apache-2.0. Bundled from the GitHub zip with pinned SHA-256.
+- Target: extracted PE artifacts only. CLI: `floss.exe -q -j <pe>`.
+- Results are static / stack / tight / decoded strings, not malware findings. Provenance includes `pe_extraction_run_id` when present.
+- Job kind: `floss_artifact`. No runtime download.
+
+**bulk_extractor**
+
+- Verified project: **[simsong/bulk_extractor](https://github.com/simsong/bulk_extractor)** release **v2.2.0** (`bulk_extractor64.exe` GitHub Actions MinGW cross-compile). Native MSVC Windows builds are not supported upstream.
+- License: **GPL-3.0-or-later** for post-NPS project-authored code (`LICENSE.md` at tag v2.2.0). Original NPS material is not U.S. copyright. Dumplyzer **bundles** the official Windows EXE as a **separate process** (aggregation) and ships corresponding source (`bulk_extractor-2.2.0.tar.gz`) plus license texts under `{install}/resources/tools/bulk_extractor/`.
+- Role: complementary **raw feature / artifact extraction** on the imported memory image. It does not replace Volatility, PE Extraction, YARA, CAPA, or FLOSS and is not invoked from Volatility Python.
+- CLI used: `-V` for version; scan argv `[exe, "-o", <new output dir>, <image>]`. No extra user arguments. The `-o` directory must not already exist.
+- Output layout: `{app_data}/analysis/bulk_extractor/<scan-id>/` — original feature files (`email.txt`, `url.txt`, `ip.txt`, …), histograms, `report.xml`, and captured stdout/stderr. Files are not flattened or discarded.
+- Normalization: detect present scanners/feature files dynamically. Map known stems (URL, domain, IPv4/IPv6, email, HTTP, telephone, CCN candidates, …) into IOC candidates and informational findings. Unknown `*.txt` feature files are still indexed.
+- Provenance: `source=bulk_extractor`, plugin `provider.bulk_extractor`. Findings use severity `info` / confidence `extracted` and state they are not confirmed malicious indicators.
+- Timeline: one analysis-time event (`event_kind=bulk_extractor`) when a scan completes. Feature-file timestamps are not treated as evidence timestamps.
+- Security: EXE allow-list (known names, MZ header, tools root **or** bundled resources; artifact/analysis roots denied as the EXE), argv arrays, no runtime download, evidence fingerprint before/after, timeout, cooperative cancel. Extracted bytes are never executed.
+- Default resolution: bundled `{install}/resources/tools/bulk_extractor/bulk_extractor64.exe`. User-supplied EXE under `{app_data}/tools/` is an override when configured or when the bundle is missing.
+- Job kind: `bulk_extractor_scan`
+- UI states: unavailable, idle, queued, running, completed_features, completed_no_features, failed, cancelled
+- Full Analysis does **not** run bulk_extractor, PE Extraction, YARA, CAPA, or FLOSS
 
 **Plugin Explorer / Advanced execution**
 
@@ -517,27 +538,27 @@ providers/
 **Export / reporting**
 
 - Formats: **JSON** (`memscope-report-v1`, report schema **v1**), **CSV** (tabular datasets), **HTML** (primary human-readable forensic report). No PDF.
-- Job kind `export_report`; records persist in SQLite `exports` (schema **v9**)
+- Job kind `export_report`; records persist in SQLite `exports` (schema **v9**; analysis schema currently **v11**)
 - Output is always under `{app_data}/exports/<sanitized-name>_<id>/`. Client destination paths are rejected. Filenames are sanitized. Source evidence is never overwritten. Path traversal and absolute paths are rejected.
 - JSON complete export writes `investigation.json` plus `manifest.json`. Selected JSON writes per-section documents that still include metadata and provenance.
 - CSV datasets (deterministic columns): processes, network, modules, vad, findings, iocs, timeline, artifacts. Nulls become empty cells; dict/list values are compact JSON. Complete CSV writes one file per dataset.
 - HTML is self-contained (inline CSS, no CDN, no JavaScript). Forensic strings are `html.escape`d. Large tables truncate at 400 rows with a pointer to JSON/CSV. Advanced Volatility executions are summarized (plugin, params, status, cache hit/miss, row counts) — raw TreeGrid output is omitted.
 - Provenance chain recorded on the report: Evidence → AnalysisRun → PluginExecution → Entity/Artifact → Finding/IOC/Timeline. Timeline `classification` is `observed` or `inferred`; inferred events are labeled and not presented as directly observed.
 - Executive summary is factual counts only. **No malware/risk score.**
-- Optional provider results (YARA, PE-sieve, mal_unpack) are included when present; PE-sieve/mal_unpack keep `observed` (tool) vs `interpretation` (MemScope). Missing providers yield empty sections.
+- Optional provider results (YARA, CAPA, FLOSS, PE Extraction, bulk_extractor) are included when present. CAPA/FLOSS keep `observed` (tool) vs `interpretation` (Dumplyzer). Extracted PE files are labeled extracted artifacts, not malware. bulk_extractor is labeled Source: bulk_extractor / Type: Extracted Artifact / IOC Candidate. Missing providers yield empty sections.
 - Limits: HTML 400 rows/section, JSON 20k, CSV 50k. Collection uses existing list DTOs / SQLite, not a raw table dump.
-- Security: no shell, no artifact execution, no network fetches from the report, no secrets added by MemScope. Command lines, paths, usernames, and plugin output are treated as untrusted text.
+- Security: no shell, no artifact execution, no network fetches from the report, no secrets added by Dumplyzer. Command lines, paths, usernames, and plugin output are treated as untrusted text.
 
 ---
 
 ## 21. Open decisions
 
-1. **License:** Apache-2.0 for MemScope application source (`LICENSE`). Redistributed Volatility 3 remains VSL; CPython embeddable is PSF; pefile is MIT. See `THIRD_PARTY_NOTICES.md`.  
+1. **License:** Apache-2.0 for Dumplyzer application source (`LICENSE`). Redistributed Volatility 3 remains VSL; CPython embeddable is PSF; pefile is MIT. See `THIRD_PARTY_NOTICES.md`.  
 2. **Engine shipping for release:** official CPython 3.12.10 embeddable + site-packages (AD-043)  
 3. **Python engine runtime:** **3.12.10** (decided)  
-4. **PE-sieve / mal_unpack:** user-supplied official EXEs (not bundled). mal_unpack 1.0 executes `/exe`; MemScope will not invoke it against investigation targets.  
+4. **PE Extraction / CAPA / FLOSS:** PE Extraction is a Volatility 3 workflow. Official CAPA v9.4.0 and FLOSS v3.1.1 Windows standalones are bundled (Apache-2.0). **bulk_extractor:** official v2.2.0 Windows EXE is bundled (GPL-3.0-or-later, separate process + corresponding source). YARA remains an optional Python extra.  
 5. **Code signing:** procedure documented in `docs/windows-release.md`. No certificate is in the repository. 0.1.0 artifacts are unsigned.  
-6. **Clean-machine VM sign-off:** remaining public-release blocker (`docs/clean-machine-validation.md`).  
+6. **Clean-machine VM sign-off:** NSIS path executed 2026-09-07 (**PASS WITH LIMITATIONS**, `docs/clean-machine-validation.md`). MSI and WebView2-absent-offline remain untested.  
 7. **WebView2:** Evergreen required. Offline machines that do not already have WebView2 are unsupported with the current bootstrapper packaging.  
 
 Ordinary implementation choices proceed without further permission.

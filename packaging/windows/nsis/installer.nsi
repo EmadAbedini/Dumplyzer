@@ -1,7 +1,7 @@
-; MemScope NSIS template based on Tauri 2.11.5 installer.nsi.
+; Dumplyzer NSIS template based on Tauri 2.11.5 installer.nsi.
 ; Local change: current-user default INSTDIR is
 ;   $LOCALAPPDATA\Programs\${PRODUCTNAME}
-; so application binaries are not mixed with %LOCALAPPDATA%\MemScope user data.
+; so application binaries are not mixed with %LOCALAPPDATA%\Dumplyzer user data.
 Unicode true
 ManifestDPIAware true
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
