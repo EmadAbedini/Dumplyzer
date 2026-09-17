@@ -1,72 +1,128 @@
+import { coverageItem, OVERVIEW_COVERAGE_ROWS } from "../lib/analysisCoverage";
+import { useState } from "react";
+import type { ReactNode } from "react";
 import type { Overview } from "../lib/types";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { CoverageStatus } from "./CoverageStatus";
+import { StatusToast, useStatusToast } from "./StatusToast";
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function analysisHasNotRun(importStatus: string | null | undefined): boolean {
+  return !importStatus || importStatus === "imported";
+}
+
+function displaySymbolStatus(
+  symbolStatus: string | null | undefined,
+  importStatus: string | null | undefined,
+): string {
+  if (analysisHasNotRun(importStatus)) return "Not analyzed";
+  if (!symbolStatus || symbolStatus === "unknown") return "—";
+  return symbolStatus;
+}
+
+function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="grid grid-cols-[140px_1fr] gap-2 border-b border-border/60 py-1.5 text-xs">
+    <div className="grid grid-cols-[140px_1fr] items-center gap-2 border-b border-border/60 py-1.5 text-xs last:border-0">
       <div className="text-muted">{label}</div>
       <div className="font-mono break-all">{value ?? "—"}</div>
     </div>
   );
 }
 
-export function OverviewView({ data }: { data: Overview | null }) {
+function HashValue({ value }: { value: string | null | undefined }) {
+  const { toast, showToast } = useStatusToast();
+  const [busy, setBusy] = useState(false);
+  if (!value) return "—";
+  return (
+    <span className="inline-flex max-w-full items-center gap-2">
+      <span className="min-w-0 break-all">{value}</span>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-6 shrink-0 px-2 text-[0.7rem]"
+        disabled={busy}
+        onClick={() => {
+          if (busy) return;
+          setBusy(true);
+          void navigator.clipboard
+            .writeText(value)
+            .then(() => showToast("SHA-256 copied"))
+            .finally(() => setBusy(false));
+        }}
+      >
+        Copy
+      </Button>
+      <StatusToast message={toast} />
+    </span>
+  );
+}
+
+export function OverviewView({
+  data,
+  onImport,
+  importing = false,
+}: {
+  data: Overview | null;
+  onImport?: () => void;
+  importing?: boolean;
+}) {
   if (!data) {
     return (
-      <div className="p-4 text-sm text-muted">
-        Import a memory image to begin investigation.
+      <div className="flex h-full items-start justify-center p-8">
+        <div className="w-full max-w-lg">
+          <button
+            type="button"
+            className="card app-import-prompt group w-full cursor-pointer appearance-none p-6 text-center text-inherit disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={onImport}
+            disabled={importing || !onImport}
+            aria-label="Import a memory dump"
+          >
+            <h2 className="text-base font-semibold transition-colors group-hover:text-accent">
+              No evidence loaded
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              Import a memory dump to begin investigation, or drag a dump file onto
+              this window.
+            </p>
+          </button>
+        </div>
       </div>
     );
   }
   const e = data.evidence;
+  const notAnalyzed = analysisHasNotRun(e.import_status);
+  const symbolLabel = displaySymbolStatus(e.symbol_status, e.import_status);
   return (
-    <div className="p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <h2 className="text-sm font-semibold">Overview</h2>
-        <Badge>{e.import_status ?? "unknown"}</Badge>
-        <Badge>{e.symbol_status ?? "symbols?"}</Badge>
+    <div className="p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <h2 className="text-base font-semibold tracking-tight">Overview</h2>
+        <Badge>{e.import_status ?? "imported"}</Badge>
+        {notAnalyzed ? (
+          <Badge>Not analyzed</Badge>
+        ) : e.symbol_status && e.symbol_status !== "unknown" ? (
+          <Badge>{e.symbol_status}</Badge>
+        ) : null}
       </div>
+      <div className="card overflow-hidden px-4 py-1">
       <Row label="Filename" value={e.filename} />
       <Row label="Path" value={e.path} />
       <Row label="Size" value={`${e.size_bytes.toLocaleString()} bytes`} />
-      <Row label="SHA-256" value={e.sha256} />
+      <Row label="SHA-256" value={<HashValue value={e.sha256} />} />
       <Row label="OS" value={e.detected_os} />
       <Row label="Architecture" value={e.architecture} />
-      <Row label="Symbol status" value={e.symbol_status} />
+      <Row label="Symbol status" value={symbolLabel} />
       <Row label="Symbol detail" value={e.symbol_detail} />
-      <Row label="Processes" value={data.process_count} />
-      <Row label="Network" value={data.network_count} />
-      <Row label="Modules" value={data.module_count} />
-      <Row label="Findings" value={data.finding_count} />
-      <Row label="IOCs" value={data.ioc_count} />
-      <div className="mt-4">
-        <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">
-          Recent analysis runs
-        </div>
-        {data.recent_runs.length === 0 ? (
-          <div className="text-xs text-muted">None yet</div>
-        ) : (
-          <table className="w-full text-left text-xs">
-            <thead className="text-muted">
-              <tr>
-                <th className="py-1 font-medium">Kind</th>
-                <th className="py-1 font-medium">Status</th>
-                <th className="py-1 font-medium">Started</th>
-                <th className="py-1 font-medium">Vol</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.recent_runs.map((r) => (
-                <tr key={String(r.id)} className="border-t border-border/50">
-                  <td className="py-1">{String(r.kind)}</td>
-                  <td className="py-1">{String(r.status)}</td>
-                  <td className="py-1 font-mono">{String(r.started_at ?? "")}</td>
-                  <td className="py-1 font-mono">{String(r.volatility_version ?? "")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="mb-1 mt-[15px] text-[11px] font-medium uppercase tracking-wider text-muted">
+        Analysis
+      </div>
+      {OVERVIEW_COVERAGE_ROWS.map((row) => (
+        <Row
+          key={row.id}
+          label={row.label}
+          value={<CoverageStatus item={coverageItem(data.coverage, row.id)} />}
+        />
+      ))}
       </div>
     </div>
   );

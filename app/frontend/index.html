@@ -1,9 +1,31 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MemScope</title>
+    <title>Dumplyzer</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("dumplyzer.ui.theme") || localStorage.getItem("memscope.ui.theme");
+          var theme = t === "dark" ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.style.colorScheme = theme;
+          var f = localStorage.getItem("dumplyzer.ui.fontSize") || localStorage.getItem("memscope.ui.fontSize");
+          var n = f ? parseInt(f, 10) : 13;
+          if (n < 12) n = 12;
+          if (n > 16) n = 16;
+          document.documentElement.style.setProperty("--app-font-size", n + "px");
+        } catch (e) {}
+      })();
+      document.addEventListener(
+        "contextmenu",
+        function (e) {
+          e.preventDefault();
+        },
+        true,
+      );
+    </script>
   </head>
   <body>
     <div id="root"></div>

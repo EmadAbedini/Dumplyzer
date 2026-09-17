@@ -48,6 +48,7 @@ export type ModuleRow = {
   evidence_id: string;
   process_id: string | null;
   pid: number;
+  process_name?: string | null;
   name: string | null;
   path: string | null;
   base_address: string | null;
@@ -62,6 +63,7 @@ export type NetworkConnection = {
   evidence_id: string;
   process_id: string | null;
   pid: number | null;
+  process_name?: string | null;
   protocol: string | null;
   local_address: string | null;
   local_port: number | null;
@@ -72,6 +74,96 @@ export type NetworkConnection = {
   created: string | null;
   offset_hex: string | null;
   source_plugin: string | null;
+};
+
+export type NetworkArtifact = {
+  id: string;
+  run_id?: string | null;
+  evidence_id: string;
+  analysis_run_id?: string | null;
+  connection_id?: string | null;
+  process_id: string | null;
+  pid: number | null;
+  process_name?: string | null;
+  artifact_type: string;
+  value: string;
+  protocol: string | null;
+  local_address: string | null;
+  local_port: number | null;
+  remote_address: string | null;
+  remote_port: number | null;
+  state: string | null;
+  source: string;
+  source_plugin: string | null;
+  extraction_method: string;
+  source_address: string | null;
+  offset_hex: string | null;
+  context: string | null;
+  metadata?: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type NetworkArtifactRun = {
+  id: string;
+  evidence_id: string;
+  status: string;
+  artifact_count: number;
+  type_counts: Record<string, number>;
+  sources: string[];
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type PcapFlowResult = {
+  id: string;
+  reconstruction_id: string;
+  connection_id: string | null;
+  process_id: string | null;
+  pid: number | null;
+  protocol: string | null;
+  local_address: string | null;
+  local_port: number | null;
+  remote_address: string | null;
+  remote_port: number | null;
+  status: string;
+  display_status: string;
+  packet_count: number;
+  truncated_count: number;
+  notes: string | null;
+  flow_pcap_path: string | null;
+  exportable: boolean;
+};
+
+export type PcapReconstruction = {
+  id: string;
+  evidence_id: string;
+  status: string;
+  ui_state: string | null;
+  reconstruction_status: string;
+  display_status: string;
+  packet_count: number;
+  truncated_count: number;
+  ethernet_count: number;
+  raw_ip_count: number;
+  flow_count: number;
+  output_path: string | null;
+  output_dir: string | null;
+  files: Array<Record<string, unknown>>;
+  limitations: string[];
+  observed?: {
+    imported_pcap_packets?: number | null;
+    imported_pcap_path?: string | null;
+    [key: string]: unknown;
+  } | null;
+  pcap_embedded?: boolean;
+  error?: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type PcapReconstructionBundle = {
+  reconstruction: PcapReconstruction;
+  flows: PcapFlowResult[];
 };
 
 export type HandleRow = {
@@ -132,10 +224,10 @@ export type Artifact = {
   parent_artifact_id?: string | null;
   yara_scans?: YaraScanBundle[];
   yara_status?: YaraStatus;
-  pe_sieve_scans?: PeSieveScanBundle[];
-  pe_sieve_status?: PeSieveStatus;
-  mal_unpack_scans?: MalUnpackScanBundle[];
-  mal_unpack_status?: MalUnpackStatus;
+  capa_scans?: CapaScanBundle[];
+  capa_status?: CapaStatus;
+  floss_scans?: FlossScanBundle[];
+  floss_status?: FlossStatus;
 };
 
 export type YaraStatus = {
@@ -145,18 +237,37 @@ export type YaraStatus = {
   yara_version?: string | null;
   binding?: string | null;
   provider?: string;
+  bundled?: boolean;
   rule_file_count?: number;
+  valid_rule_file_count?: number;
+  skipped_rule_file_count?: number;
+  loaded_rule_count?: number;
+  memory_rule_file_count?: number;
+  artifact_rule_file_count?: number;
+  bundled_rule_file_count?: number;
+  custom_rule_file_count?: number;
+  extra_rule_file_count?: number;
+  bundled_rule_count?: number;
+  custom_rule_count?: number;
+  extra_rule_count?: number;
+  skipped_rule_files?: Array<{ path?: string; error?: string }>;
   rule_files?: string[];
   default_rules_dir?: string | null;
+  bundled_dir?: string | null;
+  custom_dir?: string | null;
   extra_rule_paths?: string[];
   timeout_secs?: number;
+  memory_timeout_secs?: number;
+  scan_modes?: string[];
+  status_summary?: string;
 };
 
 export type YaraMatch = {
   id: string;
   scan_id: string;
   evidence_id: string;
-  artifact_id: string;
+  artifact_id: string | null;
+  target_kind?: string;
   process_id: string | null;
   pid: number | null;
   memory_region_id: string | null;
@@ -179,7 +290,8 @@ export type YaraMatch = {
 export type YaraScan = {
   id: string;
   evidence_id: string;
-  artifact_id: string;
+  artifact_id: string | null;
+  target_kind?: string;
   process_id: string | null;
   pid: number | null;
   memory_region_id: string | null;
@@ -199,19 +311,81 @@ export type YaraScanBundle = {
   matches: YaraMatch[];
 };
 
-export type PeSieveStatus = {
+export type PeExtractionStatus = {
   available: boolean;
   reason?: string | null;
   suggestion?: string | null;
-  pe_sieve_version?: string | null;
+  volatility_version?: string | null;
+  pedump_available?: boolean;
+  target?: string;
+  methods?: string[];
+  notes?: string;
+  produces?: string;
+  not_a_malware_verdict?: boolean;
+};
+
+export type PeExtractionRun = {
+  id: string;
+  evidence_id: string;
+  analysis_run_id?: string | null;
+  job_id?: string | null;
+  status: string;
+  volatility_version?: string | null;
+  extracted_count: number;
+  exe_count: number;
+  dll_count: number;
+  skipped_count: number;
+  candidate_count?: number;
+  output_dir?: string | null;
+  methods?: string[];
+  observed?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type PeExtractionItem = {
+  id: string;
+  run_id: string;
+  artifact_id: string | null;
+  evidence_id?: string | null;
+  process_id: string | null;
+  pid: number | null;
+  process_name: string | null;
+  original_path: string | null;
+  pe_kind: string | null;
+  memory_region: string | null;
+  source_address?: string | null;
+  start_vpn?: string | null;
+  end_vpn?: string | null;
+  extraction_method: string;
+  source_plugin: string | null;
+  filename: string | null;
+  stored_path: string | null;
+  sha256: string | null;
+  size_bytes: number | null;
+  metadata?: Record<string, unknown>;
+  label?: string;
+  created_at?: string | null;
+};
+
+export type PeExtractionBundle = {
+  run: PeExtractionRun;
+  items: PeExtractionItem[];
+};
+
+export type CapaStatus = {
+  available: boolean;
+  reason?: string | null;
+  suggestion?: string | null;
+  capa_version?: string | null;
   executable_path?: string | null;
   tools_dir?: string | null;
   timeout_secs?: number;
   verified_release?: string;
   supported_target_kinds?: string[];
-  memscope_artifact_targets_supported?: boolean;
-  unsupported_target_explanation?: string | null;
-  ui_state?: string;
+  target?: string;
+  source?: "bundled" | "user-supplied" | string | null;
   license?: {
     name?: string;
     redistribution?: string;
@@ -219,24 +393,39 @@ export type PeSieveStatus = {
   };
 };
 
-export type PeSieveScan = {
+export type CapaCapability = {
+  id: string;
+  scan_id: string;
+  evidence_id?: string | null;
+  artifact_id?: string | null;
+  process_id?: string | null;
+  pid?: number | null;
+  name: string;
+  namespace: string | null;
+  scope: string | null;
+  attck: unknown[];
+  mbc: unknown[];
+  authors: unknown[];
+  description: string | null;
+  created_at: string | null;
+};
+
+export type CapaScan = {
   id: string;
   evidence_id: string | null;
-  artifact_id: string | null;
+  artifact_id: string;
   process_id: string | null;
   pid: number | null;
-  memory_region_id: string | null;
-  analysis_run_id: string | null;
-  job_id: string | null;
+  memory_region_id?: string | null;
+  pe_extraction_run_id?: string | null;
+  analysis_run_id?: string | null;
+  job_id?: string | null;
   status: string;
-  ui_state: string | null;
-  target_kind: string | null;
-  live_pid: number | null;
-  pe_sieve_version: string | null;
-  executable_path: string | null;
-  output_dir: string | null;
-  exit_code: number | null;
-  pesieve_result: string | null;
+  capa_version: string | null;
+  executable_path?: string | null;
+  capability_count: number;
+  exit_code?: number | null;
+  output_json_path?: string | null;
   observed?: Record<string, unknown>;
   interpretation?: Record<string, unknown>;
   error?: Record<string, unknown> | null;
@@ -244,44 +433,88 @@ export type PeSieveScan = {
   finished_at: string | null;
 };
 
-export type PeSieveOutput = {
-  id: string;
-  scan_id: string;
-  artifact_id: string;
-  dump_file: string | null;
-  dump_mode: string | null;
-  module_base: string | null;
-  is_shellcode: boolean;
-  role: string;
-  sha256?: string | null;
-  filename?: string | null;
-  size_bytes?: number | null;
-  file_type?: string | null;
-  observed?: Record<string, unknown>;
+export type CapaScanBundle = {
+  scan: CapaScan;
+  capabilities: CapaCapability[];
 };
 
-export type PeSieveScanBundle = {
-  scan: PeSieveScan;
-  outputs: PeSieveOutput[];
-};
-
-export type MalUnpackStatus = {
+export type FlossStatus = {
   available: boolean;
   reason?: string | null;
   suggestion?: string | null;
-  mal_unpack_version?: string | null;
+  floss_version?: string | null;
   executable_path?: string | null;
   tools_dir?: string | null;
   timeout_secs?: number;
-  timeout_ms?: number;
   verified_release?: string;
-  verified_version_str?: string;
-  verified_repo?: string;
-  native_target_kinds?: string[];
   supported_target_kinds?: string[];
-  memscope_artifact_targets_supported?: boolean;
-  executes_sample?: boolean;
-  unsupported_target_explanation?: string | null;
+  target?: string;
+  source?: "bundled" | "user-supplied" | string | null;
+  license?: {
+    name?: string;
+    redistribution?: string;
+    bundled_in_memscope?: boolean;
+  };
+};
+
+export type FlossString = {
+  id: string;
+  scan_id: string;
+  evidence_id?: string | null;
+  artifact_id?: string | null;
+  process_id?: string | null;
+  pid?: number | null;
+  kind: string;
+  value: string;
+  offset?: string | null;
+  encoding?: string | null;
+  observed?: Record<string, unknown>;
+  created_at?: string | null;
+};
+
+export type FlossScan = {
+  id: string;
+  evidence_id: string | null;
+  artifact_id: string;
+  process_id: string | null;
+  pid: number | null;
+  memory_region_id?: string | null;
+  pe_extraction_run_id?: string | null;
+  analysis_run_id?: string | null;
+  job_id?: string | null;
+  status: string;
+  floss_version: string | null;
+  executable_path?: string | null;
+  string_count: number;
+  exit_code?: number | null;
+  output_json_path?: string | null;
+  observed?: Record<string, unknown>;
+  interpretation?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type FlossScanBundle = {
+  scan: FlossScan;
+  strings: FlossString[];
+};
+
+export type BulkExtractorStatus = {
+  available: boolean;
+  reason?: string | null;
+  suggestion?: string | null;
+  bulk_extractor_version?: string | null;
+  executable_path?: string | null;
+  tools_dir?: string | null;
+  analysis_dir?: string | null;
+  timeout_secs?: number;
+  verified_release?: string;
+  verified_repo?: string;
+  supported_target_kinds?: string[];
+  source?: "bundled" | "user-supplied" | string | null;
+  bundled_dir?: string | null;
+  windows_notes?: string | null;
   ui_state?: string;
   license?: {
     name?: string;
@@ -290,23 +523,33 @@ export type MalUnpackStatus = {
   };
 };
 
-export type MalUnpackScan = {
+export type BulkExtractorCategory = {
+  id: string;
+  label: string;
+  description?: string;
+  unique_count: number;
+  row_count: number;
+  scanners?: string[];
+  columns?: string[];
+};
+
+export type BulkExtractorScan = {
   id: string;
   evidence_id: string | null;
-  artifact_id: string | null;
-  process_id: string | null;
-  pid: number | null;
-  memory_region_id: string | null;
   analysis_run_id: string | null;
   job_id: string | null;
   status: string;
   ui_state: string | null;
-  target_kind: string | null;
-  mal_unpack_version: string | null;
+  bulk_extractor_version: string | null;
   executable_path: string | null;
   output_dir: string | null;
   exit_code: number | null;
-  unpack_result: string | null;
+  feature_count: number;
+  feature_file_count?: number;
+  feature_counts?: Record<string, number>;
+  unique_counts?: Record<string, number>;
+  categories?: BulkExtractorCategory[];
+  scanner_count: number;
   invoked: boolean;
   observed?: Record<string, unknown>;
   interpretation?: Record<string, unknown>;
@@ -315,31 +558,62 @@ export type MalUnpackScan = {
   finished_at: string | null;
 };
 
-export type MalUnpackOutput = {
+export type BulkExtractorOutput = {
   id: string;
   scan_id: string;
-  artifact_id: string;
-  dump_file: string | null;
-  dump_mode: string | null;
-  module_base: string | null;
-  is_shellcode: boolean;
+  evidence_id?: string | null;
+  relative_path: string | null;
   role: string;
-  sha256?: string | null;
-  filename?: string | null;
+  scanner?: string | null;
   size_bytes?: number | null;
-  file_type?: string | null;
   observed?: Record<string, unknown>;
+  created_at?: string | null;
 };
 
-export type MalUnpackScanBundle = {
-  scan: MalUnpackScan;
-  outputs: MalUnpackOutput[];
+export type BulkExtractorScanBundle = {
+  scan: BulkExtractorScan;
+  outputs: BulkExtractorOutput[];
+};
+
+export type BulkExtractorFeature = {
+  id: string;
+  scan_id?: string;
+  evidence_id?: string | null;
+  scanner: string;
+  category: string;
+  ioc_type: string;
+  finding_type?: string;
+  offset: string | null;
+  value: string;
+  context: string | null;
+  count: number;
+  extra?: Record<string, unknown>;
+  created_at?: string | null;
+};
+
+export type BulkExtractorFeaturePage = {
+  scan_id: string;
+  evidence_id?: string | null;
+  categories: BulkExtractorCategory[];
+  category?: string | null;
+  scanner?: string | null;
+  items: BulkExtractorFeature[];
+  total: number;
+  shown?: number;
+  limit?: number;
+  offset?: number;
+  hide_weak?: boolean;
+  note?: string;
 };
 
 export type TimelineEvent = {
   id: string;
   evidence_id: string;
   event_time: string | null;
+  /** When the analyst ran Dumplyzer; not dump OS time. */
+  recorded_at?: string | null;
+  /** dump = forensic OS clock; analysis = tool/run wall clock. */
+  clock?: "dump" | "analysis";
   time_precision: string;
   classification: string;
   event_kind: string;
@@ -406,6 +680,29 @@ export type Job = {
   result: Record<string, unknown> | null;
   params: Record<string, unknown>;
   cancel_requested: boolean;
+  evidence_filename?: string | null;
+};
+
+export type AnalysisCapability = {
+  id: string;
+  label: string;
+  scope: "evidence" | "process" | string;
+  description: string;
+};
+
+export type AnalysisProfileInfo = {
+  id: "full" | "recommended" | "custom" | string;
+  label: string;
+  capabilities: string[];
+  description: string;
+};
+
+export type AnalysisProfileCatalog = {
+  profiles: AnalysisProfileInfo[];
+  capabilities: AnalysisCapability[];
+  full_analysis: string;
+  select_all_evidence: string[];
+  select_all_with_process: string[];
 };
 
 export type Overview = {
@@ -416,6 +713,25 @@ export type Overview = {
   finding_count: number;
   ioc_count: number;
   recent_runs: Array<Record<string, unknown>>;
+  coverage?: AnalysisCoverage;
+};
+
+export type AnalysisCoverageState =
+  | "analyzed"
+  | "analyzed_zero"
+  | "not_analyzed"
+  | "failed";
+
+export type CapabilityCoverage = {
+  id: string;
+  state: AnalysisCoverageState;
+  count: number | null;
+};
+
+export type AnalysisCoverage = {
+  items: Record<string, CapabilityCoverage>;
+  executed: string[];
+  failed: string[];
 };
 
 export type PluginRequirement = {
@@ -541,10 +857,12 @@ export type NavId =
   | "search"
   | "timeline"
   | "artifacts"
+  | "signatures"
   | "jobs"
   | "plugins"
   | "export"
-  | "settings";
+  | "settings"
+  | "about";
 
 export type SearchHit = {
   entity: string;
@@ -569,7 +887,7 @@ export type Ioc = {
   created_at: string | null;
 };
 
-export type ExportFormat = "json" | "csv" | "html";
+export type ExportFormat = "json" | "xlsx" | "html";
 export type ExportScope = "complete" | "selected";
 export type ExportUiState =
   | "idle"
@@ -578,6 +896,11 @@ export type ExportUiState =
   | "completed"
   | "failed"
   | "cancelled";
+
+export function exportStatusLabel(state: ExportUiState): string {
+  if (state === "queued" || state === "running") return "generating";
+  return state;
+}
 
 export type ExportRecord = {
   id: string;

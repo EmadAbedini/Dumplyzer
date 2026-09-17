@@ -57,3 +57,35 @@ export async function ensureAppPaths(): Promise<Record<string, string>> {
     throw parseEngineError(err);
   }
 }
+
+export async function openUserFolder(kind: string): Promise<void> {
+  try {
+    await invoke("open_user_folder", { kind });
+  } catch (err) {
+    throw parseEngineError(err);
+  }
+}
+
+export async function openLocalFolder(path: string): Promise<void> {
+  try {
+    await invoke("open_local_folder", { path });
+  } catch (err) {
+    throw parseEngineError(err);
+  }
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  try {
+    await invoke("open_external_url", { url });
+  } catch (err) {
+    throw parseEngineError(err);
+  }
+}
+
+export async function copyExportFile(source: string, destination: string): Promise<void> {
+  try {
+    await invoke("copy_export_file", { source, destination });
+  } catch (err) {
+    throw parseEngineError(err);
+  }
+}

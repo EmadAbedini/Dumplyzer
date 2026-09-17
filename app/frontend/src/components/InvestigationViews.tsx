@@ -1,76 +1,180 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
-import type { NetworkConnection, ModuleRow, Finding } from "../lib/types";
+import { formatResultCell } from "../lib/datetime";
+import { matchesFieldQuery } from "../lib/resultFilter";
+import { useTableSort } from "../lib/tableSort";
+import {
+  coverageLiveKind,
+  coverageResultCaption,
+} from "../lib/analysisCoverage";
+import { countFindingsBySeverity, sortFindings } from "../lib/findings";
+import type { ModuleRow, Finding, CapabilityCoverage } from "../lib/types";
+import {
+  CoverageEmptyState,
+  ImportEvidenceState,
+  ListLoadingState,
+  coverageShowsEmptyPanel,
+} from "./CoverageStatus";
+import { FindingCard } from "./FindingCard";
+import { ResultFilterBar } from "./ResultFilterBar";
+import { SortableTh } from "./SortableTh";
 
-export function NetworkView({
-  evidenceId,
-  onError,
+function PidCell({
+  value,
+  processId,
+  onOpenProcess,
 }: {
-  evidenceId: string | null;
-  onError: (m: string) => void;
+  value: string | number;
+  processId?: string | null;
+  onOpenProcess?: (processId: string) => void;
 }) {
-  const [items, setItems] = useState<NetworkConnection[]>([]);
+  const label = formatResultCell(value);
+  if (processId && onOpenProcess) {
+    return (
+      <button
+        type="button"
+        className="text-accent hover:underline"
+        onClick={() => onOpenProcess(processId)}
+      >
+        {label}
+      </button>
+    );
+  }
+  return <>{label}</>;
+}
+
+function useEvidenceItems<T>(
+  evidenceId: string | null,
+  method: string,
+  onError: (m: string) => void,
+  refreshToken?: number | string,
+): { items: T[]; loading: boolean } {
+  const [items, setItems] = useState<T[]>([]);
+  const [loadedEvidenceId, setLoadedEvidenceId] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!evidenceId) return;
+    if (!evidenceId) {
+      setItems([]);
+      setLoadedEvidenceId(null);
+      return;
+    }
+    let cancelled = false;
     void (async () => {
       try {
-        const res = await engineCall<{ items: NetworkConnection[] }>("network.list", {
-          evidence_id: evidenceId,
-        });
-        setItems(res.items);
+        const res = await engineCall<{ items: T[] }>(method, { evidence_id: evidenceId });
+        if (!cancelled) {
+          setItems(res.items);
+          setLoadedEvidenceId(evidenceId);
+        }
       } catch (e) {
-        onError(e instanceof EngineClientError ? e.message : String(e));
+        if (!cancelled) {
+          setItems([]);
+          setLoadedEvidenceId(evidenceId);
+          onError(e instanceof EngineClientError ? e.message : String(e));
+        }
       }
     })();
-  }, [evidenceId, onError]);
+    return () => {
+      cancelled = true;
+    };
+  }, [evidenceId, method, onError, refreshToken]);
 
-  if (!evidenceId) return <Empty text="Import evidence first." />;
-  return (
-    <SimpleTable
-      title="Network"
-      empty="No network connections stored. Run process recommended analysis (netscan) or analyze processes of interest."
-      columns={["PID", "Proto", "Local", "Remote", "State", "Owner"]}
-      rows={items.map((n) => [
-        n.pid ?? "—",
-        n.protocol ?? "—",
-        `${n.local_address ?? ""}:${n.local_port ?? ""}`,
-        `${n.remote_address ?? ""}:${n.remote_port ?? ""}`,
-        n.state ?? "—",
-        n.owner ?? "—",
-      ])}
-    />
-  );
+  return {
+    items,
+    loading: Boolean(evidenceId) && loadedEvidenceId !== evidenceId,
+  };
 }
 
 export function ModulesView({
   evidenceId,
   onError,
+  coverage,
+  refreshToken,
+  onOpenProcess,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
+  coverage?: CapabilityCoverage;
+  refreshToken?: number | string;
+  onOpenProcess: (processId: string) => void;
 }) {
-  const [items, setItems] = useState<ModuleRow[]>([]);
-  useEffect(() => {
-    if (!evidenceId) return;
-    void (async () => {
-      try {
-        const res = await engineCall<{ items: ModuleRow[] }>("modules.list", {
-          evidence_id: evidenceId,
-        });
-        setItems(res.items);
-      } catch (e) {
-        onError(e instanceof EngineClientError ? e.message : String(e));
-      }
-    })();
-  }, [evidenceId, onError]);
+  const { items, loading } = useEvidenceItems<ModuleRow>(
+    evidenceId,
+    "modules.list",
+    onError,
+    refreshToken,
+  );
+  const [filter, setFilter] = useState("");
+  const [filterField, setFilterField] = useState("all");
 
-  if (!evidenceId) return <Empty text="Import evidence first." />;
+  const filtered = useMemo(
+    () =>
+      items.filter((m) =>
+        matchesFieldQuery(
+          filter,
+          filterField,
+          {
+            pid: m.pid,
+            process: m.process_name,
+            name: m.name,
+            base: m.base_address,
+            path: m.path,
+          },
+          [m.size, m.source_plugin, m.process_name],
+        ),
+      ),
+    [items, filter, filterField],
+  );
+
+  if (!evidenceId) return <ImportEvidenceState title="Modules / DLLs" />;
+  if (loading && items.length === 0 && coverageLiveKind(coverage) !== "in_progress") {
+    return <ListLoadingState title="Modules / DLLs" />;
+  }
+  if (coverageShowsEmptyPanel(coverage, items.length)) {
+    return (
+      <CoverageEmptyState
+        item={coverage}
+        title="Modules / DLLs"
+        inProgressDetail="Modules / DLLs are still being analyzed."
+        analyzedZeroDetail="Module analysis completed and found no modules."
+        notAnalyzedDetail="This capability was not included in the selected analysis mode."
+        notAnalyzedHint="Run Complete Analysis or select Modules in Custom Analysis to analyze it."
+        failedDetail="Module analysis failed."
+      />
+    );
+  }
   return (
     <SimpleTable
       title="Modules / DLLs"
-      empty="No modules stored yet. Run Analyze process on targets of interest."
-      columns={["PID", "Name", "Base", "Path"]}
-      rows={items.map((m) => [m.pid, m.name ?? "—", m.base_address ?? "—", m.path ?? "—"])}
+      caption={coverageResultCaption(coverage, items.length, filtered.length)}
+      filter={filter}
+      onFilter={setFilter}
+      filterField={filterField}
+      onFilterField={setFilterField}
+      filterFields={[
+        { id: "pid", label: "PID" },
+        { id: "process", label: "Process" },
+        { id: "name", label: "Name" },
+        { id: "base", label: "Base" },
+        { id: "path", label: "Path" },
+      ]}
+      filterPlaceholder="Filter name / path / PID…"
+      empty="0 results. Module analysis completed and found no modules."
+      emptyFilter="No modules match the current filter."
+      columns={["PID", "Process", "Name", "Base", "Path"]}
+      rows={filtered.map((m) => ({
+        key: m.id,
+        processId: m.process_id,
+        cells: [
+          m.pid ?? "—",
+          m.process_name?.trim() || "—",
+          m.name ?? "—",
+          m.base_address ?? "—",
+          m.path ?? "—",
+        ],
+      }))}
+      total={items.length}
+      onOpenProcess={onOpenProcess}
     />
   );
 }
@@ -78,87 +182,201 @@ export function ModulesView({
 export function FindingsView({
   evidenceId,
   onError,
+  coverage,
+  refreshToken,
+  onOpenProcess,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
+  coverage?: CapabilityCoverage;
+  refreshToken?: number | string;
+  onOpenProcess?: (processId: string) => void;
 }) {
-  const [items, setItems] = useState<Finding[]>([]);
-  useEffect(() => {
-    if (!evidenceId) return;
-    void (async () => {
-      try {
-        const res = await engineCall<{ items: Finding[] }>("findings.list", {
-          evidence_id: evidenceId,
-        });
-        setItems(res.items);
-      } catch (e) {
-        onError(e instanceof EngineClientError ? e.message : String(e));
-      }
-    })();
-  }, [evidenceId, onError]);
+  const { items, loading } = useEvidenceItems<Finding>(
+    evidenceId,
+    "findings.list",
+    onError,
+    refreshToken,
+  );
+  const [filter, setFilter] = useState("");
+  const [filterField, setFilterField] = useState("all");
 
-  if (!evidenceId) return <Empty text="Import evidence first." />;
-  if (items.length === 0) {
+  const filtered = useMemo(
+    () =>
+      sortFindings(
+        items.filter((f) =>
+          matchesFieldQuery(filter, filterField, {
+            title: f.finding_type,
+            severity: f.severity,
+            evidence: f.explanation,
+            pid: f.pid,
+            plugin: f.plugin,
+            field: f.field_name,
+            value: f.field_value,
+          }),
+        ),
+      ),
+    [items, filter, filterField],
+  );
+  const severityCounts = useMemo(() => countFindingsBySeverity(filtered), [filtered]);
+
+  if (!evidenceId) return <ImportEvidenceState title="Findings" />;
+  if (loading && items.length === 0 && coverageLiveKind(coverage) !== "in_progress") {
+    return <ListLoadingState title="Findings" />;
+  }
+  if (coverageShowsEmptyPanel(coverage, items.length)) {
     return (
-      <div className="p-4 text-sm text-muted">
-        No findings yet. Findings are transparent heuristics derived from analysis results (not
-        risk scores).
-      </div>
+      <CoverageEmptyState
+        item={coverage}
+        title="Findings"
+        inProgressDetail="Findings are still being analyzed."
+        analyzedZeroDetail="Complete Analysis found no matching command-line heuristics (encoded PowerShell, cmd.exe LOLBins, or user-temp execution). Memory-region findings appear after Analyze process."
+        notAnalyzedDetail="This capability was not included in the selected analysis mode."
+        notAnalyzedHint="Run Complete Analysis or select Findings in Custom Analysis to analyze it."
+        failedDetail="Findings analysis failed."
+      />
     );
   }
   return (
-    <div className="space-y-2 p-3 text-xs">
-      <div className="text-sm font-semibold">Findings</div>
-      {items.map((f) => (
-        <div key={f.id} className="rounded border border-border bg-surface p-2">
-          <div className="mb-1 font-medium">
-            [{f.severity}] {f.finding_type} {f.pid != null ? `(PID ${f.pid})` : ""}
-          </div>
-          <div>{f.explanation}</div>
+    <div className="flex h-full flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        <div className="text-sm font-semibold">Findings</div>
+        <div className="text-xs text-muted">
+          {coverageResultCaption(coverage, items.length, filtered.length) ??
+            `${filtered.length} / ${items.length}`}
         </div>
-      ))}
+        {severityCounts.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {severityCounts.map((row) => (
+              <span
+                key={row.id}
+                className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[11px] capitalize text-muted"
+              >
+                {row.count} {row.id}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <ResultFilterBar
+          query={filter}
+          onQueryChange={setFilter}
+          field={filterField}
+          onFieldChange={setFilterField}
+          placeholder="Filter title / PID / evidence…"
+          fields={[
+            { id: "title", label: "Title" },
+            { id: "severity", label: "Severity" },
+            { id: "pid", label: "PID" },
+            { id: "evidence", label: "Evidence" },
+            { id: "plugin", label: "Plugin" },
+          ]}
+        />
+      </div>
+      <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
+        {filtered.map((f) => (
+          <FindingCard key={f.id} finding={f} onOpenProcess={onOpenProcess} />
+        ))}
+        {filtered.length === 0 && (
+          <div className="p-4 text-muted">No findings match the current filter.</div>
+        )}
+      </div>
     </div>
   );
 }
 
-function Empty({ text }: { text: string }) {
-  return <div className="p-4 text-sm text-muted">{text}</div>;
-}
-
 function SimpleTable({
   title,
+  caption,
   columns,
   rows,
   empty,
+  emptyFilter,
+  filter,
+  onFilter,
+  filterField,
+  onFilterField,
+  filterFields,
+  filterPlaceholder,
+  total,
+  onOpenProcess,
 }: {
   title: string;
+  caption?: string | null;
   columns: string[];
-  rows: (string | number)[][];
+  rows: { key: string; processId?: string | null; cells: (string | number)[] }[];
   empty: string;
+  emptyFilter?: string;
+  filter?: string;
+  onFilter?: (value: string) => void;
+  filterField?: string;
+  onFilterField?: (value: string) => void;
+  filterFields?: { id: string; label: string }[];
+  filterPlaceholder?: string;
+  total?: number;
+  onOpenProcess?: (processId: string) => void;
 }) {
+  const count = total ?? rows.length;
+  const getValue = useCallback(
+    (row: { cells: (string | number)[] }, key: string) => row.cells[columns.indexOf(key)],
+    [columns],
+  );
+  const { sorted, sort, toggle } = useTableSort(rows, getValue);
+  const pidIndex = columns.indexOf("PID");
   return (
     <div className="flex h-full flex-col text-xs">
-      <div className="border-b border-border px-3 py-2 text-sm font-semibold">{title}</div>
-      {rows.length === 0 ? (
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <div className="text-sm font-semibold">{title}</div>
+        <div className="text-xs text-muted">
+          {caption ?? `${rows.length} / ${count}`}
+        </div>
+        {onFilter && filterFields && onFilterField ? (
+          <ResultFilterBar
+            query={filter ?? ""}
+            onQueryChange={onFilter}
+            field={filterField ?? "all"}
+            onFieldChange={onFilterField}
+            fields={filterFields}
+            placeholder={filterPlaceholder}
+          />
+        ) : onFilter ? (
+          <ResultFilterBar
+            query={filter ?? ""}
+            onQueryChange={onFilter}
+            field="all"
+            onFieldChange={() => undefined}
+            fields={[]}
+            placeholder={filterPlaceholder}
+          />
+        ) : null}
+      </div>
+      {count === 0 ? (
         <div className="p-4 text-muted">{empty}</div>
+      ) : rows.length === 0 ? (
+        <div className="p-4 text-muted">{emptyFilter ?? "No results match the current filter."}</div>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full text-left">
+          <table className="app-result-table w-full text-center">
             <thead className="sticky top-0 bg-surface-2 text-muted">
               <tr>
                 {columns.map((c) => (
-                  <th key={c} className="px-2 py-1.5 font-medium">
-                    {c}
-                  </th>
+                  <SortableTh key={c} label={c} column={c} sort={sort} onToggle={toggle} />
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={i} className="border-t border-border/40">
-                  {r.map((cell, j) => (
+              {sorted.map((r) => (
+                <tr key={r.key} className="border-t border-border/40">
+                  {r.cells.map((cell, j) => (
                     <td key={j} className="max-w-[24rem] truncate px-2 py-1 font-mono">
-                      {cell}
+                      {j === pidIndex ? (
+                        <PidCell
+                          value={cell}
+                          processId={r.processId}
+                          onOpenProcess={onOpenProcess}
+                        />
+                      ) : (
+                        formatResultCell(cell)
+                      )}
                     </td>
                   ))}
                 </tr>
