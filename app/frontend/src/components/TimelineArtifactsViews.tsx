@@ -13,8 +13,15 @@ import {
   resolveHistogramWindow,
 } from "../lib/timelineHistogram";
 import type { HistogramRange, HistogramSpanId } from "../lib/timelineHistogram";
-import { CoverageEmptyState, CenteredLoading, ImportEvidenceState } from "./CoverageStatus";
-import type { CapabilityCoverage, TimelineEvent } from "../lib/types";
+import { CoverageEmptyState, CenteredLoading, ImportEvidenceState, AnalysisScopeNote } from "./CoverageStatus";
+import {
+  DERIVED_SOURCE_IDS,
+  STORED_ACTION_TITLE,
+  limitedResultsNote,
+  storedActionNote,
+  uncoveredSourceIds,
+} from "../lib/analysisScope";
+import type { AnalysisCoverage, CapabilityCoverage, TimelineEvent } from "../lib/types";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ResultFilterBar } from "./ResultFilterBar";
@@ -138,12 +145,14 @@ export function TimelineView({
   onError,
   refreshToken,
   coverage,
+  analysisCoverage,
 }: {
   evidenceId: string | null;
   onOpenProcess: (processId: string) => void;
   onError: (m: string) => void;
   refreshToken?: number | string;
   coverage?: CapabilityCoverage;
+  analysisCoverage?: AnalysisCoverage;
 }) {
   const [items, setItems] = useState<TimelineEvent[]>([]);
   const [loadedEvidenceId, setLoadedEvidenceId] = useState<string | null>(null);
@@ -152,6 +161,7 @@ export function TimelineView({
   const [filterField, setFilterField] = useState("all");
   const [timeRange, setTimeRange] = useState<HistogramRange | null>(null);
   const [spanId, setSpanId] = useState<HistogramSpanId>("auto");
+  const [builtHere, setBuiltHere] = useState(false);
   const { toast, showToast } = useStatusToast();
 
   const load = useCallback(async () => {
@@ -176,6 +186,7 @@ export function TimelineView({
   useEffect(() => {
     setTimeRange(null);
     setSpanId("auto");
+    setBuiltHere(false);
   }, [evidenceId]);
 
   const rebuild = async () => {
@@ -187,6 +198,8 @@ export function TimelineView({
       });
       setItems(res.items);
       setLoadedEvidenceId(evidenceId);
+      setBuiltHere(true);
+      showToast("Timeline rebuilt from stored analysis results.");
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     } finally {
@@ -267,6 +280,24 @@ export function TimelineView({
   const loading = loadedEvidenceId !== evidenceId;
   const updating = coverageIsUpdating(coverage);
   const showRebuild = !coverageWasExecuted(coverage) && coverageLiveKind(coverage) !== "in_progress";
+  const missingSources = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.timeline);
+  const showLimitedNote = dumpItems.length > 0 && missingSources.length > 0;
+  const timelineEmptyItem =
+    builtHere && dumpItems.length === 0 && coverageLiveKind(coverage) === "not_analyzed"
+      ? { id: "timeline", state: "analyzed_zero" as const, count: 0 }
+      : coverage;
+  const timelineNotAnalyzedDetail =
+    "The timeline is built from process, network, module, and other records already stored — not by rescanning the dump.";
+  const timelineNotAnalyzedHint =
+    missingSources.length > 0
+      ? `${storedActionNote(missingSources)} You can still rebuild from whatever is stored.`
+      : "Use Rebuild from stored results to build a timeline from stored records, or include Timeline in Complete or Custom Analysis.";
+  const timelineAnalyzedZeroDetail =
+    missingSources.length > 0
+      ? "The timeline was built from stored records and found no dump-time events."
+      : "No dump-time events were recovered from this image.";
+  const timelineAnalyzedZeroHint =
+    missingSources.length > 0 ? storedActionNote(missingSources) : undefined;
 
   if (!evidenceId) {
     return <ImportEvidenceState title="Timeline" />;
@@ -281,12 +312,9 @@ export function TimelineView({
             {coverageResultCaption(coverage, dumpItems.length, filtered.length)}
           </div>
           {showRebuild ? (
-            <span
-              className="inline-flex"
-              title="Rebuild from current analysis results. Does not reopen the dump."
-            >
+            <span className="inline-flex" title={STORED_ACTION_TITLE}>
               <Button size="sm" onClick={() => void rebuild()} disabled={busy || updating}>
-                {busy ? "Building…" : "Rebuild from evidence"}
+                {busy ? "Building…" : "Rebuild from stored results"}
               </Button>
             </span>
           ) : null}
@@ -319,17 +347,23 @@ export function TimelineView({
           ]}
         />
       </div>
+      {showLimitedNote ? (
+        <div className="border-b border-border px-3 py-2">
+          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
+        </div>
+      ) : null}
       {loading && items.length === 0 && coverageLiveKind(coverage) !== "in_progress" ? (
         <CenteredLoading />
       ) : dumpItems.length === 0 ? (
         <CoverageEmptyState
-          item={coverage}
+          item={timelineEmptyItem}
           title="Timeline"
           showTitle={false}
           inProgressDetail="The timeline is still being built."
-          analyzedZeroDetail="No dump-time events were recovered from this image."
-          notAnalyzedDetail="This capability was not included in the selected analysis mode."
-          notAnalyzedHint="Run Complete Analysis or select Timeline in Custom Analysis to analyze it."
+          analyzedZeroDetail={timelineAnalyzedZeroDetail}
+          analyzedZeroHint={timelineAnalyzedZeroHint}
+          notAnalyzedDetail={timelineNotAnalyzedDetail}
+          notAnalyzedHint={timelineNotAnalyzedHint}
           failedDetail="Timeline analysis failed."
         />
       ) : (

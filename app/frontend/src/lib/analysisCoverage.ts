@@ -30,6 +30,7 @@ export type CoverageLiveKind =
   | "analyzed_zero"
   | "partial"
   | "in_progress"
+  | "has_results"
   | "not_analyzed";
 
 /** Always-visible Overview capability rows. Never filter this list by coverage state. */
@@ -111,8 +112,9 @@ export function coverageLiveKind(item: CapabilityCoverage | undefined): Coverage
   if (item.state === "failed") return "failed";
   if (item.state === "analyzed") return "analyzed";
   if (item.state === "analyzed_zero") return "analyzed_zero";
-  if (item.state === "not_analyzed" && item.count != null) {
-    return item.count > 0 ? "partial" : "in_progress";
+  if (item.state === "not_analyzed") {
+    if (item.updating) return (item.count ?? 0) > 0 ? "partial" : "in_progress";
+    if ((item.count ?? 0) > 0) return "has_results";
   }
   return "not_analyzed";
 }
@@ -156,9 +158,13 @@ export function coverageRefreshKey(coverage?: AnalysisCoverage): string {
     .sort()
     .map((id) => {
       const item = coverage.items[id];
-      return `${id}:${item.state}:${item.count ?? ""}`;
+      return `${id}:${item.state}:${item.count ?? ""}:${item.updating ? "1" : ""}`;
     })
     .join("|");
+}
+
+function recordUnit(count: number): string {
+  return count === 1 ? "record" : "records";
 }
 
 export function coverageResultCaption(
@@ -168,18 +174,23 @@ export function coverageResultCaption(
 ): string | null {
   const kind = coverageLiveKind(item);
   const n = rowCount;
+  const unit = recordUnit(n);
   const filtered = filteredCount != null && filteredCount !== n ? `${filteredCount.toLocaleString()} / ` : "";
+  const countText = `${filtered}${n.toLocaleString()} ${unit}`;
   if (kind === "partial" || (kind === "in_progress" && n > 0)) {
-    return `${filtered}${n.toLocaleString()} results · Updating…`;
+    return `${countText} · Updating…`;
   }
   if (kind === "analyzed") {
-    return `${filtered}${n.toLocaleString()} results ✓`;
+    return `${countText} ✓`;
   }
-  if (kind === "analyzed_zero") return "0 results ✓";
+  if (kind === "analyzed_zero") return "0 records ✓";
+  if (kind === "has_results") {
+    return countText;
+  }
   if (kind === "in_progress") return "Updating…";
   if (kind === "failed") return "Failed";
   if (n > 0) {
-    return filteredCount != null ? `${filteredCount.toLocaleString()} / ${n.toLocaleString()}` : n.toLocaleString();
+    return countText;
   }
   return null;
 }

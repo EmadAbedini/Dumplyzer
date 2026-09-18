@@ -726,6 +726,7 @@ export type CapabilityCoverage = {
   id: string;
   state: AnalysisCoverageState;
   count: number | null;
+  updating?: boolean;
 };
 
 export type AnalysisCoverage = {

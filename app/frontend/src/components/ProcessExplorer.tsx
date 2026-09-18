@@ -4,8 +4,9 @@ import { TimestampText } from "../lib/datetime";
 import { matchesFieldQuery } from "../lib/resultFilter";
 import { useTableSort } from "../lib/tableSort";
 import { coverageResultCaption } from "../lib/analysisCoverage";
-import type { ProcessRow, CapabilityCoverage } from "../lib/types";
-import { CoverageEmptyState, ImportEvidenceState, coverageShowsEmptyPanel } from "./CoverageStatus";
+import { capabilityHasStoredData } from "../lib/analysisScope";
+import type { AnalysisCoverage, ProcessRow, CapabilityCoverage } from "../lib/types";
+import { CoverageEmptyState, ImportEvidenceState, AnalysisScopeNote, coverageShowsEmptyPanel } from "./CoverageStatus";
 import { ResultFilterBar } from "./ResultFilterBar";
 import { SortableTh } from "./SortableTh";
 
@@ -17,6 +18,7 @@ type Props = {
   selectedId?: string | null;
   onSelect: (p: ProcessRow) => void;
   coverage?: CapabilityCoverage;
+  analysisCoverage?: AnalysisCoverage;
 };
 
 export function ProcessExplorer({
@@ -27,6 +29,7 @@ export function ProcessExplorer({
   selectedId,
   onSelect,
   coverage,
+  analysisCoverage,
 }: Props) {
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
@@ -58,6 +61,8 @@ export function ProcessExplorer({
     return "";
   }, []);
   const { sorted, sort, toggle } = useTableSort(filtered, processSortValue);
+  const commandLinesMissing =
+    items.length > 0 && !capabilityHasStoredData(analysisCoverage, "command_lines");
 
   if (!evidenceId) {
     return <ImportEvidenceState title="Processes" />;
@@ -70,8 +75,8 @@ export function ProcessExplorer({
         title="Processes"
         inProgressDetail="Processes are still being analyzed."
         analyzedZeroDetail="Process analysis completed and found no processes."
-        notAnalyzedDetail="This capability was not included in the selected analysis mode."
-        notAnalyzedHint="Run Quick Triage, Complete Analysis, or select Processes in Custom Analysis to analyze it."
+        notAnalyzedDetail="This data was not collected in the analysis you ran."
+        notAnalyzedHint="Run Quick Triage, Complete Analysis, or select Processes in Custom Analysis."
         failedDetail="Process analysis failed."
       />
     );
@@ -86,7 +91,8 @@ export function ProcessExplorer({
             <div className="text-xs text-muted">
               {loading
                 ? "Loading…"
-                : coverageResultCaption(coverage, total, filtered.length) ?? `${filtered.length} / ${total}`}
+                : coverageResultCaption(coverage, total, filtered.length) ??
+                  `${filtered.length.toLocaleString()} / ${total.toLocaleString()} records`}
             </div>
           </div>
           <div className="text-xs text-muted">Select a process to inspect its details.</div>
@@ -107,6 +113,15 @@ export function ProcessExplorer({
           ]}
         />
       </div>
+      {commandLinesMissing ? (
+        <div className="border-b border-border px-3 py-2">
+          <AnalysisScopeNote>
+            Command lines were not collected in the last analysis, so that column stays empty.
+            Run Complete Analysis, or select Command Lines in Custom Analysis. Analyze process
+            can also fill the command line for a single PID.
+          </AnalysisScopeNote>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="app-result-table w-full border-collapse text-center text-xs">
           <thead className="sticky top-0 bg-surface-2 text-muted">

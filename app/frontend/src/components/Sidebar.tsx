@@ -32,7 +32,7 @@ export const EXPORT_JOB_BUSY_HINT =
   "Export starts a new job and cannot run while analysis is in progress.";
 
 export const EXPORT_NEEDS_ANALYSIS_HINT =
-  "Generate is available after analysis completes.";
+  "Generate is available after analysis completes. Reports include only the capabilities that already ran.";
 
 const PRIMARY_NAV: { id: NavId; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -56,7 +56,7 @@ const SECONDARY_NAV: { id: NavId; label: string; icon: LucideIcon }[] = [
   { id: "about", label: "About", icon: Info },
 ];
 
-const NAV_OPEN_DURING_IMPORT = new Set<NavId>(["overview", "jobs", "settings", "about"]);
+const NAV_OPEN_DURING_IMPORT = new Set<NavId>(["jobs"]);
 
 export function navStartsConcurrentJob(id: NavId): boolean {
   return id === "plugins" || id === "export";
@@ -66,7 +66,7 @@ export function navLockedDuringImport(id: NavId): boolean {
   return !NAV_OPEN_DURING_IMPORT.has(id);
 }
 
-/** Pages that stay reachable while an analysis job runs. Import still locks analysis nav. */
+/** Pages that stay reachable while an analysis job runs. Import keeps only Jobs reachable. */
 export function navOpenDuringJobs(
   id: NavId,
   _coverage?: AnalysisCoverage,
@@ -241,6 +241,7 @@ export function Sidebar({
             icon={item.icon}
             active={active === item.id}
             onSelect={onSelect}
+            importing={importing}
           />
         ))}
       </div>

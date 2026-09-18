@@ -228,6 +228,14 @@ export function AnalysisOptionsDialog({
                       );
                     })}
                   </div>
+                  <div className="analysis-profile-note mt-3 flex items-start gap-2 rounded-md px-2.5 py-2 text-xs leading-snug">
+                    <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      IOC Extraction, Findings, Network Artifact Extraction, and Timeline read
+                      stored results. They do not rescan the dump, so include Command Lines,
+                      Modules, and Network Connections or the output will be sparse.
+                    </span>
+                  </div>
                 </>
               ) : null}
 

@@ -11,7 +11,21 @@ import {
   coverageResultCaption,
   coverageWasExecuted,
 } from "../lib/analysisCoverage";
-import { CoverageEmptyState, CenteredLoading, ImportEvidenceState } from "./CoverageStatus";
+import {
+  AnalysisScopeNote,
+  CoverageEmptyState,
+  CenteredLoading,
+  ImportEvidenceState,
+} from "./CoverageStatus";
+import {
+  DERIVED_SOURCE_IDS,
+  STORED_ACTION_TITLE,
+  formatCapabilityList,
+  limitedResultsNote,
+  searchFieldHasData,
+  storedActionNote,
+  uncoveredSourceIds,
+} from "../lib/analysisScope";
 import { matchesFieldQuery } from "../lib/resultFilter";
 import { useTableSort } from "../lib/tableSort";
 import type { AnalysisCoverage, CapabilityCoverage, SearchHit, Ioc } from "../lib/types";
@@ -49,7 +63,7 @@ const SEARCH_SCOPE =
   "Search process names, PIDs, command lines, usernames, modules, IP addresses, ports, file paths, handles, findings, and IOCs.";
 
 const SEARCH_SOURCE_HINT =
-  "This searches analysis results already stored for this dump. It does not rescan the memory image.";
+  "Search looks through analysis results already stored for this dump. It does not rescan the memory image.";
 
 const ENTITY_LABEL: Record<string, string> = {
   process: "Process",
@@ -114,6 +128,8 @@ export function SearchView({
   const [lastQuery, setLastQuery] = useState<string | null>(null);
 
   const field = SEARCH_FIELDS.find((item) => item.id === scope) ?? SEARCH_FIELDS[0];
+  const missingSources = uncoveredSourceIds(coverage, DERIVED_SOURCE_IDS.search);
+  const limitedSearch = missingSources.length > 0;
 
   const run = useCallback(async () => {
     const query = q.trim();
@@ -183,8 +199,8 @@ export function SearchView({
         <div className="border-b border-border px-3 py-2 text-sm font-semibold">Search</div>
         <SearchEmptyPanel
           heading="Nothing to search yet"
-          detail={SEARCH_SCOPE}
-          hint="Run Complete Analysis first, then search here."
+          detail="Search looks through analysis results already stored for this dump. It does not rescan the memory image."
+          hint="Quick Triage only collects processes. Run Complete Analysis, or select the capabilities you want to search in Custom Analysis."
         />
       </div>
     );
@@ -212,11 +228,14 @@ export function SearchView({
               setLastQuery(null);
             }}
           >
-            {SEARCH_FIELDS.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
+            {SEARCH_FIELDS.map((item) => {
+              const available = searchFieldHasData(coverage, item.id);
+              return (
+                <option key={item.id} value={item.id} disabled={!available}>
+                  {available ? item.label : `${item.label} (not analyzed)`}
+                </option>
+              );
+            })}
           </select>
           <ClearableInput
             type="search"
@@ -247,6 +266,11 @@ export function SearchView({
         </form>
         {resultCaption ? <div className="text-xs text-muted">{resultCaption}</div> : null}
       </div>
+      {limitedSearch ? (
+        <div className="border-b border-border px-3 py-2">
+          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
         {busy && items.length === 0 ? (
           <CenteredLoading label="Searching…" />
@@ -269,7 +293,11 @@ export function SearchView({
                 ? `Nothing matched “${lastQuery}”. Try another term, or choose a field from the menu.`
                 : `Nothing matched “${lastQuery}” in ${field.label.toLowerCase()}. Try another term, or switch the field to All.`
             }
-            hint="Search is case-insensitive and matches partial text."
+            hint={
+              limitedSearch
+                ? `Search is case-insensitive and matches partial text. Fields marked “not analyzed” have no stored data yet.`
+                : "Search is case-insensitive and matches partial text."
+            }
           />
         ) : (
           <table className="app-result-table w-full text-center">
@@ -328,11 +356,13 @@ export function IocsView({
   evidenceId,
   onError,
   coverage,
+  analysisCoverage,
   refreshToken,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
   coverage?: CapabilityCoverage;
+  analysisCoverage?: AnalysisCoverage;
   refreshToken?: number | string;
 }) {
   const [items, setItems] = useState<Ioc[]>([]);
@@ -342,6 +372,7 @@ export function IocsView({
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState<"json" | "xlsx" | null>(null);
   const [listedTotal, setListedTotal] = useState(0);
+  const [extractedHere, setExtractedHere] = useState(false);
   const { toast, showToast } = useStatusToast();
 
   const load = useCallback(async () => {
@@ -359,6 +390,10 @@ export function IocsView({
     } finally {
       setLoadedEvidenceId(evidenceId);
     }
+  }, [evidenceId]);
+
+  useEffect(() => {
+    setExtractedHere(false);
   }, [evidenceId]);
 
   useEffect(() => {
@@ -381,6 +416,24 @@ export function IocsView({
       setItems(res.items);
       setListedTotal(res.total);
       setLoadedEvidenceId(evidenceId);
+      setExtractedHere(true);
+      const n = res.total;
+      const missing = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.iocs);
+      if (missing.length > 0) {
+        const list = formatCapabilityList(missing);
+        const verb = missing.length === 1 ? "was" : "were";
+        showToast(
+          n === 0
+            ? `No IOCs in the data already stored. ${list} ${verb} not analyzed.`
+            : `Extracted ${n.toLocaleString()} IOCs from stored analysis results. ${list} ${verb} not analyzed.`,
+        );
+      } else {
+        showToast(
+          n === 0
+            ? "No IOCs in the stored analysis results."
+            : `Extracted ${n.toLocaleString()} IOCs from stored analysis results.`,
+        );
+      }
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     } finally {
@@ -461,6 +514,24 @@ export function IocsView({
   const iocTotal = coverage?.count ?? listedTotal;
   const showExtract =
     !coverageWasExecuted(coverage) && coverageLiveKind(coverage) !== "in_progress";
+  const missingSources = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.iocs);
+  const showLimitedNote = items.length > 0 && missingSources.length > 0;
+  const iocEmptyItem =
+    extractedHere && items.length === 0 && coverageLiveKind(coverage) === "not_analyzed"
+      ? { id: "iocs", state: "analyzed_zero" as const, count: 0 }
+      : coverage;
+  const iocNotAnalyzedDetail =
+    "IOCs are pulled from process, module, network, and handle data already stored — not by rescanning the dump.";
+  const iocNotAnalyzedHint =
+    missingSources.length > 0
+      ? `${storedActionNote(missingSources)} You can still extract from whatever is stored.`
+      : "Use Extract IOCs to collect indicators from the data already stored, or include IOC Extraction in Complete or Custom Analysis.";
+  const iocAnalyzedZeroDetail =
+    missingSources.length > 0
+      ? "IOC extraction ran against the data that was stored, and found no indicators."
+      : "IOC extraction completed and found no indicators.";
+  const iocAnalyzedZeroHint =
+    missingSources.length > 0 ? storedActionNote(missingSources) : undefined;
 
   if (!evidenceId) {
     return <ImportEvidenceState title="IOCs" />;
@@ -474,10 +545,7 @@ export function IocsView({
           {coverageResultCaption(coverage, iocTotal, filtered.length)}
         </div>
         {showExtract ? (
-          <span
-            className="inline-flex"
-            title="Extract from stored analysis data. Does not rescan the dump."
-          >
+          <span className="inline-flex" title={STORED_ACTION_TITLE}>
             <Button size="sm" onClick={() => void extract()} disabled={actionsLocked}>
               {busy ? "Extracting…" : "Extract IOCs"}
             </Button>
@@ -520,17 +588,23 @@ export function IocsView({
           ]}
         />
       </div>
+      {showLimitedNote ? (
+        <div className="border-b border-border px-3 py-2">
+          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
+        </div>
+      ) : null}
       {loading && items.length === 0 && coverageLiveKind(coverage) !== "in_progress" ? (
         <CenteredLoading />
       ) : items.length === 0 ? (
         <CoverageEmptyState
-          item={coverage}
+          item={iocEmptyItem}
           title="IOCs"
           showTitle={false}
           inProgressDetail="IOCs are still being extracted."
-          analyzedZeroDetail="IOC extraction completed and found no indicators."
-          notAnalyzedDetail="This capability was not included in the selected analysis mode."
-          notAnalyzedHint="Run Complete Analysis or select IOCs in Custom Analysis to analyze it."
+          analyzedZeroDetail={iocAnalyzedZeroDetail}
+          analyzedZeroHint={iocAnalyzedZeroHint}
+          notAnalyzedDetail={iocNotAnalyzedDetail}
+          notAnalyzedHint={iocNotAnalyzedHint}
           failedDetail="IOC extraction failed."
         />
       ) : (

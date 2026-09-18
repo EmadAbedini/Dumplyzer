@@ -370,6 +370,7 @@ export default function App() {
     setActiveJobIds([]);
     setRunningJob(null);
     setJobTick((t) => t + 1);
+    setNav("jobs");
     try {
       const job = await engineCall<Job>("evidence.import", { path });
       if (!importStillCurrent(generation)) {
@@ -571,6 +572,11 @@ export default function App() {
 
   const importing = importStartRef.current || importJobIdRef.current != null;
   importingRef.current = importing;
+  useEffect(() => {
+    if (importing && navLockedDuringImport(nav)) {
+      setNav("jobs");
+    }
+  }, [importing, nav]);
   const jobsRunning =
     activeJobIds.length > 0 ||
     Boolean(importJob && isActiveJobStatus(importJob.status));
@@ -611,6 +617,7 @@ export default function App() {
           selectedId={selectedProcessId}
           onSelect={onSelectProcess}
           coverage={coverageItem(coverage, "processes")}
+          analysisCoverage={coverage}
         />
       );
       break;
@@ -661,6 +668,7 @@ export default function App() {
           onError={setErr}
           coverage={coverageItem(coverage, "network")}
           artifactCoverage={coverageItem(coverage, "network_artifacts")}
+          analysisCoverage={coverage}
           refreshToken={coverageTick}
           onOpenProcess={(id) => {
             setSelectedProcessId(id);
@@ -695,7 +703,6 @@ export default function App() {
             setSelectedProcessId(id);
             setNav("process_dive");
           }}
-          onActiveProcessChange={setSelectedProcessId}
           onJobSubmitted={onPluginJobSubmitted}
           onError={setErr}
           refreshToken={coverageTick}
@@ -709,6 +716,7 @@ export default function App() {
           evidenceId={evidence?.id ?? null}
           onError={setErr}
           coverage={coverageItem(coverage, "findings")}
+          analysisCoverage={coverage}
           refreshToken={coverageTick}
           onOpenProcess={(id) => {
             setSelectedProcessId(id);
@@ -723,6 +731,7 @@ export default function App() {
           evidenceId={evidence?.id ?? null}
           onError={setErr}
           coverage={coverageItem(coverage, "iocs")}
+          analysisCoverage={coverage}
           refreshToken={coverageTick}
         />
       );
@@ -751,6 +760,7 @@ export default function App() {
           onError={setErr}
           refreshToken={coverageTick}
           coverage={coverageItem(coverage, "timeline")}
+          analysisCoverage={coverage}
         />
       );
       break;
@@ -759,7 +769,7 @@ export default function App() {
         <ArtifactsView
           evidenceId={evidence?.id ?? null}
           onError={setErr}
-          onJobSubmitted={onJobSubmitted}
+          onJobSubmitted={onPluginJobSubmitted}
           refreshToken={coverageTick}
           coverage={coverageItem(coverage, "artifacts")}
           jobsRunning={jobsRunning}
@@ -860,7 +870,10 @@ export default function App() {
       <div className="flex min-h-0 min-w-0 flex-1">
         <Sidebar
           active={nav}
-          onSelect={setNav}
+          onSelect={(id) => {
+            if (importing && navLockedDuringImport(id)) return;
+            setNav(id);
+          }}
           evidenceLabel={evidence?.filename}
           coverage={coverage}
           jobsRunning={jobsRunning}

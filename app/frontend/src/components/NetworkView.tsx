@@ -10,7 +10,22 @@ import {
   coverageResultCaption,
   coverageWasExecuted,
 } from "../lib/analysisCoverage";
+import {
+  CoverageEmptyState,
+  ImportEvidenceState,
+  ListLoadingState,
+  AnalysisScopeNote,
+  coverageShowsEmptyPanel,
+} from "./CoverageStatus";
+import {
+  DERIVED_SOURCE_IDS,
+  STORED_ACTION_TITLE,
+  limitedResultsNote,
+  storedActionNote,
+  uncoveredSourceIds,
+} from "../lib/analysisScope";
 import type {
+  AnalysisCoverage,
   CapabilityCoverage,
   Job,
   NetworkArtifact,
@@ -18,12 +33,6 @@ import type {
   PcapFlowResult,
   PcapReconstructionBundle,
 } from "../lib/types";
-import {
-  CoverageEmptyState,
-  ImportEvidenceState,
-  ListLoadingState,
-  coverageShowsEmptyPanel,
-} from "./CoverageStatus";
 import { ResultFilterBar } from "./ResultFilterBar";
 import { SortableTh } from "./SortableTh";
 import { Badge } from "./ui/badge";
@@ -89,6 +98,7 @@ export function NetworkView({
   onError,
   coverage,
   artifactCoverage,
+  analysisCoverage,
   refreshToken,
   onOpenProcess,
   onJobSubmitted,
@@ -98,6 +108,7 @@ export function NetworkView({
   onError: (m: string) => void;
   coverage?: CapabilityCoverage;
   artifactCoverage?: CapabilityCoverage;
+  analysisCoverage?: AnalysisCoverage;
   refreshToken?: number | string;
   onOpenProcess: (processId: string) => void;
   onJobSubmitted?: (job: Job) => void;
@@ -215,6 +226,7 @@ export function NetworkView({
       {tab === "artifacts" && (
         <ArtifactsPanel
           coverage={artifactCoverage}
+          analysisCoverage={analysisCoverage}
           items={artifacts}
           typeCounts={typeCounts}
           filter={filter}
@@ -226,7 +238,7 @@ export function NetworkView({
             void queue(
               "network.extract_artifacts",
               { evidence_id: evidenceId },
-              "Network artifact extraction queued",
+              "Network artifact extraction queued from stored analysis results.",
             )
           }
           extracting={actionsLocked}
@@ -302,8 +314,8 @@ function ConnectionsPanel({
         title="Network Connections"
         inProgressDetail="Network connections are still being analyzed."
         analyzedZeroDetail="Network analysis completed and found no connections."
-        notAnalyzedDetail="This capability was not included in the selected analysis mode."
-        notAnalyzedHint="Run Complete Analysis or select Network Connections in Custom Analysis to analyze it."
+        notAnalyzedDetail="This data was not collected in the analysis you ran."
+        notAnalyzedHint="Quick Triage only collects processes. Run Complete Analysis, or select Network Connections in Custom Analysis."
         failedDetail="Network analysis failed."
       />
     );
@@ -404,6 +416,7 @@ function ConnectionsPanel({
 
 function ArtifactsPanel({
   coverage,
+  analysisCoverage,
   items,
   typeCounts,
   filter,
@@ -415,6 +428,7 @@ function ArtifactsPanel({
   extracting,
 }: {
   coverage?: CapabilityCoverage;
+  analysisCoverage?: AnalysisCoverage;
   items: NetworkArtifact[];
   typeCounts: Record<string, number>;
   filter: string;
@@ -457,6 +471,23 @@ function ArtifactsPanel({
   }, []);
   const { sorted, sort, toggle } = useTableSort(filtered, getValue);
   const emptyCoverage = coverageShowsEmptyPanel(coverage, items.length) && items.length === 0;
+  const missingSources = uncoveredSourceIds(
+    analysisCoverage,
+    DERIVED_SOURCE_IDS.network_artifacts,
+  );
+  const showLimitedNote = items.length > 0 && missingSources.length > 0;
+  const notAnalyzedDetail =
+    "Network artifacts are recovered from connections, command lines, and stored process text — not by rescanning the dump.";
+  const notAnalyzedHint =
+    missingSources.length > 0
+      ? `${storedActionNote(missingSources)} You can still extract from whatever is stored.`
+      : "Use Extract Network Artifacts for stored results, or include Network Artifact Extraction in Complete or Custom Analysis.";
+  const analyzedZeroDetail =
+    missingSources.length > 0
+      ? "Network artifact extraction ran against the data that was stored, and found no recoverable indicators."
+      : "Network artifact extraction completed and found no recoverable indicators.";
+  const analyzedZeroHint =
+    missingSources.length > 0 ? storedActionNote(missingSources) : undefined;
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
@@ -479,11 +510,18 @@ function ArtifactsPanel({
           ]}
         />
         {coverageWasExecuted(coverage) || coverageIsUpdating(coverage) ? null : (
-          <Button size="sm" disabled={extracting} onClick={onExtract}>
-            {extracting ? "Extracting…" : "Extract Network Artifacts"}
-          </Button>
+          <span className="inline-flex" title={STORED_ACTION_TITLE}>
+            <Button size="sm" disabled={extracting} onClick={onExtract}>
+              {extracting ? "Extracting…" : "Extract Network Artifacts"}
+            </Button>
+          </span>
         )}
       </div>
+      {showLimitedNote ? (
+        <div className="border-b border-border px-3 py-2">
+          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
+        </div>
+      ) : null}
       {Object.keys(typeCounts).length > 0 ? (
         <div className="flex flex-wrap gap-1 border-b border-border px-3 py-2">
           {Object.entries(typeCounts)
@@ -500,15 +538,16 @@ function ArtifactsPanel({
           item={coverage}
           title="Network Artifacts"
           inProgressDetail="Network artifacts are still being extracted."
-          analyzedZeroDetail="Network artifact extraction completed and found no recoverable indicators."
-          notAnalyzedDetail="This capability was not included in the selected analysis mode."
-          notAnalyzedHint="Run Complete Analysis, select Network Artifact Extraction in Custom Analysis, or extract from this page."
+          analyzedZeroDetail={analyzedZeroDetail}
+          analyzedZeroHint={analyzedZeroHint}
+          notAnalyzedDetail={notAnalyzedDetail}
+          notAnalyzedHint={notAnalyzedHint}
           failedDetail="Network artifact extraction failed."
         />
       ) : items.length === 0 ? (
         <div className="p-4 text-muted">
-          No network artifacts stored yet. Extract from analyzed connections, process text, and
-          optional artifact-extraction results.
+          No network artifacts stored yet. Extraction uses analyzed connections, process text, and
+          optional carved-artifact results — it does not rescan the dump.
         </div>
       ) : filtered.length === 0 ? (
         <div className="p-4 text-muted">No network artifacts match the current filter.</div>

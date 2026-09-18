@@ -246,6 +246,9 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     coverage_lib = (root / "app" / "frontend" / "src" / "lib" / "analysisCoverage.ts").read_text(
         encoding="utf-8"
     )
+    scope = (root / "app" / "frontend" / "src" / "lib" / "analysisScope.ts").read_text(
+        encoding="utf-8"
+    )
     app = (root / "app" / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     assert "jobTableMessage" in view
     assert "jobFileName" in view
@@ -289,6 +292,9 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     assert "Updating…" in coverage
     assert "Analysis in progress" in coverage
     assert "Results will appear here automatically when available." in coverage
+    assert "This data was not collected in the analysis you ran." in coverage
+    assert "Quick Triage only collects processes." in coverage
+    assert "AnalysisScopeNote" in coverage
     assert "SortableTh" in view
     assert "jobFileName" in display
     assert "jobsRunning" in sidebar
@@ -297,6 +303,8 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     assert "jobProgressPercentText" in display
     assert "frozenPercent" in display
     assert "Analysis views are available after the memory image import finishes." in sidebar
+    assert 'NAV_OPEN_DURING_IMPORT = new Set<NavId>(["jobs"])' in sidebar
+    assert '["overview", "jobs"' not in sidebar
     assert "navLockedDuringImport" in sidebar
     assert "navOpenDuringJobs" in sidebar
     assert "PLUGIN_JOB_BUSY_HINT" in sidebar
@@ -305,12 +313,18 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     assert "This section will be available when its analysis completes." not in sidebar
     assert "onJobsRunningNav" not in sidebar
     assert "coverageLiveKind" in coverage_lib
+    assert "has_results" in coverage_lib
+    assert "item.updating" in coverage_lib
     assert "coverageRefreshKey" in coverage_lib
     assert "coverageHasSearchableData" in coverage_lib
     assert "coverageProcessListReady" in coverage_lib
     assert "coverageCanExport" in coverage_lib
+    assert "STORED_ACTION_TITLE" in scope
+    assert "limitedResultsNote" in scope
+    assert "analysisCoverage={coverage}" in app
     assert "analysisBusy" in app
     assert "IMPORTING_NAV_HINT" in app
+    assert "navLockedDuringImport(id)" in app
     assert "A job is running" not in sidebar
     assert "A job is running" not in app
     for label in ("cancelling", "cancelled", "completed", "failed", "running"):

@@ -271,7 +271,8 @@ export function ProcessDeepDiveView({
     ),
   );
 
-  const emptyNotAnalyzed = "Not analyzed for this process.";
+  const emptyNotAnalyzed =
+    "This was not collected in the last analysis. Run Complete Analysis, select this capability in Custom Analysis, or use Analyze process for this PID.";
   const emptyFailed = "Analysis failed.";
 
   return (

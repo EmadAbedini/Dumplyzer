@@ -44,7 +44,7 @@ export const ANALYSIS_PROFILE_COPY: Record<
     title: "Quick Triage",
     description:
       "Quickly identify the operating system and review running processes.",
-    hint: "Faster first look — processes only.",
+    hint: "Faster first look — processes only. Search, IOCs, network, modules, and timeline stay limited until you run a fuller analysis.",
   },
   custom: {
     title: "Custom Analysis",
@@ -72,7 +72,7 @@ const CAPABILITY_COPY: Record<string, { label: string; description: string }> = 
   network_artifacts: {
     label: "Network Artifact Extraction",
     description:
-      "Extract recoverable network indicators such as addresses, endpoints, URLs, and DNS-related strings.",
+      "Recover network indicators from stored connections and process text. Does not rescan the dump.",
   },
   handles: {
     label: "Handles",
@@ -80,15 +80,18 @@ const CAPABILITY_COPY: Record<string, { label: string; description: string }> = 
   },
   findings: {
     label: "Findings & Heuristics",
-    description: "Review evidence-based findings produced by the analysis pipeline.",
+    description:
+      "Review heuristic findings from command lines already stored. Requires Command Lines, or run Complete Analysis.",
   },
   iocs: {
     label: "IOC Extraction",
-    description: "Extract indicators from analyzed process, module, and network data.",
+    description:
+      "Extract indicators from stored process, module, and network data. Does not rescan the dump — results match whatever those capabilities collected.",
   },
   timeline: {
     label: "Timeline",
-    description: "Build an investigation timeline from available evidence.",
+    description:
+      "Build an investigation timeline from stored records. Does not rescan the dump.",
   },
   recommended: {
     label: "Process Analysis",

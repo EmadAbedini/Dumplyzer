@@ -743,3 +743,74 @@ def test_overview_coverage_stale_rows_hidden_without_running_job(tmp_path: Path)
     assert items["processes"]["state"] == "not_analyzed"
     assert items["processes"]["count"] is None
     db.close()
+
+
+def test_process_recommended_running_spins_process_caps_not_iocs(tmp_path: Path) -> None:
+    from memscope_engine.analysis.coverage import coverage_for_evidence
+
+    db, ev = _import(tmp_path)
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, finished_at, error_json,
+          volatility_version, schema_version, notes, process_id, pid, job_id, strategy_json
+        ) VALUES (?, ?, 'process_recommended', 'running', datetime('now'), NULL, NULL, NULL, 9, 'pid 4', NULL, 4, NULL, '[]')
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["modules"]["state"] == "not_analyzed"
+    assert items["modules"]["count"] == 0
+    assert items["modules"]["updating"] is True
+    assert items["network"]["updating"] is True
+    assert items["memory_vad"]["updating"] is True
+    assert items["iocs"]["count"] is None
+    assert items["iocs"]["updating"] is False
+    assert items["timeline"]["count"] is None
+    assert items["artifacts"]["updating"] is False
+    db.close()
+
+
+def test_process_recommended_completed_keeps_module_counts(tmp_path: Path) -> None:
+    from memscope_engine.analysis.coverage import coverage_for_evidence
+
+    db, ev = _import(tmp_path)
+    run_id = str(uuid4())
+    proc_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, finished_at, error_json,
+          volatility_version, schema_version, notes, process_id, pid, job_id, strategy_json
+        ) VALUES (?, ?, 'process_recommended', 'completed', datetime('now'), datetime('now'), NULL, NULL, 9, 'pid 4', ?, 4, NULL, '[]')
+        """,
+        (run_id, ev["id"], proc_id),
+    )
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, username,
+          image_path, command_line, create_time, exit_time, offset_hex,
+          threads, handles, session_id, wow64, source_plugin
+        ) VALUES (?, ?, ?, 4, 0, 'test.exe', NULL, NULL, 'whoami', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'windows.pslist')
+        """,
+        (proc_id, ev["id"], run_id),
+    )
+    db.execute(
+        """
+        INSERT INTO modules (
+          id, evidence_id, analysis_run_id, process_id, pid, name, path,
+          base_address, size, load_count, load_time, source_plugin
+        ) VALUES (?, ?, ?, ?, 4, 'ntdll.dll', 'C:\\ntdll.dll', '0x1', '100', 1, NULL, 'windows.dlllist')
+        """,
+        (str(uuid4()), ev["id"], run_id, proc_id),
+    )
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["modules"]["state"] == "not_analyzed"
+    assert items["modules"]["count"] == 1
+    assert items["modules"]["updating"] is False
+    assert items["command_lines"]["state"] == "not_analyzed"
+    assert items["command_lines"]["count"] == 1
+    assert items["iocs"]["count"] is None
+    db.close()
+

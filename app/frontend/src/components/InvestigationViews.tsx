@@ -8,13 +8,18 @@ import {
   coverageResultCaption,
 } from "../lib/analysisCoverage";
 import { countFindingsBySeverity, sortFindings } from "../lib/findings";
-import type { ModuleRow, Finding, CapabilityCoverage } from "../lib/types";
 import {
   CoverageEmptyState,
   ImportEvidenceState,
   ListLoadingState,
   coverageShowsEmptyPanel,
 } from "./CoverageStatus";
+import {
+  DERIVED_SOURCE_IDS,
+  capabilityHasStoredData,
+  uncoveredSourceIds,
+} from "../lib/analysisScope";
+import type { AnalysisCoverage, ModuleRow, Finding, CapabilityCoverage } from "../lib/types";
 import { FindingCard } from "./FindingCard";
 import { ResultFilterBar } from "./ResultFilterBar";
 import { SortableTh } from "./SortableTh";
@@ -137,8 +142,8 @@ export function ModulesView({
         title="Modules / DLLs"
         inProgressDetail="Modules / DLLs are still being analyzed."
         analyzedZeroDetail="Module analysis completed and found no modules."
-        notAnalyzedDetail="This capability was not included in the selected analysis mode."
-        notAnalyzedHint="Run Complete Analysis or select Modules in Custom Analysis to analyze it."
+        notAnalyzedDetail="This data was not collected in the analysis you ran."
+        notAnalyzedHint="Quick Triage only collects processes. Run Complete Analysis, or select Modules in Custom Analysis."
         failedDetail="Module analysis failed."
       />
     );
@@ -183,12 +188,14 @@ export function FindingsView({
   evidenceId,
   onError,
   coverage,
+  analysisCoverage,
   refreshToken,
   onOpenProcess,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
   coverage?: CapabilityCoverage;
+  analysisCoverage?: AnalysisCoverage;
   refreshToken?: number | string;
   onOpenProcess?: (processId: string) => void;
 }) {
@@ -219,6 +226,18 @@ export function FindingsView({
     [items, filter, filterField],
   );
   const severityCounts = useMemo(() => countFindingsBySeverity(filtered), [filtered]);
+  const missingSources = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.findings);
+  const commandLinesReady = capabilityHasStoredData(analysisCoverage, "command_lines");
+  const findingsNotAnalyzedDetail = commandLinesReady
+    ? "Command lines are stored, but Findings was not included in the last analysis."
+    : "Findings come from command-line heuristics already stored — they are not scanned from the dump itself.";
+  const findingsNotAnalyzedHint = commandLinesReady
+    ? "Run Complete Analysis, or select Findings in Custom Analysis."
+    : "Quick Triage does not collect command lines. Run Complete Analysis, or select Command Lines and Findings in Custom Analysis.";
+  const findingsZeroHint =
+    missingSources.length > 0
+      ? "Command lines were not collected in the last analysis, so command-line heuristics had little to evaluate."
+      : undefined;
 
   if (!evidenceId) return <ImportEvidenceState title="Findings" />;
   if (loading && items.length === 0 && coverageLiveKind(coverage) !== "in_progress") {
@@ -231,19 +250,20 @@ export function FindingsView({
         title="Findings"
         inProgressDetail="Findings are still being analyzed."
         analyzedZeroDetail="Complete Analysis found no matching command-line heuristics (encoded PowerShell, cmd.exe LOLBins, or user-temp execution). Memory-region findings appear after Analyze process."
-        notAnalyzedDetail="This capability was not included in the selected analysis mode."
-        notAnalyzedHint="Run Complete Analysis or select Findings in Custom Analysis to analyze it."
+        analyzedZeroHint={findingsZeroHint}
+        notAnalyzedDetail={findingsNotAnalyzedDetail}
+        notAnalyzedHint={findingsNotAnalyzedHint}
         failedDetail="Findings analysis failed."
       />
     );
   }
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col text-xs">
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <div className="text-sm font-semibold">Findings</div>
         <div className="text-xs text-muted">
           {coverageResultCaption(coverage, items.length, filtered.length) ??
-            `${filtered.length} / ${items.length}`}
+            `${filtered.length.toLocaleString()} / ${items.length.toLocaleString()} records`}
         </div>
         {severityCounts.length > 0 ? (
           <div className="flex flex-wrap gap-1">

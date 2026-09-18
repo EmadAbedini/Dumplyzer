@@ -1,12 +1,13 @@
-import { CircleAlert, CircleDashed } from "lucide-react";
+import type { ReactNode } from "react";
+import { CircleAlert, CircleDashed, Info } from "lucide-react";
 import { coverageLiveKind } from "../lib/analysisCoverage";
 import type { CapabilityCoverage } from "../lib/types";
 import { cn } from "../lib/utils";
 
 const NOT_ANALYZED_DETAIL =
-  "This capability was not included in the selected analysis mode.";
+  "This data was not collected in the analysis you ran.";
 const NOT_ANALYZED_HINT =
-  "Run Complete Analysis or select this capability in Custom Analysis to analyze it.";
+  "Quick Triage only collects processes. Run Complete Analysis, or select this capability in Custom Analysis.";
 
 const IN_PROGRESS_HINT = "Results will appear here automatically when available.";
 
@@ -50,6 +51,16 @@ export function CoverageStatus({
     );
   }
 
+  if (kind === "has_results") {
+    const n = count ?? 0;
+    const label = `${n.toLocaleString()} records`;
+    return (
+      <span className="tabular-nums" title={label} aria-label={label}>
+        {n.toLocaleString()}
+      </span>
+    );
+  }
+
   if (kind === "not_analyzed") {
     if (compact) {
       return (
@@ -61,7 +72,7 @@ export function CoverageStatus({
     return (
       <span
         className="text-muted"
-        title="This capability was not run for this evidence."
+        title="Not collected in the last analysis."
       >
         Not analyzed
       </span>
@@ -101,10 +112,20 @@ export function CoverageStatus({
   );
 }
 
+export function AnalysisScopeNote({ children }: { children: ReactNode }) {
+  return (
+    <div className="analysis-profile-note flex items-start gap-2 rounded-md px-2.5 py-2 text-xs leading-snug">
+      <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+      <p className="min-w-0 flex-1">{children}</p>
+    </div>
+  );
+}
+
 export function CoverageEmptyState({
   item,
   title,
   analyzedZeroDetail,
+  analyzedZeroHint,
   notAnalyzedDetail = NOT_ANALYZED_DETAIL,
   notAnalyzedHint,
   failedDetail,
@@ -114,6 +135,7 @@ export function CoverageEmptyState({
   item: CapabilityCoverage | undefined;
   title: string;
   analyzedZeroDetail: string;
+  analyzedZeroHint?: string;
   notAnalyzedDetail?: string;
   notAnalyzedHint?: string;
   failedDetail: string;
@@ -135,7 +157,7 @@ export function CoverageEmptyState({
     heading = "0 results";
     headingClass = "text-foreground";
     detail = analyzedZeroDetail;
-    hint = null;
+    hint = analyzedZeroHint ?? null;
   } else if (kind === "in_progress" || kind === "partial") {
     heading = "Analysis in progress";
     headingClass = "text-foreground";
@@ -176,8 +198,8 @@ export function CoverageEmptyState({
             <div className="list-loading-bar h-full w-2/5 rounded-full bg-accent" />
           </div>
         ) : null}
-        <p className="mt-4 max-w-sm text-sm leading-5 text-muted">{detail}</p>
-        {hint ? <p className="mt-3 max-w-sm text-xs leading-5 text-muted">{hint}</p> : null}
+        <p className="mt-4 max-w-md text-sm leading-5 text-muted">{detail}</p>
+        {hint ? <p className="mt-3 max-w-md text-xs leading-5 text-muted">{hint}</p> : null}
       </div>
     </div>
   );
