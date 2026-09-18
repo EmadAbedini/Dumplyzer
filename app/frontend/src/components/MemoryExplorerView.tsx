@@ -24,6 +24,7 @@ import { ClearableInput } from "./ui/input";
 import { SortableTh } from "./SortableTh";
 import { RefreshButton, StatusToast, useStatusToast } from "./StatusToast";
 import { ResultFilterBar } from "./ResultFilterBar";
+import { cn } from "../lib/utils";
 
 export function MemoryExplorerView({
   evidenceId,
@@ -247,7 +248,7 @@ export function MemoryExplorerView({
           onClick={() => void scan()}
           disabled={working || activePid == null}
         >
-          {working ? "Working…" : "Scan VADs (job)"}
+          {working ? "Working…" : "Scan VADs"}
         </Button>
         <ResultFilterBar
           query={textFilter}
@@ -271,8 +272,8 @@ export function MemoryExplorerView({
           Indicators are evidence-based (e.g. W+X), not a malice verdict.
         </span>
       </div>
-      <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 overflow-auto">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
           {loading &&
           items.length === 0 &&
           coverageLiveKind(coverage) !== "in_progress" ? (
@@ -353,13 +354,16 @@ export function MemoryExplorerView({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r) => (
+                {sorted.map((r) => {
+                  const isSelected = selected?.id === r.id;
+                  return (
                   <tr
                     key={r.id}
-                    className={
-                      "cursor-pointer border-t border-border/40 " +
-                      (selected?.id === r.id ? "app-row-active" : "")
-                    }
+                    aria-selected={isSelected}
+                    className={cn(
+                      "cursor-pointer border-t border-border/40",
+                      isSelected && "app-row-active",
+                    )}
                     onClick={() => setSelected(r)}
                   >
                     <td className="px-2 py-1 font-mono">{r.pid}</td>
@@ -393,61 +397,80 @@ export function MemoryExplorerView({
                       ))}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
-        <aside className="w-80 shrink-0 overflow-auto border-l border-border p-3">
+        <aside
+          className={cn(
+            "max-h-[42%] shrink-0 overflow-auto border-t border-border p-3",
+            selected ? "selected-record-detail" : "bg-surface-2",
+          )}
+        >
           {!selected ? (
             <div className="text-muted">
               Select a region for details and extraction.
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="font-semibold">Region detail</div>
-              <KV k="PID" v={selected.pid} />
-              <KV k="Start" v={selected.start_vpn} />
-              <KV k="End" v={selected.end_vpn} />
-              <KV k="Size" v={selected.size_bytes} />
-              <KV k="Protection" v={selected.protection} />
-              <KV k="Tag" v={selected.tag} />
-              <KV k="Private" v={selected.private_memory} />
-              <KV k="File" v={selected.file_path} />
-              <KV k="Source" v={selected.source_plugin} />
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden />
+                <div className="font-semibold">Region detail</div>
+                <div className="font-mono text-muted">
+                  PID {selected.pid}
+                  {selected.start_vpn ? ` · ${selected.start_vpn}` : ""}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
+                <KV k="PID" v={selected.pid} />
+                <KV k="Start" v={selected.start_vpn} />
+                <KV k="End" v={selected.end_vpn} />
+                <KV k="Size" v={selected.size_bytes} />
+                <KV k="Protection" v={selected.protection} />
+                <KV k="Tag" v={selected.tag} />
+                <KV k="Private" v={selected.private_memory} />
+                <KV k="File" v={selected.file_path} />
+                <KV k="Source" v={selected.source_plugin} />
+              </div>
               <div className="text-muted">Indicators</div>
               {(selected.indicators ?? []).length === 0 ? (
                 <div className="text-muted">None flagged</div>
               ) : (
-                (selected.indicators ?? []).map((i) => (
-                  <div
-                    key={i.code}
-                    className="rounded border border-border p-2"
-                  >
-                    <div className="font-medium">{i.label}</div>
-                    <div className="text-muted">{i.detail}</div>
-                  </div>
-                ))
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(selected.indicators ?? []).map((i) => (
+                    <div
+                      key={i.code}
+                      className="rounded border border-border p-2"
+                    >
+                      <div className="font-medium">{i.label}</div>
+                      <div className="text-muted">{i.detail}</div>
+                    </div>
+                  ))}
+                </div>
               )}
-              {selected.process_id && (
+              <div className="flex flex-wrap items-center gap-2">
+                {selected.process_id && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onSelectProcess(selected.process_id!)}
+                  >
+                    Open process
+                  </Button>
+                )}
                 <Button
                   size="sm"
-                  variant="outline"
-                  onClick={() => onSelectProcess(selected.process_id!)}
+                  onClick={() => void extract(selected)}
+                  disabled={working}
                 >
-                  Open process
+                  {working ? "Working…" : "Extract region"}
                 </Button>
-              )}
-              <Button
-                size="sm"
-                onClick={() => void extract(selected)}
-                disabled={working}
-              >
-                {working ? "Working…" : "Extract region (job)"}
-              </Button>
-              <div className="text-[11px] text-muted">
-                Extraction uses Volatility vad_dump into the controlled artifact
-                store. Artifacts are never executed.
+                <div className="text-[11px] text-muted">
+                  Extraction uses Volatility vad_dump into the controlled artifact
+                  store. Artifacts are never executed.
+                </div>
               </div>
             </div>
           )}

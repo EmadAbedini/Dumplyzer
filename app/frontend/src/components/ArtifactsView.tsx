@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { engineCall, EngineClientError, openLocalFolder } from "../lib/api";
 import { CAPABILITY, UNAVAILABLE_DETAIL } from "../lib/analysisCapabilities";
-import { useCapabilityStatus } from "../lib/capabilityStatus";
+import { useCapabilityStatus, type CapabilitySnapshot } from "../lib/capabilityStatus";
 import { coverageIsUpdating, coverageLiveKind, coverageResultCaption } from "../lib/analysisCoverage";
 import { CoverageEmptyState, CenteredLoading, ImportEvidenceState } from "./CoverageStatus";
 import { TimestampText } from "../lib/datetime";
@@ -19,7 +19,6 @@ import type {
   PeExtractionBundle,
   YaraScanBundle,
 } from "../lib/types";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { SortableTh } from "./SortableTh";
 import { ResultFilterBar } from "./ResultFilterBar";
@@ -33,6 +32,26 @@ function artifactScanError(error: Record<string, unknown> | null | undefined): s
   if (!message && !suggestion) return "Analysis failed.";
   if (message && suggestion && !message.includes(suggestion)) return `${message} ${suggestion}`;
   return message || suggestion;
+}
+
+function isPeArtifact(a: Artifact): boolean {
+  const label = String(a.metadata?.label || "");
+  if (label === "extracted_pe_artifact") return true;
+  if ((a.file_type || "").toLowerCase() === "pe") return true;
+  const kind = String(a.metadata?.pe_kind || "").toLowerCase();
+  if (kind === "exe" || kind === "dll") return true;
+  const method = (a.extraction_method || "").toLowerCase();
+  return method.includes("pedump") || method.includes("dumpfiles.pe");
+}
+
+function isUnsupportedScan(error: Record<string, unknown> | null | undefined): boolean {
+  const text = artifactScanError(error).toLowerCase();
+  return text.includes("not this file") || text.includes("extracted pe");
+}
+
+function isBoilerplateNotes(notes: string | null | undefined): boolean {
+  if (!notes?.trim()) return true;
+  return /not executed|not classified as malware/i.test(notes);
 }
 
 type ArtifactAction = "pe" | "extraction" | "yara" | "capa" | "floss";
@@ -90,9 +109,6 @@ export function ArtifactsView({
   const [submitting, setSubmitting] = useState<ArtifactAction | null>(null);
   const [pane, setPane] = useState<"pe" | "extraction">("extraction");
   const [confirmAction, setConfirmAction] = useState<DiskWriteAction | null>(null);
-  const yaraStatus = caps.yara;
-  const capaStatus = caps.capa;
-  const flossStatus = caps.floss;
   const peStatus = caps.peExtraction;
   const bulkExtractorStatus = caps.bulkExtractor;
 
@@ -133,6 +149,13 @@ export function ArtifactsView({
   }, [load, refreshToken]);
 
   useEffect(() => {
+    setDetail(null);
+    setYaraBundles([]);
+    setCapaBundles([]);
+    setFlossBundles([]);
+  }, [evidenceId]);
+
+  useEffect(() => {
     if (!confirmAction) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setConfirmAction(null);
@@ -142,15 +165,7 @@ export function ArtifactsView({
   }, [confirmAction]);
 
   const visible = useMemo(() => {
-    const peFiltered = peOnly
-      ? items.filter(
-          (a) =>
-            a.file_type === "pe" ||
-            (a.extraction_method || "").includes("pedump") ||
-            (a.extraction_method || "").includes("dumpfiles.pe") ||
-            a.metadata?.label === "extracted_pe_artifact",
-        )
-      : items;
+    const peFiltered = peOnly ? items.filter(isPeArtifact) : items;
     return peFiltered.filter((a) =>
       matchesFieldQuery(
         filter,
@@ -181,7 +196,7 @@ export function ArtifactsView({
   }, []);
   const { sorted, sort, toggle } = useTableSort(visible, artifactSortValue);
 
-  const openDetail = async (id: string) => {
+  const openDetail = useCallback(async (id: string) => {
     try {
       const a = await engineCall<Artifact>("artifacts.get", { artifact_id: id });
       setDetail(a);
@@ -191,7 +206,19 @@ export function ArtifactsView({
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     }
-  };
+  }, [onError]);
+
+  const selectedDetailId = useRef<string | null>(null);
+  selectedDetailId.current = detail?.id ?? null;
+  const prevJobsRunning = useRef(jobsRunning);
+
+  useEffect(() => {
+    const wasRunning = prevJobsRunning.current;
+    prevJobsRunning.current = jobsRunning;
+    if (!wasRunning || jobsRunning) return;
+    const id = selectedDetailId.current;
+    if (id) void openDetail(id);
+  }, [jobsRunning, openDetail]);
 
   const queue = async (method: string, params: Record<string, unknown>, action?: ArtifactAction) => {
     if (jobsRunning || coverageIsUpdating(coverage) || busy) return;
@@ -234,7 +261,11 @@ export function ArtifactsView({
   const carvedOutputDir =
     latestBe?.scan.status === "completed" ? latestBe.scan.output_dir : null;
   const peLiveKind = coverageLiveKind(coverage);
-  const peCaption = coverageResultCaption(coverage, items.length, visible.length);
+  const peCaption = coverageResultCaption(
+    coverage,
+    items.length,
+    visible.length !== items.length ? visible.length : undefined,
+  );
 
   const requestDiskWrite = (action: DiskWriteAction) => {
     if (actionsLocked) return;
@@ -317,8 +348,7 @@ export function ArtifactsView({
           </div>
         </div>
       ) : (
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border px-3 py-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm leading-5 text-muted">
@@ -333,7 +363,6 @@ export function ArtifactsView({
                     <input
                       type="checkbox"
                       checked={peOnly}
-                      disabled={actionsLocked}
                       onChange={(e) => setPeOnly(e.target.checked)}
                     />
                     <span>
@@ -381,18 +410,27 @@ export function ArtifactsView({
                   <span className="text-muted">
                     {extractedCount} PE artifact{extractedCount === 1 ? "" : "s"} (
                     {latestPe.exe_count} EXE / {latestPe.dll_count} DLL)
+                    {peOnly && items.length !== visible.length
+                      ? ` · ${visible.length.toLocaleString()} shown`
+                      : ""}
                   </span>
-                ) : peCaption ? (
-                  <span className="text-muted">{peCaption}</span>
+                ) : visible.length > 0 || !peOnly ? (
+                  peCaption ? <span className="text-muted">{peCaption}</span> : null
                 ) : null}
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto">
+            <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+            <div className="min-h-32 min-w-0 flex-1 overflow-auto">
               {loading && items.length === 0 && peLiveKind !== "in_progress" ? (
                 <CenteredLoading />
               ) : visible.length === 0 ? (
                 filter.trim() ? (
                   <div className="p-6 text-sm text-muted">No artifacts match the current filter.</div>
+                ) : peOnly && items.length > 0 ? (
+                  <div className="p-6 text-sm text-muted">
+                    No reconstructed EXE/DLL files in this list. Run PE Reconstruction, or clear
+                    Extracted PE only to inspect other extracted files.
+                  </div>
                 ) : peLiveKind === "in_progress" || peLiveKind === "partial" || peLiveKind === "failed" ? (
                   <CoverageEmptyState
                     item={coverage}
@@ -420,12 +458,15 @@ export function ArtifactsView({
                     </tr>
                   </thead>
                   <tbody>
-                    {sorted.map((a) => (
+                    {sorted.map((a) => {
+                      const isSelected = detail?.id === a.id;
+                      return (
                       <tr
                         key={a.id}
+                        aria-selected={isSelected}
                         className={cn(
-                          "cursor-pointer border-t border-border/40 hover:bg-surface-2/50",
-                          detail?.id === a.id && "bg-surface-2/70",
+                          "cursor-pointer border-t border-border/40",
+                          isSelected && "app-row-active",
                         )}
                         onClick={() => void openDetail(a.id)}
                       >
@@ -441,206 +482,38 @@ export function ArtifactsView({
                           <TimestampText value={a.extracted_at} />
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
             </div>
-          </div>
-          {pane === "pe" && detail ? (
-            <aside className="w-[24rem] shrink-0 overflow-auto border-l border-border p-3">
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold">Extracted PE artifact</div>
-                  <Button size="sm" variant="ghost" onClick={() => setDetail(null)}>
-                    Close
-                  </Button>
+            <aside
+              className={cn(
+                "h-auto shrink-0 border-t border-border p-3",
+                detail && "selected-record-detail",
+              )}
+            >
+              {!detail ? (
+                <div className="text-muted">
+                  Select a reconstructed EXE or DLL for details and analysis.
                 </div>
-                <div className="text-[11px] text-muted">
-                  Not classified as malware because it was found in memory. Analysis
-                  results below are tool observations.
-                </div>
-                <div className="break-all font-mono text-[11px]">{detail.sha256}</div>
-                <div className="text-muted">{detail.notes}</div>
-                <div className="text-muted">Provenance</div>
-                <ol className="list-decimal space-y-1 pl-4">
-                  {(detail.provenance_chain ?? []).map((s, i) => (
-                    <li key={i} className="font-mono text-[11px]">
-                      {String(s.step)}: {JSON.stringify(s)}
-                    </li>
-                  ))}
-                </ol>
-                <div className="break-all text-[11px] text-muted">Path: {detail.stored_path}</div>
-                <div className="text-[11px] text-muted">
-                  Process: {String(detail.metadata?.original_path || "—")} PID {detail.pid ?? "—"}
-                </div>
-                <div className="text-[11px] text-muted">
-                  Method: {detail.extraction_method} · {detail.tool_name} {detail.tool_version}
-                </div>
-
-                <ArtifactToolPanel
-                  title={CAPABILITY.signatureDetection}
-                  checking={caps.rows.signatureDetection.kind === "checking"}
-                  available={caps.rows.signatureDetection.kind === "available"}
-                  unavailableReason={
-                    caps.rows.signatureDetection.kind === "unavailable"
-                      ? UNAVAILABLE_DETAIL
-                      : undefined
-                  }
-                  extra={yaraStatus?.status_summary}
-                  busy={actionsLocked}
-                  runLabel={actionButtonLabel(
-                    "Scan signatures",
-                    "yara",
-                    submitting,
-                    activeJobKind,
-                    actionsLocked,
-                  )}
-                  onRun={() =>
-                    void queue("yara.scan_artifact", {
-                      artifact_id: detail.id,
-                      evidence_id: evidenceId,
-                      process_id: detail.process_id ?? undefined,
-                      pid: detail.pid ?? undefined,
-                    }, "yara")
-                  }
-                  note="Scans the extracted artifact file only. Matches are not a malware verdict."
-                >
-                  {yaraBundles.length === 0 ? (
-                    <div className="text-muted">No signature scans yet for this artifact.</div>
-                  ) : (
-                    yaraBundles.map((b) => (
-                      <div key={b.scan.id} className="rounded border border-border bg-surface p-2">
-                        <div className="mb-1 flex flex-wrap items-center gap-2">
-                          <Badge>{b.scan.status}</Badge>
-                          <span>
-                            {b.scan.match_count} match{b.scan.match_count === 1 ? "" : "es"}
-                          </span>
-                        </div>
-                        {b.matches.map((m) => (
-                          <div key={m.id} className="mt-1 border-t border-border/50 pt-1">
-                            <div className="font-medium">{m.rule_name}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ))
-                  )}
-                </ArtifactToolPanel>
-
-                <ArtifactToolPanel
-                  title={CAPABILITY.capabilityAnalysis}
-                  checking={caps.rows.capabilityAnalysis.kind === "checking"}
-                  available={caps.rows.capabilityAnalysis.kind === "available"}
-                  unavailableReason={
-                    caps.rows.capabilityAnalysis.kind === "unavailable"
-                      ? UNAVAILABLE_DETAIL
-                      : undefined
-                  }
-                  version={capaStatus?.capa_version}
-                  busy={actionsLocked}
-                  runLabel={actionButtonLabel(
-                    "Analyze capabilities",
-                    "capa",
-                    submitting,
-                    activeJobKind,
-                    actionsLocked,
-                  )}
-                  onRun={() =>
-                    void queue("capa.scan_artifact", {
-                      artifact_id: detail.id,
-                      evidence_id: evidenceId,
-                      process_id: detail.process_id ?? undefined,
-                      pid: detail.pid ?? undefined,
-                    }, "capa")
-                  }
-                  note="Reports capabilities (injection, network, persistence, …), not a malware verdict."
-                >
-                  {capaBundles.length === 0 ? (
-                    <div className="text-muted">No capability results yet for this artifact.</div>
-                  ) : (
-                    capaBundles.map((b) => (
-                      <div key={b.scan.id} className="rounded border border-border bg-surface p-2">
-                        <div className="mb-1 flex flex-wrap items-center gap-2">
-                          <Badge>{b.scan.status}</Badge>
-                          {b.scan.status === "completed" ? (
-                            <span>
-                              {b.scan.capability_count} capability
-                              {b.scan.capability_count === 1 ? "" : "ies"}
-                            </span>
-                          ) : null}
-                        </div>
-                        {b.scan.status === "failed" || b.scan.status === "cancelled" ? (
-                          <div className="text-[11px] text-danger">{artifactScanError(b.scan.error)}</div>
-                        ) : (
-                          b.capabilities.slice(0, 12).map((c) => (
-                            <div key={c.id} className="mt-1 border-t border-border/50 pt-1">
-                              <div className="font-medium">{c.name}</div>
-                              <div className="text-muted">{c.namespace}</div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    ))
-                  )}
-                </ArtifactToolPanel>
-
-                <ArtifactToolPanel
-                  title={CAPABILITY.stringAnalysis}
-                  checking={caps.rows.stringAnalysis.kind === "checking"}
-                  available={caps.rows.stringAnalysis.kind === "available"}
-                  unavailableReason={
-                    caps.rows.stringAnalysis.kind === "unavailable"
-                      ? UNAVAILABLE_DETAIL
-                      : undefined
-                  }
-                  version={flossStatus?.floss_version}
-                  busy={actionsLocked}
-                  runLabel={actionButtonLabel(
-                    "Extract strings",
-                    "floss",
-                    submitting,
-                    activeJobKind,
-                    actionsLocked,
-                  )}
-                  onRun={() =>
-                    void queue("floss.scan_artifact", {
-                      artifact_id: detail.id,
-                      evidence_id: evidenceId,
-                      process_id: detail.process_id ?? undefined,
-                      pid: detail.pid ?? undefined,
-                    }, "floss")
-                  }
-                  note="Static and decoded strings. Not treated as malicious findings."
-                >
-                  {flossBundles.length === 0 ? (
-                    <div className="text-muted">No string results yet for this artifact.</div>
-                  ) : (
-                    flossBundles.map((b) => (
-                      <div key={b.scan.id} className="rounded border border-border bg-surface p-2">
-                        <div className="mb-1 flex flex-wrap items-center gap-2">
-                          <Badge>{b.scan.status}</Badge>
-                          {b.scan.status === "completed" ? (
-                            <span>
-                              {b.scan.string_count} string{b.scan.string_count === 1 ? "" : "s"}
-                            </span>
-                          ) : null}
-                        </div>
-                        {b.scan.status === "failed" || b.scan.status === "cancelled" ? (
-                          <div className="text-[11px] text-danger">{artifactScanError(b.scan.error)}</div>
-                        ) : (
-                          b.strings.slice(0, 20).map((s) => (
-                            <div key={s.id} className="mt-1 font-mono text-[11px] text-muted">
-                              [{s.kind}] {s.value.slice(0, 120)}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    ))
-                  )}
-                </ArtifactToolPanel>
-              </div>
+              ) : (
+              <ExtractedFileDetail
+                detail={detail}
+                evidenceId={evidenceId}
+                yaraBundles={yaraBundles}
+                capaBundles={capaBundles}
+                flossBundles={flossBundles}
+                caps={caps}
+                actionsLocked={actionsLocked}
+                submitting={submitting}
+                activeJobKind={activeJobKind}
+                onQueue={queue}
+              />
+              )}
             </aside>
-          ) : null}
+            </div>
         </div>
       )}
 
@@ -659,6 +532,215 @@ function EmptyHint({ title, detail }: { title: string; detail?: string }) {
     <div className="flex min-h-[16rem] flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="text-sm font-semibold">{title}</div>
       {detail ? <p className="mt-2 max-w-sm text-sm leading-5 text-muted">{detail}</p> : null}
+    </div>
+  );
+}
+
+function KV({ k, v }: { k: string; v: unknown }) {
+  return (
+    <div className="grid grid-cols-[72px_1fr] gap-1">
+      <div className="text-muted">{k}</div>
+      <div className="break-all font-mono">
+        {v == null || v === "" ? "—" : String(v)}
+      </div>
+    </div>
+  );
+}
+
+function ExtractedFileDetail({
+  detail,
+  evidenceId,
+  yaraBundles,
+  capaBundles,
+  flossBundles,
+  caps,
+  actionsLocked,
+  submitting,
+  activeJobKind,
+  onQueue,
+}: {
+  detail: Artifact;
+  evidenceId: string;
+  yaraBundles: YaraScanBundle[];
+  capaBundles: CapaScanBundle[];
+  flossBundles: FlossScanBundle[];
+  caps: CapabilitySnapshot;
+  actionsLocked: boolean;
+  submitting: ArtifactAction | null;
+  activeJobKind: string | null;
+  onQueue: (method: string, params: Record<string, unknown>, action?: ArtifactAction) => Promise<void>;
+}) {
+  const isPe = isPeArtifact(detail);
+  const kind = String(detail.metadata?.pe_kind || detail.file_type || "");
+  const yaraRow = caps.rows.signatureDetection;
+  const capaRow = caps.rows.capabilityAnalysis;
+  const flossRow = caps.rows.stringAnalysis;
+  const yaraReady = yaraRow.kind === "available";
+  const capaReady = capaRow.kind === "available";
+  const flossReady = flossRow.kind === "available";
+  const yaraResults = yaraBundles.filter((b) => !isUnsupportedScan(b.scan.error));
+  const capaResults = isPe
+    ? capaBundles.filter((b) => !isUnsupportedScan(b.scan.error))
+    : [];
+  const flossResults = isPe
+    ? flossBundles.filter((b) => !isUnsupportedScan(b.scan.error))
+    : [];
+  const runParams = {
+    artifact_id: detail.id,
+    evidence_id: evidenceId,
+    process_id: detail.process_id ?? undefined,
+    pid: detail.pid ?? undefined,
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden />
+        <div className="font-semibold">File detail</div>
+        <div className="min-w-0 truncate font-mono text-muted">
+          {detail.filename}
+          {kind ? ` · ${kind}` : ""}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
+        <KV k="Filename" v={detail.filename} />
+        <KV k="Kind" v={kind || null} />
+        <KV k="SHA-256" v={detail.sha256} />
+        <KV k="Size" v={detail.size_bytes.toLocaleString()} />
+        <KV k="PID" v={detail.pid} />
+        <KV k="Method" v={detail.extraction_method} />
+        <KV k="Path" v={detail.stored_path} />
+        <KV k="Original" v={detail.metadata?.original_path} />
+      </div>
+      {!isBoilerplateNotes(detail.notes) ? (
+        <div className="text-muted">{detail.notes}</div>
+      ) : null}
+
+      <div className="space-y-2 border-t border-border pt-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={actionsLocked || !yaraReady}
+            title={!yaraReady ? UNAVAILABLE_DETAIL : undefined}
+            onClick={() => void onQueue("yara.scan_artifact", runParams, "yara")}
+          >
+            {actionButtonLabel("Scan signatures", "yara", submitting, activeJobKind, actionsLocked)}
+          </Button>
+          {isPe ? (
+            <>
+              <Button
+                size="sm"
+                disabled={actionsLocked || !capaReady}
+                title={!capaReady ? UNAVAILABLE_DETAIL : undefined}
+                onClick={() => void onQueue("capa.scan_artifact", runParams, "capa")}
+              >
+                {actionButtonLabel(
+                  "Analyze capabilities",
+                  "capa",
+                  submitting,
+                  activeJobKind,
+                  actionsLocked,
+                )}
+              </Button>
+              <Button
+                size="sm"
+                disabled={actionsLocked || !flossReady}
+                title={!flossReady ? UNAVAILABLE_DETAIL : undefined}
+                onClick={() => void onQueue("floss.scan_artifact", runParams, "floss")}
+              >
+                {actionButtonLabel("Extract strings", "floss", submitting, activeJobKind, actionsLocked)}
+              </Button>
+            </>
+          ) : null}
+        </div>
+        {isPe ? (
+          <p className="text-[11px] text-muted">
+            These tools inspect the extracted file. Matches and capabilities are observations, not a
+            malware verdict.
+          </p>
+        ) : (
+          <p className="text-[11px] text-muted">
+            Signature scans can run on this file. Capability Analysis and String Analysis need a
+            reconstructed EXE or DLL — run PE Reconstruction, or enable Extracted PE only.
+          </p>
+        )}
+      </div>
+
+      {yaraResults.length > 0 ? (
+        <ResultBlock title={CAPABILITY.signatureDetection}>
+          {yaraResults.map((b) => (
+            <div key={b.scan.id} className="rounded border border-border bg-surface p-2">
+              <div className="mb-1 text-muted">
+                {b.scan.status === "failed" || b.scan.status === "cancelled"
+                  ? artifactScanError(b.scan.error)
+                  : `${b.scan.match_count} signature match${b.scan.match_count === 1 ? "" : "es"}`}
+              </div>
+              {b.matches.map((m) => (
+                <div key={m.id} className="mt-1 border-t border-border/50 pt-1 font-medium">
+                  {m.rule_name}
+                </div>
+              ))}
+            </div>
+          ))}
+        </ResultBlock>
+      ) : null}
+
+      {capaResults.length > 0 ? (
+        <ResultBlock title={CAPABILITY.capabilityAnalysis}>
+          {capaResults.map((b) => (
+            <div key={b.scan.id} className="rounded border border-border bg-surface p-2">
+              {b.scan.status === "failed" || b.scan.status === "cancelled" ? (
+                <div className="text-danger">{artifactScanError(b.scan.error)}</div>
+              ) : (
+                <>
+                  <div className="mb-1 text-muted">
+                    {b.scan.capability_count} capabilit
+                    {b.scan.capability_count === 1 ? "y" : "ies"}
+                  </div>
+                  {b.capabilities.slice(0, 12).map((c) => (
+                    <div key={c.id} className="mt-1 border-t border-border/50 pt-1">
+                      <div className="font-medium">{c.name}</div>
+                      {c.namespace ? <div className="text-muted">{c.namespace}</div> : null}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          ))}
+        </ResultBlock>
+      ) : null}
+
+      {flossResults.length > 0 ? (
+        <ResultBlock title={CAPABILITY.stringAnalysis}>
+          {flossResults.map((b) => (
+            <div key={b.scan.id} className="rounded border border-border bg-surface p-2">
+              {b.scan.status === "failed" || b.scan.status === "cancelled" ? (
+                <div className="text-danger">{artifactScanError(b.scan.error)}</div>
+              ) : (
+                <>
+                  <div className="mb-1 text-muted">
+                    {b.scan.string_count} string{b.scan.string_count === 1 ? "" : "s"}
+                  </div>
+                  {b.strings.slice(0, 20).map((s) => (
+                    <div key={s.id} className="mt-1 font-mono text-[11px] text-muted">
+                      [{s.kind}] {s.value.slice(0, 120)}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          ))}
+        </ResultBlock>
+      ) : null}
+    </div>
+  );
+}
+
+function ResultBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <div className="font-semibold">{title}</div>
+      {children}
     </div>
   );
 }
@@ -723,61 +805,6 @@ function AntivirusConfirmDialog({
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ArtifactToolPanel({
-  title,
-  checking = false,
-  available,
-  unavailableReason,
-  suggestion,
-  version,
-  extra,
-  busy,
-  onRun,
-  runLabel,
-  note,
-  children,
-}: {
-  title: string;
-  checking?: boolean;
-  available: boolean;
-  unavailableReason?: string | null;
-  suggestion?: string | null;
-  version?: string | null;
-  extra?: string;
-  busy: boolean;
-  onRun: () => void;
-  runLabel: string;
-  note: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border-t border-border pt-3">
-      <div className="mb-2 font-semibold">{title}</div>
-      {checking ? (
-        <div className="text-muted">{title} — Checking…</div>
-      ) : !available ? (
-        <div className="space-y-1 text-muted">
-          <div>{title} unavailable</div>
-          <div>{unavailableReason}</div>
-          <div>{suggestion}</div>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {version && <div className="text-muted">Version {version}</div>}
-          {extra && <div className="break-all font-mono text-[11px] text-muted">{extra}</div>}
-          <div className="flex gap-2">
-            <Button size="sm" onClick={onRun} disabled={busy}>
-              {runLabel}
-            </Button>
-          </div>
-          <div className="text-[11px] text-muted">{note}</div>
-          {children}
-        </div>
-      )}
     </div>
   );
 }

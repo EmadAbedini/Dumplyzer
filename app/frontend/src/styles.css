@@ -398,8 +398,16 @@ table {
 }
 
 .app-result-table > tbody > tr.app-row-active,
-.app-result-table > tbody > tr.app-row-active:nth-child(even) {
-  background: var(--surface-2);
+.app-result-table > tbody > tr.app-row-active:nth-child(even),
+.app-result-table > tbody > tr.app-row-active:hover:not(.app-row-empty) {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.selected-record-detail {
+  border-top-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 thead {
