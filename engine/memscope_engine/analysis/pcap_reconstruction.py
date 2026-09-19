@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from uuid import uuid4
 
 from memscope_engine.analysis.pcap_carve import (
     CarvedPacket,
+    canonical_ip,
     carve_image,
     filter_packets_for_flow,
     flow_key,
@@ -46,7 +48,7 @@ LIMITATIONS = [
     "A memory image is not a packet capture. Recovered records are packet-shaped bytes found in RAM, not a complete conversation.",
     "Capture timestamps are not present on carved packets; PCAP timestamps are unset (0).",
     "Missing bytes are never invented. Truncated records are stored with the recovered length only.",
-    "Ethernet and raw IP records are written as separate PCAPs so a synthetic Layer-2 header is never prepended.",
+    "packets.pcap is Ethernet IPv4. Raw IP and IPv6-looking RAM bytes are not used as the capture.",
     "Connection metadata from Network Connections is not a PCAP. Metadata-only flows have no packet file.",
 ]
 
@@ -123,28 +125,78 @@ def _flow_status(packet_count: int, truncated_count: int, has_connection: bool) 
     return "packets_recovered"
 
 
+def _prefer_packets_pcap(paths: list[Path]) -> Path | None:
+    if not paths:
+        return None
+    for path in paths:
+        if path.name.lower() == "packets.pcap":
+            return path
+    return paths[0]
+
+
+def _copy_as_packets_pcap(src: Path, out_dir: Path) -> dict[str, Any]:
+    dest = out_dir / "packets.pcap"
+    if src.resolve() != dest.resolve():
+        shutil.copy2(src, dest)
+    size = dest.stat().st_size if dest.is_file() else 0
+    rec = {
+        "name": dest.name,
+        "kind": "pcap",
+        "packet_count": None,
+        "size_bytes": size,
+        "path": str(dest),
+        "source_path": str(src),
+    }
+    return {"files": [rec], "primary_path": str(dest)}
+
+
 def _existing_bulk_extractor_pcaps(db: Database, evidence_id: str) -> list[Path]:
-    if not _table_exists(db, "bulk_extractor_outputs"):
-        return []
-    rows = db.fetchall(
-        """
-        SELECT o.relative_path, s.output_dir
-        FROM bulk_extractor_outputs o
-        JOIN bulk_extractor_scans s ON s.id = o.scan_id
-        WHERE o.evidence_id = ? AND s.status = 'completed'
-        """,
-        (evidence_id,),
-    )
     found: list[Path] = []
-    for row in rows:
-        rel = str(row.get("relative_path") or "")
-        lower = rel.lower()
-        if not (lower.endswith(".pcap") or lower.endswith(".pcapng")):
-            continue
-        root = Path(str(row.get("output_dir") or ""))
-        candidate = (root / rel) if root else Path(rel)
-        if candidate.is_file():
-            found.append(candidate)
+    seen: set[Path] = set()
+
+    def _add(path: Path) -> None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return
+        if resolved in seen or not path.is_file():
+            return
+        seen.add(resolved)
+        found.append(path)
+
+    if _table_exists(db, "bulk_extractor_outputs"):
+        rows = db.fetchall(
+            """
+            SELECT o.relative_path, s.output_dir
+            FROM bulk_extractor_outputs o
+            JOIN bulk_extractor_scans s ON s.id = o.scan_id
+            WHERE o.evidence_id = ? AND s.status = 'completed'
+            """,
+            (evidence_id,),
+        )
+        for row in rows:
+            rel = str(row.get("relative_path") or "")
+            lower = rel.lower()
+            if not (lower.endswith(".pcap") or lower.endswith(".pcapng")):
+                continue
+            root = Path(str(row.get("output_dir") or ""))
+            candidate = (root / rel) if root else Path(rel)
+            _add(candidate)
+
+    if _table_exists(db, "bulk_extractor_scans"):
+        scans = db.fetchall(
+            """
+            SELECT output_dir FROM bulk_extractor_scans
+            WHERE evidence_id = ? AND status = 'completed'
+            """,
+            (evidence_id,),
+        )
+        for row in scans:
+            root = Path(str(row.get("output_dir") or ""))
+            if not root:
+                continue
+            _add(root / "packets.pcap")
+
     return found
 
 
@@ -233,7 +285,13 @@ def reconstruct_packets(
         pct = max(1, min(89, int(frac * 80) + 5))
         progress(message or "Reconstructing packet records", {"phase": "pcap", "percent": pct})
 
-    carved = carve_image(image, cancelled=cancelled, progress=_prog)
+    carved = carve_image(
+        image,
+        cancelled=cancelled,
+        progress=_prog,
+        include_raw_ip=False,
+        include_ipv6=False,
+    )
     if carved.cancelled:
         raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
     packets: list[CarvedPacket] = list(carved.packets)
@@ -389,12 +447,62 @@ def run_pcap_reconstruction_job(
         ]
         if import_pcap:
             extras.append((import_pcap, "external_import"))
-        result = reconstruct_packets(
-            image, cancelled=cancelled, progress=progress, extra_pcaps=extras
-        )
+        primary_extra = _prefer_packets_pcap([path for path, _src in extras])
+        if primary_extra:
+            progress("Using bulk_extractor packets.pcap", {"phase": "pcap", "percent": 20})
+            packets = []
+            seen: set[tuple[Any, ...]] = set()
+            imported = 0
+            for extra, source in extras:
+                try:
+                    imported_pkts = read_pcap(extra, source=f"{source}:{extra.name}")
+                except OSError:
+                    continue
+                for pkt in imported_pkts:
+                    key = (pkt.offset, pkt.incl_len, pkt.src_ip, pkt.dst_ip, pkt.src_port, pkt.dst_port)
+                    if key in seen:
+                        continue
+                    packets.append(pkt)
+                    seen.add(key)
+                    imported += 1
+            packets.sort(key=lambda p: p.offset)
+            written = _copy_as_packets_pcap(primary_extra, out_dir)
+            if written.get("files"):
+                written["files"][0]["packet_count"] = len(packets)
+            source_label = next(
+                (src for path, src in extras if path.resolve() == primary_extra.resolve()),
+                "pcap",
+            )
+            packet_source = (
+                "bulk_extractor packets.pcap"
+                if source_label == "bulk_extractor"
+                else "imported packets.pcap"
+            )
+            result = {
+                "packets": packets,
+                "status": overall_status(packets),
+                "bytes_scanned": None,
+                "image_size": None,
+                "skipped_invalid": 0,
+                "imported_pcap_packets": imported if import_pcap else 0,
+                "truncated_count": sum(1 for p in packets if p.truncated),
+                "ethernet_count": sum(1 for p in packets if p.linktype == 1),
+                "raw_ip_count": sum(1 for p in packets if p.linktype == 101),
+                "packet_source": packet_source,
+            }
+        else:
+            result = reconstruct_packets(
+                image, cancelled=cancelled, progress=progress, extra_pcaps=extras
+            )
+            packets = result["packets"]
+            written = (
+                write_pcap_pair(out_dir, packets, stem="packets")
+                if packets
+                else {"files": [], "primary_path": None}
+            )
+            result["packet_source"] = "memory image carve"
+            result["imported_pcap_packets"] = result.get("imported_pcap_packets") or 0
         assert_evidence_unchanged(image, before, entity="pcap")
-        packets: list[CarvedPacket] = result["packets"]
-        written = write_pcap_pair(out_dir, packets) if packets else {"files": [], "primary_path": None}
         if cancelled():
             raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
         progress("Correlating recovered packets with network connections", {"phase": "pcap", "percent": 92})
@@ -413,7 +521,10 @@ def run_pcap_reconstruction_job(
             "skipped_invalid": result.get("skipped_invalid"),
             "imported_pcap_packets": result.get("imported_pcap_packets"),
             "imported_pcap_path": str(import_pcap) if import_pcap else None,
-            "timestamps": "unset",
+            "packet_source": result.get("packet_source"),
+            "ipv4_count": sum(1 for p in packets if p.ip_version == 4),
+            "ipv6_count": sum(1 for p in packets if p.ip_version == 6),
+            "timestamps": "original" if primary_extra else "unset",
             "limitations": LIMITATIONS,
         }
         db.execute(
@@ -570,9 +681,9 @@ def _persist_flows(
             "process_id": conn.get("process_id"),
             "pid": conn.get("pid"),
             "protocol": conn.get("protocol"),
-            "local_address": conn.get("local_address"),
+            "local_address": canonical_ip(str(conn.get("local_address") or "")) or conn.get("local_address"),
             "local_port": conn.get("local_port"),
-            "remote_address": conn.get("remote_address"),
+            "remote_address": canonical_ip(str(conn.get("remote_address") or "")) or conn.get("remote_address"),
             "remote_port": conn.get("remote_port"),
             "status": status,
             "packet_count": len(matched),

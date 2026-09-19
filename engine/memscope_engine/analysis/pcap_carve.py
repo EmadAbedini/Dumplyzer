@@ -292,6 +292,8 @@ def carve_buffer(
     consumed: set[int] | None = None,
     max_packets: int = MAX_PACKETS,
     existing: int = 0,
+    include_raw_ip: bool = True,
+    include_ipv6: bool = True,
 ) -> tuple[list[CarvedPacket], int, set[int]]:
     """Carve packets from a buffer.
 
@@ -317,7 +319,10 @@ def carve_buffer(
         return True
 
     # Ethernet frames first so inner IP is not also stored as raw IP.
-    for needle in (b"\x08\x00", b"\x86\xdd"):
+    needles = [b"\x08\x00"]
+    if include_ipv6:
+        needles.append(b"\x86\xdd")
+    for needle in needles:
         for rel in _candidate_indexes(buffer, needle):
             if len(found) >= budget:
                 break
@@ -331,28 +336,35 @@ def carve_buffer(
             if not parsed:
                 skipped += 1
                 continue
+            if not include_ipv6 and int(parsed.get("ip_version") or 0) == 6:
+                skipped += 1
+                continue
             pkt = _packet_from_parsed(parsed, abs_off, LINKTYPE_ETHERNET)
             inner = parsed.get("inner_ip_offset")
             inner_abs = (base_offset + int(inner)) if inner is not None else None
             if not _accept(pkt, inner_abs):
                 break
 
-    for version, parse in ((4, parse_ipv4), (6, parse_ipv6)):
-        if len(found) >= budget:
-            break
-        for rel in _ip_version_indexes(buffer, version):
+    if include_raw_ip:
+        parsers: list[tuple[int, Any]] = [(4, parse_ipv4)]
+        if include_ipv6:
+            parsers.append((6, parse_ipv6))
+        for version, parse in parsers:
             if len(found) >= budget:
                 break
-            abs_off = base_offset + rel
-            if abs_off in covered:
-                continue
-            parsed = parse(buffer, rel)
-            if not parsed:
-                skipped += 1
-                continue
-            pkt = _packet_from_parsed(parsed, abs_off, LINKTYPE_RAW)
-            if not _accept(pkt):
-                break
+            for rel in _ip_version_indexes(buffer, version):
+                if len(found) >= budget:
+                    break
+                abs_off = base_offset + rel
+                if abs_off in covered:
+                    continue
+                parsed = parse(buffer, rel)
+                if not parsed:
+                    skipped += 1
+                    continue
+                pkt = _packet_from_parsed(parsed, abs_off, LINKTYPE_RAW)
+                if not _accept(pkt):
+                    break
 
     return found, skipped, covered
 
@@ -379,6 +391,8 @@ def carve_image(
     cancelled: Callable[[], bool] | None = None,
     progress: Callable[[float, str | None], None] | None = None,
     max_packets: int = MAX_PACKETS,
+    include_raw_ip: bool = True,
+    include_ipv6: bool = True,
 ) -> CarveResult:
     result = CarveResult()
     image = Path(path)
@@ -404,6 +418,8 @@ def carve_image(
                 consumed=covered,
                 max_packets=max_packets,
                 existing=len(result.packets),
+                include_raw_ip=include_raw_ip,
+                include_ipv6=include_ipv6,
             )
             result.packets.extend(packets)
             result.skipped_invalid += skipped
@@ -504,6 +520,21 @@ def _describe_frame(raw: bytes, network: int) -> dict[str, Any]:
     return parsed or {}
 
 
+def canonical_ip(value: str | None) -> str:
+    """Normalize IPv4-mapped IPv6 (::ffff:a.b.c.d) to dotted IPv4."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        addr = ipaddress.ip_address(raw)
+    except ValueError:
+        return raw
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        return str(mapped)
+    return str(addr)
+
+
 def flow_key(src_ip: str, src_port: int, dst_ip: str, dst_port: int, protocol: str) -> tuple[Any, ...]:
     proto = protocol.lower().replace("ipv4", "").replace("ipv6", "").replace("v4", "").replace("v6", "")
     proto = proto.strip() or protocol.lower()
@@ -511,8 +542,10 @@ def flow_key(src_ip: str, src_port: int, dst_ip: str, dst_port: int, protocol: s
         proto = "tcp"
     elif proto.startswith("udp"):
         proto = "udp"
-    a = (src_ip, int(src_port), dst_ip, int(dst_port))
-    b = (dst_ip, int(dst_port), src_ip, int(src_port))
+    src = canonical_ip(src_ip) or src_ip
+    dst = canonical_ip(dst_ip) or dst_ip
+    a = (src, int(src_port), dst, int(dst_port))
+    b = (dst, int(dst_port), src, int(src_port))
     ends = a if a <= b else b
     return (proto, ends)
 
@@ -528,7 +561,7 @@ def write_pcap_pair(
     out_dir: Path,
     packets: list[CarvedPacket],
     *,
-    stem: str = "reconstructed",
+    stem: str = "packets",
 ) -> dict[str, Any]:
     """Write one or two classic PCAPs so Ethernet and raw IP are never mixed."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -548,7 +581,7 @@ def write_pcap_pair(
         size = write_pcap(path, raw_ip, linktype=LINKTYPE_RAW)
         rec = {"name": path.name, "kind": "pcap_raw_ip", "linktype": LINKTYPE_RAW, "packet_count": len(raw_ip), "size_bytes": size, "path": str(path)}
         files.append(rec)
-        if primary is None or len(raw_ip) > len(ethernet):
+        if primary is None:
             primary = path
     return {
         "files": files,

@@ -12,8 +12,10 @@ from memscope_engine.analysis.pcap_carve import (
     LINKTYPE_ETHERNET,
     LINKTYPE_RAW,
     PCAP_MAGIC,
+    canonical_ip,
     carve_buffer,
     carve_image,
+    flow_key,
     ipv4_header_checksum,
     overall_status,
     parse_ipv4,
@@ -23,6 +25,7 @@ from memscope_engine.analysis.pcap_carve import (
 )
 from memscope_engine.analysis.pcap_reconstruction import (
     LIMITATIONS,
+    reconstruct_packets,
     run_pcap_reconstruction_job,
     validate_import_pcap,
 )
@@ -181,8 +184,41 @@ def test_write_pcap_pair_splits_linktypes(tmp_path: Path) -> None:
     packets, _, _ = carve_buffer(blob)
     written = write_pcap_pair(tmp_path, packets)
     names = {f["name"] for f in written["files"]}
-    assert "reconstructed.pcap" in names
-    assert "reconstructed-rawip.pcap" in names
+    assert "packets.pcap" in names
+    assert "packets-rawip.pcap" in names
+    assert Path(written["primary_path"]).name == "packets.pcap"
+
+
+def test_write_pcap_pair_keeps_ethernet_primary_when_raw_outnumbers(tmp_path: Path) -> None:
+    blob = ethernet_ipv4_tcp() + raw_ipv4_udp() * 8
+    packets, _, _ = carve_buffer(blob)
+    written = write_pcap_pair(tmp_path, packets)
+    assert Path(written["primary_path"]).name == "packets.pcap"
+    eth = next(f for f in written["files"] if f["name"] == "packets.pcap")
+    raw = next(f for f in written["files"] if f["name"] == "packets-rawip.pcap")
+    assert raw["packet_count"] > eth["packet_count"]
+
+
+def test_canonical_ip_maps_ipv4_mapped_ipv6() -> None:
+    assert canonical_ip("::ffff:192.0.2.10") == "192.0.2.10"
+    assert canonical_ip("192.0.2.10") == "192.0.2.10"
+    key_v4 = flow_key("192.0.2.10", 443, "10.0.0.1", 49152, "tcp")
+    key_mapped = flow_key("::ffff:192.0.2.10", 443, "10.0.0.1", 49152, "tcp")
+    assert key_v4 == key_mapped
+
+
+def test_reconstruction_carve_keeps_ethernet_ipv4_not_raw_ipv6(tmp_path: Path) -> None:
+    image = tmp_path / "mem.raw"
+    image.write_bytes(ethernet_ipv4_tcp() + ipv6_udp() * 12 + b"\x00" * 64)
+    result = reconstruct_packets(image)
+    packets = result["packets"]
+    assert packets
+    assert all(p.ip_version == 4 for p in packets)
+    assert all(p.linktype == LINKTYPE_ETHERNET for p in packets)
+    written = write_pcap_pair(tmp_path, packets)
+    loaded = read_pcap(Path(written["primary_path"]))
+    assert loaded
+    assert all(p.ip_version == 4 for p in loaded)
 
 
 def test_job_writes_pcap_outside_evidence(tmp_path: Path) -> None:
@@ -213,6 +249,7 @@ def test_job_writes_pcap_outside_evidence(tmp_path: Path) -> None:
     assert recon["pcap_embedded"] is False
     out = Path(recon["output_path"])
     assert out.is_file()
+    assert out.name == "packets.pcap"
     assert out.read_bytes()[:4] == struct.pack("<I", PCAP_MAGIC)
     assert out.resolve().is_relative_to(paths.analysis.resolve())
     assert not out.resolve().is_relative_to(evidence_dir.resolve())
@@ -314,8 +351,10 @@ def test_job_imports_external_pcap(tmp_path: Path) -> None:
     assert recon["observed"]["imported_pcap_path"] == str(external.resolve())
     out = Path(recon["output_path"])
     assert out.is_file()
+    assert out.name == "packets.pcap"
     loaded = read_pcap(out)
     assert loaded[0].src_ip == "10.0.0.1"
+    assert out.read_bytes() == external.read_bytes()
     assert external.read_bytes()[:4] == struct.pack("<I", PCAP_MAGIC)
     db.close()
 
@@ -371,3 +410,91 @@ def test_import_pcap_rejects_non_pcap(tmp_path: Path) -> None:
     with pytest.raises(AppError) as err:
         validate_import_pcap(str(other), evidence_path=image)
     assert err.value.code == "pcap_import_invalid"
+
+
+def test_job_copies_bulk_extractor_packets_pcap(tmp_path: Path) -> None:
+    paths = AppPaths(tmp_path / "data").ensure()
+    db = Database(paths.db_path)
+    image = tmp_path / "memory.raw"
+    image.write_bytes(b"\x00" * 512)
+    ev = import_evidence(db, str(image))
+
+    be_dir = paths.analysis / "bulk_extractor" / "scan1"
+    be_dir.mkdir(parents=True, exist_ok=True)
+    packets, _, _ = carve_buffer(ethernet_ipv4_tcp())
+    src = be_dir / "packets.pcap"
+    write_pcap(src, packets, linktype=LINKTYPE_ETHERNET)
+    original = src.read_bytes()
+    scan_id = str(uuid4())
+    now = "2026-01-01T00:00:00+00:00"
+    db.execute(
+        """
+        INSERT INTO bulk_extractor_scans (
+          id, evidence_id, status, ui_state, feature_count, scanner_count,
+          invoked, started_at, finished_at, output_dir
+        ) VALUES (?, ?, 'completed', 'completed', 0, 0, 1, ?, ?, ?)
+        """,
+        (scan_id, ev["id"], now, now, str(be_dir)),
+    )
+    db.execute(
+        """
+        INSERT INTO bulk_extractor_outputs (
+          id, scan_id, evidence_id, relative_path, role, size_bytes, created_at
+        ) VALUES (?, ?, ?, 'packets.pcap', 'pcap', ?, ?)
+        """,
+        (str(uuid4()), scan_id, ev["id"], len(original), now),
+    )
+
+    result = run_pcap_reconstruction_job(
+        db,
+        {"evidence_id": ev["id"]},
+        lambda: False,
+        lambda *a, **k: None,
+        paths=paths,
+    )
+    recon = result["reconstruction"]
+    out = Path(recon["output_path"])
+    assert out.name == "packets.pcap"
+    assert out.read_bytes() == original
+    assert recon["observed"]["packet_source"] == "bulk_extractor packets.pcap"
+    db.close()
+
+
+def test_job_copies_packets_pcap_from_scan_dir_without_outputs_row(tmp_path: Path) -> None:
+    paths = AppPaths(tmp_path / "data").ensure()
+    db = Database(paths.db_path)
+    image = tmp_path / "memory.raw"
+    image.write_bytes(ethernet_ipv4_tcp() + ipv6_udp() * 8)
+    ev = import_evidence(db, str(image))
+
+    be_dir = paths.analysis / "bulk_extractor" / "scan-unindexed"
+    be_dir.mkdir(parents=True, exist_ok=True)
+    packets, _, _ = carve_buffer(ethernet_ipv4_tcp())
+    src = be_dir / "packets.pcap"
+    write_pcap(src, packets, linktype=LINKTYPE_ETHERNET)
+    original = src.read_bytes()
+    now = "2026-01-01T00:00:00+00:00"
+    db.execute(
+        """
+        INSERT INTO bulk_extractor_scans (
+          id, evidence_id, status, ui_state, feature_count, scanner_count,
+          invoked, started_at, finished_at, output_dir
+        ) VALUES (?, ?, 'completed', 'completed', 0, 0, 1, ?, ?, ?)
+        """,
+        (str(uuid4()), ev["id"], now, now, str(be_dir)),
+    )
+
+    result = run_pcap_reconstruction_job(
+        db,
+        {"evidence_id": ev["id"]},
+        lambda: False,
+        lambda *a, **k: None,
+        paths=paths,
+    )
+    recon = result["reconstruction"]
+    out = Path(recon["output_path"])
+    assert out.read_bytes() == original
+    assert recon["observed"]["packet_source"] == "bulk_extractor packets.pcap"
+    assert recon["observed"]["ipv4_count"] >= 1
+    assert recon["observed"]["ipv6_count"] == 0
+    db.close()
