@@ -97,6 +97,25 @@ export function uncoveredSourceIds(
   return sourceIds.filter((id) => !capabilityHasStoredData(coverage, id));
 }
 
+/** True when no Complete Analysis capability is still in progress. */
+export function evidenceAnalysisSettled(coverage?: AnalysisCoverage): boolean {
+  if (!coverage) return true;
+  for (const id of COMPLETE_ANALYSIS_IDS) {
+    const kind = coverageLiveKind(coverageItem(coverage, id));
+    if (kind === "in_progress" || kind === "partial") return false;
+  }
+  return true;
+}
+
+/** Missing sources after the last evidence-wide analysis has settled. */
+export function settledMissingSourceIds(
+  coverage: AnalysisCoverage | undefined,
+  sourceIds: readonly string[],
+): string[] {
+  if (!evidenceAnalysisSettled(coverage)) return [];
+  return uncoveredSourceIds(coverage, sourceIds);
+}
+
 export function searchFieldHasData(
   coverage: AnalysisCoverage | undefined,
   fieldId: string,
@@ -129,9 +148,9 @@ export function storedActionNote(missingIds: readonly string[]): string {
 
 export function limitedResultsNote(missingIds: readonly string[]): string {
   if (missingIds.length >= 4) {
-    return "Showing results from the analysis that already ran. Quick Triage and Custom Analysis only include the capabilities you selected, so this list can be smaller than Complete Analysis.";
+    return "This view is less complete than Complete Analysis. Quick Triage and Custom Analysis only include the capabilities you selected, so you will see fewer results here.";
   }
   const list = formatCapabilityList(missingIds);
   const verb = missingIds.length === 1 ? "was" : "were";
-  return `Showing results from the analysis that already ran. ${list} ${verb} not included, so this list can be smaller than Complete Analysis.`;
+  return `This view is less complete than Complete Analysis. ${list} ${verb} not collected in the last run, so you will see fewer results than after a full pass.`;
 }

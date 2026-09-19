@@ -12,12 +12,14 @@ import {
   CoverageEmptyState,
   ImportEvidenceState,
   ListLoadingState,
+  AnalysisScopeNote,
   coverageShowsEmptyPanel,
 } from "./CoverageStatus";
 import {
   DERIVED_SOURCE_IDS,
   capabilityHasStoredData,
-  uncoveredSourceIds,
+  limitedResultsNote,
+  settledMissingSourceIds,
 } from "../lib/analysisScope";
 import type { AnalysisCoverage, ModuleRow, Finding, CapabilityCoverage } from "../lib/types";
 import { FindingCard } from "./FindingCard";
@@ -226,7 +228,7 @@ export function FindingsView({
     [items, filter, filterField],
   );
   const severityCounts = useMemo(() => countFindingsBySeverity(filtered), [filtered]);
-  const missingSources = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.findings);
+  const missingSources = settledMissingSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.findings);
   const commandLinesReady = capabilityHasStoredData(analysisCoverage, "command_lines");
   const findingsNotAnalyzedDetail = commandLinesReady
     ? "Command lines are stored, but Findings was not included in the last analysis."
@@ -245,16 +247,23 @@ export function FindingsView({
   }
   if (coverageShowsEmptyPanel(coverage, items.length)) {
     return (
-      <CoverageEmptyState
-        item={coverage}
-        title="Findings"
-        inProgressDetail="Findings are still being analyzed."
-        analyzedZeroDetail="Complete Analysis found no matching command-line heuristics (encoded PowerShell, cmd.exe LOLBins, or user-temp execution). Memory-region findings appear after Analyze process."
-        analyzedZeroHint={findingsZeroHint}
-        notAnalyzedDetail={findingsNotAnalyzedDetail}
-        notAnalyzedHint={findingsNotAnalyzedHint}
-        failedDetail="Findings analysis failed."
-      />
+      <div className="flex h-full min-h-0 flex-1 flex-col">
+        {missingSources.length > 0 ? (
+          <div className="border-b border-border px-3 py-2">
+            <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
+          </div>
+        ) : null}
+        <CoverageEmptyState
+          item={coverage}
+          title="Findings"
+          inProgressDetail="Findings are still being analyzed."
+          analyzedZeroDetail="Complete Analysis found no matching command-line heuristics (encoded PowerShell, cmd.exe LOLBins, or user-temp execution). Memory-region findings appear after Analyze process."
+          analyzedZeroHint={findingsZeroHint}
+          notAnalyzedDetail={findingsNotAnalyzedDetail}
+          notAnalyzedHint={findingsNotAnalyzedHint}
+          failedDetail="Findings analysis failed."
+        />
+      </div>
     );
   }
   return (
@@ -292,6 +301,11 @@ export function FindingsView({
           ]}
         />
       </div>
+      {missingSources.length > 0 ? (
+        <div className="border-b border-border px-3 py-2">
+          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
         {filtered.map((f) => (
           <FindingCard key={f.id} finding={f} onOpenProcess={onOpenProcess} />

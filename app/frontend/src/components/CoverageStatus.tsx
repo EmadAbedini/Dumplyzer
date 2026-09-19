@@ -114,9 +114,9 @@ export function CoverageStatus({
 
 export function AnalysisScopeNote({ children }: { children: ReactNode }) {
   return (
-    <div className="analysis-profile-note flex items-start gap-2 rounded-md px-2.5 py-2 text-xs leading-snug">
+    <div className="analysis-profile-note flex min-w-0 items-start gap-2 overflow-hidden rounded-md px-2.5 py-2 text-xs leading-snug">
       <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
-      <p className="min-w-0 flex-1">{children}</p>
+      <p className="min-w-0 flex-1 wrap-anywhere">{children}</p>
     </div>
   );
 }

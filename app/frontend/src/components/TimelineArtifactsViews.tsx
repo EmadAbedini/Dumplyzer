@@ -18,8 +18,7 @@ import {
   DERIVED_SOURCE_IDS,
   STORED_ACTION_TITLE,
   limitedResultsNote,
-  storedActionNote,
-  uncoveredSourceIds,
+  settledMissingSourceIds,
 } from "../lib/analysisScope";
 import type { AnalysisCoverage, CapabilityCoverage, TimelineEvent } from "../lib/types";
 import { Badge } from "./ui/badge";
@@ -280,24 +279,20 @@ export function TimelineView({
   const loading = loadedEvidenceId !== evidenceId;
   const updating = coverageIsUpdating(coverage);
   const showRebuild = !coverageWasExecuted(coverage) && coverageLiveKind(coverage) !== "in_progress";
-  const missingSources = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.timeline);
-  const showLimitedNote = dumpItems.length > 0 && missingSources.length > 0;
+  const missingSources = settledMissingSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.timeline);
+  const showLimitedNote = missingSources.length > 0;
   const timelineEmptyItem =
     builtHere && dumpItems.length === 0 && coverageLiveKind(coverage) === "not_analyzed"
       ? { id: "timeline", state: "analyzed_zero" as const, count: 0 }
       : coverage;
   const timelineNotAnalyzedDetail =
     "The timeline is built from process, network, module, and other records already stored — not by rescanning the dump.";
-  const timelineNotAnalyzedHint =
-    missingSources.length > 0
-      ? `${storedActionNote(missingSources)} You can still rebuild from whatever is stored.`
-      : "Use Rebuild from stored results to build a timeline from stored records, or include Timeline in Complete or Custom Analysis.";
-  const timelineAnalyzedZeroDetail =
-    missingSources.length > 0
-      ? "The timeline was built from stored records and found no dump-time events."
-      : "No dump-time events were recovered from this image.";
-  const timelineAnalyzedZeroHint =
-    missingSources.length > 0 ? storedActionNote(missingSources) : undefined;
+  const timelineNotAnalyzedHint = showLimitedNote
+    ? "You can still rebuild from whatever is already stored."
+    : "Use Rebuild from stored results to build a timeline from stored records, or include Timeline in Complete or Custom Analysis.";
+  const timelineAnalyzedZeroDetail = showLimitedNote
+    ? "The timeline was built from stored records and found no dump-time events."
+    : "No dump-time events were recovered from this image.";
 
   if (!evidenceId) {
     return <ImportEvidenceState title="Timeline" />;
@@ -361,7 +356,6 @@ export function TimelineView({
           showTitle={false}
           inProgressDetail="The timeline is still being built."
           analyzedZeroDetail={timelineAnalyzedZeroDetail}
-          analyzedZeroHint={timelineAnalyzedZeroHint}
           notAnalyzedDetail={timelineNotAnalyzedDetail}
           notAnalyzedHint={timelineNotAnalyzedHint}
           failedDetail="Timeline analysis failed."
