@@ -117,7 +117,7 @@ export function ProcessExplorer({
         <div className="border-b border-border px-3 py-2">
           <AnalysisScopeNote>
             Command lines were not collected in the last analysis, so that column stays empty.
-            Run Complete Analysis, or select Command Lines in Custom Analysis. Analyze process
+            Run Complete Analysis, or select Command Lines in Custom Analysis. Analyze Process
             can also fill the command line for a single PID.
           </AnalysisScopeNote>
         </div>

@@ -397,14 +397,16 @@ export function PluginExplorerView({
                   {(detail.plugin.configurable_parameters ?? []).length === 0 ? (
                     <div className="text-muted">None. Engine supplies framework requirements.</div>
                   ) : (
-                    (detail.plugin.configurable_parameters ?? []).map((req) => (
-                      <ParamField
-                        key={req.name}
-                        req={req}
-                        value={params[req.name] ?? ""}
-                        onChange={(v) => setParams((p) => ({ ...p, [req.name]: v }))}
-                      />
-                    ))
+                    <div className="space-y-3">
+                      {(detail.plugin.configurable_parameters ?? []).map((req) => (
+                        <ParamField
+                          key={req.name}
+                          req={req}
+                          value={params[req.name] ?? ""}
+                          onChange={(v) => setParams((p) => ({ ...p, [req.name]: v }))}
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
                 <div>
@@ -415,10 +417,12 @@ export function PluginExplorerView({
                     {(detail.plugin.requirements ?? [])
                       .filter((r) => !r.configurable)
                       .map((r) => (
-                        <div key={r.name} className="mb-1">
+                        <div key={r.name} className="mb-2 last:mb-0">
                           <span className="font-mono">{r.name}</span>{" "}
                           <span className="text-muted">{r.type}</span>
-                          <div className="text-[11px] text-muted">{r.description}</div>
+                          {r.description ? (
+                            <div className="mt-0.5 text-[11px] leading-4 text-muted">{r.description}</div>
+                          ) : null}
                         </div>
                       ))}
                   </div>
@@ -456,7 +460,9 @@ export function PluginExplorerView({
               ) : null}
               {job?.status === "failed" && job.error && (
                 <div className="text-danger">
-                  {String(job.error.message ?? JSON.stringify(job.error))}
+                  {typeof job.error.message === "string"
+                    ? job.error.message
+                    : "Plugin run failed."}
                 </div>
               )}
             </div>
@@ -718,21 +724,29 @@ function ParamField({
 }) {
   if (req.type === "BooleanRequirement") {
     return (
-      <label className="mb-1 flex items-center gap-2">
+      <label className="flex items-start gap-2">
         <input
+          className="mt-0.5"
           type="checkbox"
           checked={value === "true" || value === "1"}
           onChange={(e) => onChange(e.target.checked ? "true" : "false")}
         />
-        <span className="font-mono">{req.name}</span>
-        <span className="text-muted">{req.description}</span>
+        <span>
+          <span className="font-mono">{req.name}</span>
+          {req.description ? (
+            <span className="mt-0.5 block text-[11px] leading-4 text-muted">{req.description}</span>
+          ) : null}
+        </span>
       </label>
     );
   }
   if (req.type === "ChoiceRequirement" && req.choices?.length) {
     return (
-      <label className="mb-1 block">
-        <div className="font-mono">{req.name}</div>
+      <label className="block space-y-1">
+        <div className="font-mono">
+          {req.name}
+          {req.optional ? "" : " *"}
+        </div>
         <select
           className="h-8 w-full rounded-md border border-border bg-surface px-2"
           value={value}
@@ -745,20 +759,26 @@ function ParamField({
             </option>
           ))}
         </select>
+        {req.description ? (
+          <div className="text-[11px] leading-4 text-muted">{req.description}</div>
+        ) : null}
       </label>
     );
   }
   return (
-    <label className="mb-1 block">
+    <label className="block space-y-1">
       <div className="font-mono">
         {req.name}
         {req.optional ? "" : " *"}
       </div>
       <Input
         value={value}
-        placeholder={req.description || req.type}
+        placeholder={req.type}
         onChange={(e) => onChange(e.target.value)}
       />
+      {req.description ? (
+        <div className="text-[11px] leading-4 text-muted">{req.description}</div>
+      ) : null}
     </label>
   );
 }

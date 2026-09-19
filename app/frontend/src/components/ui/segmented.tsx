@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { cn } from "../../lib/utils";
 
 export type SegmentedOption<T extends string> = {
@@ -26,31 +27,35 @@ export function SegmentedControl<T extends string>({
       role="tablist"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex h-8 overflow-hidden rounded-md border border-border bg-border gap-px",
+        "inline-flex h-8 overflow-hidden rounded-md border border-border",
         className,
       )}
     >
-      {options.map((opt) => {
+      {options.map((opt, index) => {
         const selected = value === opt.id;
         return (
-          <button
-            key={opt.id}
-            id={opt.buttonId}
-            type="button"
-            role="tab"
-            title={opt.title}
-            disabled={opt.disabled}
-            aria-selected={selected}
-            className={cn(
-              "inline-flex h-full items-center justify-center whitespace-nowrap px-3 text-sm font-medium leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-              selected
-                ? "bg-accent text-accent-fg"
-                : "bg-surface-2 text-muted hover:text-foreground",
-            )}
-            onClick={() => onChange(opt.id)}
-          >
-            {opt.label}
-          </button>
+          <Fragment key={opt.id}>
+            {index > 0 ? (
+              <span className="w-px shrink-0 self-stretch bg-border" aria-hidden />
+            ) : null}
+            <button
+              id={opt.buttonId}
+              type="button"
+              role="tab"
+              title={opt.title}
+              disabled={opt.disabled}
+              aria-selected={selected}
+              className={cn(
+                "inline-flex h-full items-center justify-center whitespace-nowrap px-3 text-sm font-medium leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                selected
+                  ? "bg-accent text-accent-fg"
+                  : "bg-surface-2 text-muted hover:text-foreground",
+              )}
+              onClick={() => onChange(opt.id)}
+            >
+              {opt.label}
+            </button>
+          </Fragment>
         );
       })}
     </div>

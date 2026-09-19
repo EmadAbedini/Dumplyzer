@@ -185,7 +185,7 @@ function NavButton({
           />
         </span>
       ) : concurrentBusy ? (
-        <span className="text-[0.7rem] text-muted" title={title}>
+        <span className="inline-block min-w-[3.5rem] text-center text-[0.7rem] text-muted" title={title}>
           Busy
         </span>
       ) : showCoverage ? (
@@ -208,7 +208,7 @@ export function Sidebar({
 }: Props) {
   const analysisBusy = jobsRunning && !importing;
   return (
-    <aside className="flex w-[calc(13rem+15px)] shrink-0 flex-col border-r border-border bg-surface">
+    <aside className="flex w-[calc(13rem+35px)] shrink-0 flex-col border-r border-border bg-surface">
       <div className="border-b border-border px-3 py-2.5">
         <div className="text-[0.72rem] font-medium uppercase tracking-wider text-muted">Evidence</div>
         <div className="mt-0.5 truncate text-sm" title={evidenceLabel ?? undefined}>

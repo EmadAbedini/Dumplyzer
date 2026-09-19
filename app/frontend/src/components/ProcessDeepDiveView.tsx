@@ -272,7 +272,7 @@ export function ProcessDeepDiveView({
   );
 
   const emptyNotAnalyzed =
-    "This was not collected in the last analysis. Run Complete Analysis, select this capability in Custom Analysis, or use Analyze process for this PID.";
+    "This was not collected in the last analysis. Run Complete Analysis, select this capability in Custom Analysis, or use Analyze Process for this PID.";
   const emptyFailed = "Analysis failed.";
 
   return (
@@ -307,7 +307,7 @@ export function ProcessDeepDiveView({
           {showAnalyze ? (
             <span className="inline-flex" title={ANALYZE_HINT}>
               <Button size="sm" onClick={() => void runRecommended()} disabled={analysing}>
-                {analysing ? "Analysing…" : "Analyze process"}
+                {analysing ? "Analysing…" : "Analyze Process"}
               </Button>
             </span>
           ) : null}
@@ -317,7 +317,7 @@ export function ProcessDeepDiveView({
         <div className="flex items-start gap-2 border-b border-border bg-surface-2 px-3 py-2 text-xs text-muted">
           <Info size={14} className="mt-0.5 shrink-0 text-foreground" aria-hidden />
           <p>
-            <span className="font-medium text-foreground">Analyze process</span> collects a more
+            <span className="font-medium text-foreground">Analyze Process</span> collects a more
             complete picture for this PID — fuller command line, modules, network, handles, and
             memory regions (VAD).
           </p>
@@ -392,7 +392,7 @@ export function ProcessDeepDiveView({
             ) : processRecommendedCompleted ? (
               <div className="pt-3 text-muted">Process analysis completed for this PID.</div>
             ) : processRecommendedFailed ? (
-              <div className="pt-3 text-muted">Process analysis failed. You can try Analyze process again.</div>
+              <div className="pt-3 text-muted">Process analysis failed. You can try Analyze Process again.</div>
             ) : null}
           </>
         )}
@@ -557,7 +557,7 @@ export function ProcessDeepDiveView({
               coverageItem(coverage, "memory_vad"),
               vadCompleted,
               "No memory regions were found for this process.",
-              "Memory regions are collected per process. Use Analyze process.",
+              "Memory regions are collected per process. Use Analyze Process.",
               emptyFailed,
               vadFailed,
             )}
