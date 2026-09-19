@@ -1,11 +1,9 @@
 import { formatAppVersion } from "../lib/appMeta";
-import type { AppErrorPayload } from "../lib/types";
 import { Button } from "./ui/button";
 
 type Props = {
   importing: boolean;
   analyzing: boolean;
-  error: AppErrorPayload | null;
   appVersion: string;
   onImport: () => void;
   onAnalyze: () => void;
@@ -15,7 +13,6 @@ type Props = {
 export function TopBar({
   importing,
   analyzing,
-  error,
   appVersion,
   onImport,
   onAnalyze,
@@ -37,16 +34,7 @@ export function TopBar({
         {analyzing ? "Running analysis" : "Run Analysis"}
       </Button>
       <div className="ml-auto max-w-[50%] truncate text-sm text-muted">
-        {error ? (
-          <span className="text-danger" title={error.details ?? error.raw}>
-            {error.message}
-            {error.suggestion ? ` — ${error.suggestion}` : ""}
-          </span>
-        ) : importing ? (
-          <span>Importing Memory Image…</span>
-        ) : (
-          <span>{versionLabel}</span>
-        )}
+        {importing ? <span>Importing Memory Image…</span> : <span>{versionLabel}</span>}
       </div>
     </header>
   );

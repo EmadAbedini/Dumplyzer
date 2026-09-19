@@ -1,15 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 
-const TOAST_MS = 4000;
+const TOAST_MS = 2500;
 export const TOAST_FADE_MS = 220;
+
+function finishToastFade(host: HTMLElement) {
+  const clone = host.cloneNode(true) as HTMLElement;
+  const toastEl = clone.querySelector(".app-toast");
+  if (toastEl) {
+    toastEl.classList.remove("app-toast-fade-in");
+    toastEl.classList.add("app-toast-fade-out");
+  }
+  clone.setAttribute("aria-hidden", "true");
+  document.body.appendChild(clone);
+  window.setTimeout(() => clone.remove(), TOAST_FADE_MS);
+}
 
 export function StatusToast({ message }: { message: string | null }) {
   const [visible, setVisible] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   const shownRef = useRef<string | null>(null);
+  const nodeRef = useRef<HTMLElement | null>(null);
+  const visibleRef = useRef<string | null>(null);
+  const leavingRef = useRef(false);
+  visibleRef.current = visible;
+  leavingRef.current = leaving;
+
+  const setHost = useCallback((node: HTMLDivElement | null) => {
+    if (node) nodeRef.current = node;
+  }, []);
 
   useEffect(() => {
     if (message) {
@@ -28,16 +49,27 @@ export function StatusToast({ message }: { message: string | null }) {
     return () => window.clearTimeout(t);
   }, [message]);
 
+  useLayoutEffect(() => {
+    return () => {
+      const host = nodeRef.current;
+      if (!host || !visibleRef.current || leavingRef.current) return;
+      finishToastFade(host);
+    };
+  }, []);
+
   if (!visible || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="pointer-events-none fixed inset-x-0 top-5 z-50 flex justify-center px-4">
+    <div
+      ref={setHost}
+      className="pointer-events-none fixed inset-x-0 top-5 z-50 flex justify-center px-4"
+    >
       <div
         role={visible.includes("\n") ? "alert" : "status"}
         aria-live={visible.includes("\n") ? "assertive" : "polite"}
         className={cn(
-          "app-toast max-w-md rounded-md px-4 py-2.5 text-center text-sm leading-5 shadow-md",
-          visible.includes("\n") ? "whitespace-pre-line" : "whitespace-nowrap",
+          "app-toast min-w-0 w-fit max-w-[min(28rem,calc(100vw-2rem))] overflow-hidden rounded-md px-4 py-2.5 text-center text-sm leading-5 shadow-md wrap-anywhere",
+          visible.includes("\n") ? "whitespace-pre-line" : "whitespace-normal",
           leaving ? "app-toast-fade-out" : "app-toast-fade-in",
         )}
       >

@@ -479,6 +479,9 @@ thead {
   background: #000000;
   color: #ffffff;
   border: 1px solid #000000;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 html[data-theme="dark"] .app-toast {

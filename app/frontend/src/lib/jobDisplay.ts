@@ -2,6 +2,7 @@ import {
   ANALYSIS_PROFILE_COPY,
   capabilityLabel,
   formatJobPercent,
+  formatUserError,
   isJobCancelling,
   isTerminalJobStatus,
   jobErrorPayload,
@@ -52,6 +53,7 @@ const PHASE_PERCENT: Record<string, number> = {
   pe_vad: 70,
   pe_cache: 90,
   scan: 4,
+  yara: 8,
   done: 100,
 };
 
@@ -76,6 +78,7 @@ const PHASE_RANGE: Record<string, [number, number]> = {
   pe_vad: [70, 90],
   pe_cache: [90, 98],
   scan: [2, 92],
+  yara: [2, 98],
 };
 
 const lastShownPercent = new Map<string, number>();
@@ -113,6 +116,7 @@ const PHASE_LABELS: Record<string, string> = {
   register: "Registering evidence",
   start: "Importing memory image",
   scan: "Scanning for artifacts",
+  yara: "Scanning signatures",
 };
 
 const MESSAGE_LABELS: Record<string, string> = {
@@ -220,7 +224,7 @@ export function jobTableMessage(
   const failed = job.status === "failed";
   const payload = failed ? jobErrorPayload(job, job.message || "Job failed") : null;
   const titleParts = failed
-    ? [payload?.message, payload?.details, payload?.suggestion].filter(Boolean)
+    ? [payload?.message, payload?.suggestion].filter(Boolean)
     : [];
   if (job.status === "completed") {
     clearJobDisplay(job.id);
@@ -232,7 +236,7 @@ export function jobTableMessage(
   }
   if (failed) {
     clearJobDisplay(job.id);
-    const text = sanitizeUserText(payload?.message || "Job failed") || "Job failed";
+    const text = sanitizeUserText(formatUserError(payload, "Job failed").split("\n")[0]) || "Job failed";
     return { text, title: titleParts.join(" — ") || text };
   }
 

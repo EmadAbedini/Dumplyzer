@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import traceback
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable
@@ -446,6 +445,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         p["evidence_id"],
         ioc_type=p.get("ioc_type"),
         limit=int(p["limit"]) if p.get("limit") is not None else None,
+        offset=int(p.get("offset") or 0),
     ),
     "iocs.export_json": lambda p: search_iocs.write_iocs_export(
         _db(),
@@ -498,6 +498,10 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         params={
             "evidence_id": p["evidence_id"],
             "memory_region_id": p["memory_region_id"],
+            "pid": p.get("pid"),
+            "process_id": p.get("process_id"),
+            "start_vpn": p.get("start_vpn"),
+            "end_vpn": p.get("end_vpn"),
             "maxsize": p.get("maxsize"),
         },
         message="Extract VAD region",
@@ -737,11 +741,9 @@ def handle_line(line: str) -> None:
         if req_id is not None:
             _write({"jsonrpc": "2.0", "id": req_id, "result": result})
     except Exception as exc:  # noqa: BLE001
-        payload = rpc_error_payload(exc)
         if not isinstance(exc, AppError):
-            payload.setdefault("data", {})
-            if isinstance(payload["data"], dict):
-                payload["data"]["traceback"] = traceback.format_exc()
+            log.error("unhandled engine error", extra={"channel": "app"}, exc_info=exc)
+        payload = rpc_error_payload(exc)
         _error(req_id, payload)
 
 

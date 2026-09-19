@@ -176,9 +176,37 @@ export function jobErrorPayload(job: Job, fallbackMessage: string): AppErrorPayl
   return {
     message: typeof err?.message === "string" ? err.message : fallbackMessage,
     app_code: appCode,
-    details: typeof err?.details === "string" ? err.details : undefined,
     suggestion: typeof err?.suggestion === "string" ? err.suggestion : undefined,
   };
+}
+
+const STRUCTURE_LEAK =
+  /\b(?:memscope_engine|volatility3|Traceback \(most recent call last\)|File "[^"]+", line \d+)\b/i;
+
+function sanitizeErrorMessage(text: string): string {
+  let value = text.replace(/\r\n/g, "\n").trim();
+  value = value.replace(/^[A-Za-z_][\w.]*Error:\s*/g, "");
+  const leakAt = value.search(STRUCTURE_LEAK);
+  if (leakAt >= 0) {
+    value = value.slice(0, leakAt).trim();
+  }
+  return value.replace(/\s{2,}/g, " ").trim();
+}
+
+/** User-visible error text only — no stack traces, paths, or engine internals. */
+export function formatUserError(
+  err: AppErrorPayload | string | null | undefined,
+  fallback = "Something went wrong.",
+): string {
+  if (err == null) return fallback;
+  const payload = typeof err === "string" ? { message: err } : err;
+  const message = sanitizeErrorMessage(payload.message || "") || fallback;
+  const suggestion =
+    typeof payload.suggestion === "string" ? payload.suggestion.trim() : "";
+  if (suggestion && !message.toLowerCase().includes(suggestion.toLowerCase())) {
+    return `${message}\n${suggestion}`;
+  }
+  return message;
 }
 
 export function isNotMemoryImageError(err: AppErrorPayload): boolean {

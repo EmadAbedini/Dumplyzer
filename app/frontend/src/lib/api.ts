@@ -20,18 +20,21 @@ function parseEngineError(err: unknown): EngineClientError {
     try {
       const data = JSON.parse(parts.slice(1).join(" | ")) as Record<string, unknown>;
       return new EngineClientError({
-        message: message || raw,
+        message: message || "Something went wrong.",
         app_code: typeof data.app_code === "string" ? data.app_code : undefined,
-        details: typeof data.details === "string" ? data.details : undefined,
         suggestion: typeof data.suggestion === "string" ? data.suggestion : undefined,
         entity: typeof data.entity === "string" ? data.entity : undefined,
-        raw,
       });
     } catch {
       /* fall through */
     }
   }
-  return new EngineClientError({ message: raw, raw });
+  const cleaned = raw.replace(/^.*?:\s*/, "").trim();
+  const message =
+    /traceback|memscope_engine|volatility3|File "[^"]+", line \d+/i.test(cleaned)
+      ? "Something went wrong."
+      : cleaned || "Something went wrong.";
+  return new EngineClientError({ message });
 }
 
 export async function engineCall<T = unknown>(

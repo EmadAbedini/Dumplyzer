@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { engineCall, EngineClientError } from "../lib/api";
 import { formatResultCell } from "../lib/datetime";
 import { matchesFieldQuery } from "../lib/resultFilter";
@@ -15,14 +14,14 @@ import {
   ImportEvidenceState,
   ListLoadingState,
   AnalysisScopeNote,
+  CenteredLoading,
   coverageShowsEmptyPanel,
 } from "./CoverageStatus";
 import {
   DERIVED_SOURCE_IDS,
   STORED_ACTION_TITLE,
   limitedResultsNote,
-  storedActionNote,
-  uncoveredSourceIds,
+  settledMissingSourceIds,
 } from "../lib/analysisScope";
 import type {
   AnalysisCoverage,
@@ -103,6 +102,8 @@ export function NetworkView({
   onOpenProcess,
   onJobSubmitted,
   jobsRunning = false,
+  activeJobKind = null,
+  jobPercent = null,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
@@ -113,13 +114,14 @@ export function NetworkView({
   onOpenProcess: (processId: string) => void;
   onJobSubmitted?: (job: Job) => void;
   jobsRunning?: boolean;
+  activeJobKind?: string | null;
+  jobPercent?: string | null;
 }) {
   const [tab, setTab] = useState<TabId>("connections");
   const [connections, setConnections] = useState<NetworkConnection[]>([]);
   const [artifacts, setArtifacts] = useState<NetworkArtifact[]>([]);
   const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
   const [pcap, setPcap] = useState<PcapReconstructionBundle | null>(null);
-  const [importPcapPath, setImportPcapPath] = useState<string | null>(null);
   const [loadedEvidenceId, setLoadedEvidenceId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("");
@@ -193,7 +195,10 @@ export function NetworkView({
 
   const recon = pcap?.reconstruction;
   const reconstructing =
-    recon?.status === "running" || recon?.ui_state === "reconstructing" || recon?.status === "queued";
+    recon?.status === "running" ||
+    recon?.ui_state === "reconstructing" ||
+    recon?.status === "queued" ||
+    activeJobKind === "pcap_reconstruction";
   const actionsLocked = busy || jobsRunning;
 
   return (
@@ -247,15 +252,14 @@ export function NetworkView({
       {tab === "pcap" && (
         <PcapPanel
           bundle={pcap}
-          reconstructing={reconstructing || actionsLocked}
-          importPath={importPcapPath}
-          onImportPathChange={setImportPcapPath}
+          reconstructing={reconstructing}
+          busy={actionsLocked}
+          jobPercent={reconstructing ? jobPercent : null}
           onReconstruct={() =>
             void queue(
               "pcap.reconstruct",
               {
                 evidence_id: evidenceId,
-                import_pcap_path: importPcapPath ?? undefined,
               },
               "PCAP reconstruction queued",
             )
@@ -471,23 +475,19 @@ function ArtifactsPanel({
   }, []);
   const { sorted, sort, toggle } = useTableSort(filtered, getValue);
   const emptyCoverage = coverageShowsEmptyPanel(coverage, items.length) && items.length === 0;
-  const missingSources = uncoveredSourceIds(
+  const missingSources = settledMissingSourceIds(
     analysisCoverage,
     DERIVED_SOURCE_IDS.network_artifacts,
   );
-  const showLimitedNote = items.length > 0 && missingSources.length > 0;
+  const showLimitedNote = missingSources.length > 0;
   const notAnalyzedDetail =
     "Network artifacts are recovered from connections, command lines, and stored process text — not by rescanning the dump.";
-  const notAnalyzedHint =
-    missingSources.length > 0
-      ? `${storedActionNote(missingSources)} You can still extract from whatever is stored.`
-      : "Use Extract Network Artifacts for stored results, or include Network Artifact Extraction in Complete or Custom Analysis.";
-  const analyzedZeroDetail =
-    missingSources.length > 0
-      ? "Network artifact extraction ran against the data that was stored, and found no recoverable indicators."
-      : "Network artifact extraction completed and found no recoverable indicators.";
-  const analyzedZeroHint =
-    missingSources.length > 0 ? storedActionNote(missingSources) : undefined;
+  const notAnalyzedHint = showLimitedNote
+    ? "You can still extract from whatever is already stored."
+    : "Use Extract Network Artifacts for stored results, or include Network Artifact Extraction in Complete or Custom Analysis.";
+  const analyzedZeroDetail = showLimitedNote
+    ? "Network artifact extraction ran against the data that was stored, and found no recoverable indicators."
+    : "Network artifact extraction completed and found no recoverable indicators.";
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
@@ -539,7 +539,6 @@ function ArtifactsPanel({
           title="Network Artifacts"
           inProgressDetail="Network artifacts are still being extracted."
           analyzedZeroDetail={analyzedZeroDetail}
-          analyzedZeroHint={analyzedZeroHint}
           notAnalyzedDetail={notAnalyzedDetail}
           notAnalyzedHint={notAnalyzedHint}
           failedDetail="Network artifact extraction failed."
@@ -592,15 +591,15 @@ function ArtifactsPanel({
 function PcapPanel({
   bundle,
   reconstructing,
-  importPath,
-  onImportPathChange,
+  busy,
+  jobPercent,
   onReconstruct,
   onOpenProcess,
 }: {
   bundle: PcapReconstructionBundle | null;
   reconstructing: boolean;
-  importPath: string | null;
-  onImportPathChange: (path: string | null) => void;
+  busy: boolean;
+  jobPercent?: string | null;
   onReconstruct: () => void;
   onOpenProcess: (processId: string) => void;
 }) {
@@ -608,85 +607,73 @@ function PcapPanel({
   const flows = bundle?.flows ?? [];
   const recoverable = flows.filter((f) => f.packet_count > 0);
   const status = recon?.display_status || "Not run";
-  const importedCount = recon?.observed?.imported_pcap_packets ?? 0;
-  const importedPath = recon?.observed?.imported_pcap_path ?? null;
-
-  const pickImportFile = async () => {
-    try {
-      const selected = await open({
-        multiple: false,
-        title: "Import external PCAP",
-        filters: [{ name: "PCAP capture", extensions: ["pcap"] }],
-      });
-      if (!selected || Array.isArray(selected)) return;
-      onImportPathChange(selected);
-    } catch {
-      /* dialog unavailable (browser preview) or cancelled */
-    }
-  };
+  const outputName = recon?.output_path
+    ? recon.output_path.replace(/\\/g, "/").split("/").pop()
+    : null;
+  const packetSource =
+    typeof recon?.observed?.packet_source === "string"
+      ? recon.observed.packet_source
+      : null;
+  const finished =
+    !reconstructing &&
+    recon != null &&
+    recon.status !== "running" &&
+    recon.status !== "queued" &&
+    recon.ui_state !== "reconstructing";
 
   return (
     <div className="min-h-0 flex-1 overflow-auto p-3 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={reconstructing} onClick={onReconstruct}>
-          {reconstructing ? "Reconstructing…" : recon ? "Reconstruct again" : "Reconstruct PCAP"}
+        <Button size="sm" disabled={reconstructing || busy} onClick={onReconstruct}>
+          {reconstructing ? "Reconstructing…" : recon && finished ? "Reconstruct again" : "Reconstruct PCAP"}
         </Button>
-        <Badge>{reconstructing ? "Reconstructing…" : status}</Badge>
+        <Badge>{reconstructing ? "Reconstructing…" : finished ? status : "Not run"}</Badge>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" disabled={reconstructing} onClick={() => void pickImportFile()}>
-          Import external PCAP…
-        </Button>
-        {importPath ? (
-          <>
-            <span className="break-all font-mono text-muted">{importPath}</span>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={reconstructing}
-              onClick={() => onImportPathChange(null)}
-            >
-              Clear
-            </Button>
-          </>
-        ) : (
-          <span className="text-muted">
-            Optional: merge a capture you produced yourself (e.g. bulk_extractor packets.pcap).
-          </span>
-        )}
-      </div>
+      {reconstructing ? (
+        <CenteredLoading
+          label={
+            jobPercent
+              ? `Reconstructing packet records… ${jobPercent}`
+              : "Reconstructing packet records…"
+          }
+        />
+      ) : (
+        <>
       <p className="text-muted">
-        PCAP reconstruction recovers packet-shaped records from the memory image. Connection
-        metadata is not a packet capture. Missing bytes are never invented, and the original
-        evidence file is not modified. An imported PCAP is read-only and is merged into the
-        reconstructed capture.
+        Writes a <span className="font-mono">packets.pcap</span> from recovered traffic. If
+        Carved Data already produced one, that file is used.
       </p>
-      {recon ? (
-        <div className="grid gap-1 font-mono">
-          <div>Packet records: {recon.packet_count}</div>
-          <div>Truncated records: {recon.truncated_count}</div>
-          <div>Ethernet frames: {recon.ethernet_count}</div>
-          <div>Raw IP records: {recon.raw_ip_count}</div>
-          {importedCount > 0 ? (
+      {finished ? (
+        <div className="rounded-md border border-border bg-surface-2/60 p-3 space-y-1 font-mono">
+          {outputName ? (
             <div>
-              Imported from PCAP: {importedCount}
-              {importedPath ? <span className="break-all text-muted"> ({importedPath})</span> : null}
+              Output file: <span className="text-foreground">{outputName}</span>
             </div>
+          ) : (
+            <div>Output file: none</div>
+          )}
+          {recon.output_path ? (
+            <div className="break-all text-muted">{recon.output_path}</div>
           ) : null}
-          {recon.output_path ? <div className="break-all">Output: {recon.output_path}</div> : null}
-          <div>PCAP is a separate file and is not embedded in reports.</div>
+          <div>Packets: {recon.packet_count.toLocaleString()}</div>
+          <div>Truncated: {recon.truncated_count.toLocaleString()}</div>
+          <div>IPv4 packets: {(Number(recon.observed?.ipv4_count) || 0).toLocaleString()}</div>
+          <div>IPv6 packets: {(Number(recon.observed?.ipv6_count) || 0).toLocaleString()}</div>
+          <div>Ethernet frames: {recon.ethernet_count.toLocaleString()}</div>
+          <div>Raw IP records: {recon.raw_ip_count.toLocaleString()}</div>
+          {packetSource ? <div>Source: {packetSource}</div> : null}
         </div>
       ) : (
         <div className="text-muted">No reconstruction has been run for this memory image.</div>
       )}
-      {recon?.limitations?.length ? (
+      {finished && recon.limitations?.length ? (
         <ul className="list-disc space-y-1 pl-4 text-muted">
           {recon.limitations.map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
       ) : null}
-      {recoverable.length > 0 ? (
+      {finished && recoverable.length > 0 ? (
         <div>
           <div className="mb-1 font-semibold">Flows with recovered packets</div>
           <table className="app-result-table w-full text-center">
@@ -731,9 +718,11 @@ function PcapPanel({
             </div>
           ) : null}
         </div>
-      ) : recon && recon.packet_count <= 0 ? (
+      ) : finished && recon.packet_count <= 0 ? (
         <div className="text-muted">No reconstructable traffic was found in this memory image.</div>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

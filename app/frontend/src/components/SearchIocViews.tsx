@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleDashed, Search } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { copyExportFile, engineCall, EngineClientError } from "../lib/api";
@@ -23,11 +23,12 @@ import {
   formatCapabilityList,
   limitedResultsNote,
   searchFieldHasData,
-  storedActionNote,
+  settledMissingSourceIds,
   uncoveredSourceIds,
 } from "../lib/analysisScope";
 import { matchesFieldQuery } from "../lib/resultFilter";
 import { useTableSort } from "../lib/tableSort";
+import { cn } from "../lib/utils";
 import type { AnalysisCoverage, CapabilityCoverage, SearchHit, Ioc } from "../lib/types";
 import { Button } from "./ui/button";
 import { ClearableInput } from "./ui/input";
@@ -37,6 +38,7 @@ import { SortableTh } from "./SortableTh";
 import { RefreshButton, StatusToast, useStatusToast } from "./StatusToast";
 
 const SEARCH_LIMIT = 300;
+const IOC_PAGE = 300;
 
 const SEARCH_FIELDS = [
   {
@@ -128,7 +130,7 @@ export function SearchView({
   const [lastQuery, setLastQuery] = useState<string | null>(null);
 
   const field = SEARCH_FIELDS.find((item) => item.id === scope) ?? SEARCH_FIELDS[0];
-  const missingSources = uncoveredSourceIds(coverage, DERIVED_SOURCE_IDS.search);
+  const missingSources = settledMissingSourceIds(coverage, DERIVED_SOURCE_IDS.search);
   const limitedSearch = missingSources.length > 0;
 
   const run = useCallback(async () => {
@@ -366,34 +368,73 @@ export function IocsView({
   refreshToken?: number | string;
 }) {
   const [items, setItems] = useState<Ioc[]>([]);
+  const itemsRef = useRef<Ioc[]>([]);
+  itemsRef.current = items;
   const [loadedEvidenceId, setLoadedEvidenceId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
+  const [hasMore, setHasMore] = useState(false);
+  const [listBusy, setListBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState<"json" | "xlsx" | null>(null);
   const [listedTotal, setListedTotal] = useState(0);
   const [extractedHere, setExtractedHere] = useState(false);
+  const loadGen = useRef(0);
   const { toast, showToast } = useStatusToast();
 
-  const load = useCallback(async () => {
-    if (!evidenceId) return;
-    try {
-      const res = await engineCall<{ items: Ioc[]; total: number }>("iocs.list", {
-        evidence_id: evidenceId,
-      });
-      setItems(res.items);
-      setListedTotal(res.total);
-    } catch (e) {
-      setItems([]);
-      setListedTotal(0);
-      throw e;
-    } finally {
-      setLoadedEvidenceId(evidenceId);
-    }
-  }, [evidenceId]);
+  const load = useCallback(
+    async (append = false) => {
+      if (!evidenceId) return;
+      const gen = ++loadGen.current;
+      if (!append) {
+        setItems([]);
+        setHasMore(false);
+      }
+      setListBusy(true);
+      try {
+        const offset = append ? itemsRef.current.length : 0;
+        const res = await engineCall<{
+          items: Ioc[];
+          total: number;
+          type_counts?: Record<string, number>;
+        }>("iocs.list", {
+          evidence_id: evidenceId,
+          ioc_type: typeFilter || undefined,
+          limit: IOC_PAGE,
+          offset,
+        });
+        if (gen !== loadGen.current) return;
+        const next = append ? [...itemsRef.current, ...res.items] : res.items;
+        setItems(next);
+        setListedTotal(res.total);
+        setTypeCounts(res.type_counts ?? {});
+        setHasMore(next.length < res.total);
+      } catch (e) {
+        if (gen !== loadGen.current) return;
+        if (!append) {
+          setItems([]);
+          setListedTotal(0);
+          setTypeCounts({});
+          setHasMore(false);
+        }
+        throw e;
+      } finally {
+        if (gen === loadGen.current) {
+          setListBusy(false);
+          setLoadedEvidenceId(evidenceId);
+        }
+      }
+    },
+    [evidenceId, typeFilter],
+  );
 
   useEffect(() => {
     setExtractedHere(false);
+    setTypeFilter(null);
+    setItems([]);
+    setTypeCounts({});
   }, [evidenceId]);
 
   useEffect(() => {
@@ -410,13 +451,11 @@ export function IocsView({
     if (!evidenceId) return;
     setBusy(true);
     try {
-      const res = await engineCall<{ items: Ioc[]; total: number }>("iocs.extract", {
+      const res = await engineCall<{ total: number }>("iocs.extract", {
         evidence_id: evidenceId,
       });
-      setItems(res.items);
-      setListedTotal(res.total);
-      setLoadedEvidenceId(evidenceId);
       setExtractedHere(true);
+      await load();
       const n = res.total;
       const missing = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.iocs);
       if (missing.length > 0) {
@@ -486,6 +525,11 @@ export function IocsView({
     }
   };
 
+  const typeEntries = useMemo(
+    () => Object.entries(typeCounts).sort((a, b) => a[0].localeCompare(b[0])),
+    [typeCounts],
+  );
+
   const filtered = useMemo(
     () =>
       items.filter((i) =>
@@ -508,30 +552,27 @@ export function IocsView({
     return "";
   }, []);
   const { sorted, sort, toggle } = useTableSort(filtered, iocSortValue);
-  const loading = loadedEvidenceId !== evidenceId;
+  const loading = loadedEvidenceId !== evidenceId || (listBusy && items.length === 0);
   const updating = coverageIsUpdating(coverage);
   const actionsLocked = busy || updating || exporting !== null;
   const iocTotal = coverage?.count ?? listedTotal;
+  const captionTotal = typeFilter ? listedTotal : iocTotal;
   const showExtract =
     !coverageWasExecuted(coverage) && coverageLiveKind(coverage) !== "in_progress";
-  const missingSources = uncoveredSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.iocs);
-  const showLimitedNote = items.length > 0 && missingSources.length > 0;
+  const missingSources = settledMissingSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.iocs);
+  const showLimitedNote = missingSources.length > 0;
   const iocEmptyItem =
     extractedHere && items.length === 0 && coverageLiveKind(coverage) === "not_analyzed"
       ? { id: "iocs", state: "analyzed_zero" as const, count: 0 }
       : coverage;
   const iocNotAnalyzedDetail =
     "IOCs are pulled from process, module, network, and handle data already stored — not by rescanning the dump.";
-  const iocNotAnalyzedHint =
-    missingSources.length > 0
-      ? `${storedActionNote(missingSources)} You can still extract from whatever is stored.`
-      : "Use Extract IOCs to collect indicators from the data already stored, or include IOC Extraction in Complete or Custom Analysis.";
-  const iocAnalyzedZeroDetail =
-    missingSources.length > 0
-      ? "IOC extraction ran against the data that was stored, and found no indicators."
-      : "IOC extraction completed and found no indicators.";
-  const iocAnalyzedZeroHint =
-    missingSources.length > 0 ? storedActionNote(missingSources) : undefined;
+  const iocNotAnalyzedHint = showLimitedNote
+    ? "You can still extract from whatever is already stored."
+    : "Use Extract IOCs to collect indicators from the data already stored, or include IOC Extraction in Complete or Custom Analysis.";
+  const iocAnalyzedZeroDetail = showLimitedNote
+    ? "IOC extraction ran against the data that was stored, and found no indicators."
+    : "IOC extraction completed and found no indicators.";
 
   if (!evidenceId) {
     return <ImportEvidenceState title="IOCs" />;
@@ -542,7 +583,7 @@ export function IocsView({
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <div className="text-sm font-semibold">IOCs</div>
         <div className="text-xs text-muted">
-          {coverageResultCaption(coverage, iocTotal, filtered.length)}
+          {coverageResultCaption(coverage, captionTotal, filtered.length)}
         </div>
         {showExtract ? (
           <span className="inline-flex" title={STORED_ACTION_TITLE}>
@@ -588,6 +629,34 @@ export function IocsView({
           ]}
         />
       </div>
+      {typeEntries.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
+          <span className="mr-1 text-[0.78rem] font-semibold text-muted">Filter type</span>
+          {typeEntries.map(([type, count]) => {
+            const active = typeFilter === type;
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setTypeFilter(active ? null : type)}
+                className={cn(
+                  "cursor-pointer rounded-md border px-1.5 py-0.5 text-[0.78rem] font-medium uppercase tracking-wide",
+                  active
+                    ? "border-accent bg-accent/15 text-accent"
+                    : "border-border bg-surface-2 text-muted hover:bg-surface-2/80 hover:text-foreground",
+                )}
+              >
+                {type} {count.toLocaleString()}
+              </button>
+            );
+          })}
+          {typeFilter ? (
+            <Button size="sm" variant="ghost" onClick={() => setTypeFilter(null)}>
+              Clear
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {showLimitedNote ? (
         <div className="border-b border-border px-3 py-2">
           <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
@@ -602,7 +671,6 @@ export function IocsView({
           showTitle={false}
           inProgressDetail="IOCs are still being extracted."
           analyzedZeroDetail={iocAnalyzedZeroDetail}
-          analyzedZeroHint={iocAnalyzedZeroHint}
           notAnalyzedDetail={iocNotAnalyzedDetail}
           notAnalyzedHint={iocNotAnalyzedHint}
           failedDetail="IOC extraction failed."
@@ -642,6 +710,22 @@ export function IocsView({
             )}
           </tbody>
         </table>
+        {hasMore && !filter.trim() ? (
+          <div className="flex justify-center border-t border-border px-3 py-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={actionsLocked}
+              onClick={() => {
+                void load(true).catch((e) =>
+                  onError(e instanceof EngineClientError ? e.message : String(e)),
+                );
+              }}
+            >
+              Load more ({items.length.toLocaleString()} of {listedTotal.toLocaleString()})
+            </Button>
+          </div>
+        ) : null}
       </div>
       )}
       <StatusToast message={toast} />

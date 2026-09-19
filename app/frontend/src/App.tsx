@@ -38,6 +38,7 @@ import { loadAppMeta } from "./lib/appMeta";
 import { firstDroppedFilePath, subscribeFileDrop } from "./lib/fileDrop";
 import {
   evidenceFromImportJob,
+  formatUserError,
   isActiveJobStatus,
   isNotMemoryImageError,
   jobErrorPayload,
@@ -63,10 +64,11 @@ import type {
 } from "./lib/types";
 import "./styles.css";
 
+const ERROR_TOAST_MS = 5000;
+
 export default function App() {
   const [nav, setNav] = useState<NavId>("overview");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<AppErrorPayload | null>(null);
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [processes, setProcesses] = useState<ProcessRow[]>([]);
@@ -97,10 +99,9 @@ export default function App() {
     (payload: AppErrorPayload) => {
       if (isNotMemoryImageError(payload)) {
         showToast(notMemoryImageToast(payload), 8000);
-        setError(null);
         return;
       }
-      setError(payload);
+      showToast(formatUserError(payload), ERROR_TOAST_MS);
     },
     [showToast],
   );
@@ -225,7 +226,6 @@ export default function App() {
     async (job: Job, generation: number) => {
       if (!importStillCurrent(generation, job.id)) return;
       endImportWatch();
-      setError(null);
       const imported = evidenceFromImportJob(job);
       if (!imported) return;
       setSelectedProcessId(null);
@@ -260,7 +260,6 @@ export default function App() {
     (generation: number, jobId?: string | null) => {
       if (!importStillCurrent(generation, jobId)) return;
       endImportWatch();
-      setError(null);
     },
     [endImportWatch, importStillCurrent],
   );
@@ -366,7 +365,6 @@ export default function App() {
     }
     importStartRef.current = true;
     const generation = ++importGenerationRef.current;
-    setError(null);
     setActiveJobIds([]);
     setRunningJob(null);
     setJobTick((t) => t + 1);
@@ -406,7 +404,6 @@ export default function App() {
         window.setTimeout(resolve, TOAST_FADE_MS);
       });
     }
-    setError(null);
     try {
       const selected = await open({
         multiple: false,
@@ -458,7 +455,7 @@ export default function App() {
         return;
       }
       if (importingRef.current || importStartRef.current) {
-        setError({
+        presentError({
           message: "An import is already in progress.",
           suggestion: "Wait for it to finish, or cancel it from the banner.",
         });
@@ -475,7 +472,7 @@ export default function App() {
       clearLeaveTimer();
       unlisten?.();
     };
-  }, [importFromPath]);
+  }, [importFromPath, presentError]);
 
   const onCancelImport = useCallback(async () => {
     const jobId = importJobIdRef.current;
@@ -507,13 +504,11 @@ export default function App() {
     setProcesses([]);
     setProcessTotal(0);
     setSelectedProcessId(null);
-    setError(null);
     setNav("overview");
   }, []);
 
   const onAnalyze = useCallback(async () => {
     if (!evidence) return;
-    setError(null);
     try {
       await loadCatalog();
       analysisPromptAfterImportRef.current = false;
@@ -527,7 +522,6 @@ export default function App() {
   const onRunAnalysis = useCallback(
     async (profile: "full" | "recommended" | "custom", capabilities: string[]) => {
       if (!evidence) return;
-      setError(null);
       setBusy(true);
       try {
         const selected = processes.find((p) => p.id === selectedProcessId);
@@ -555,11 +549,6 @@ export default function App() {
   const onSelectProcess = (p: ProcessRow) => {
     setSelectedProcessId(p.id);
     setNav("process_dive");
-  };
-
-  const onJobSubmitted = (job: Job) => {
-    trackJob(job);
-    setNav("jobs");
   };
 
   const onPluginJobSubmitted = (job: Job) => {
@@ -628,7 +617,10 @@ export default function App() {
           <ProcessDeepDiveView
             processId={selectedProcessId}
             evidenceId={evidence.id}
-            onBack={() => setNav("processes")}
+            onBack={() => {
+              setSelectedProcessId(null);
+              setNav("processes");
+            }}
             onOpenProcess={(id) => {
               setSelectedProcessId(id);
             }}
@@ -676,6 +668,10 @@ export default function App() {
           }}
           onJobSubmitted={onPluginJobSubmitted}
           jobsRunning={jobsRunning}
+          activeJobKind={runningJob?.kind ?? null}
+          jobPercent={
+            runningJob?.kind === "pcap_reconstruction" ? jobsPercent : null
+          }
         />
       );
       break;
@@ -774,6 +770,9 @@ export default function App() {
           coverage={coverageItem(coverage, "artifacts")}
           jobsRunning={jobsRunning}
           activeJobKind={runningJob?.kind ?? null}
+          jobPercent={
+            runningJob?.kind === "bulk_extractor_scan" ? jobsPercent : null
+          }
         />
       );
       break;
@@ -782,10 +781,15 @@ export default function App() {
         <SignaturesView
           evidenceId={evidence?.id ?? null}
           onError={setErr}
-          onJobSubmitted={onJobSubmitted}
+          onJobSubmitted={onPluginJobSubmitted}
           refreshToken={`${coverageTick}:${jobTick}`}
           jobsRunning={jobsRunning}
           activeJobKind={runningJob?.kind ?? null}
+          jobPercent={
+            runningJob && String(runningJob.kind || "").startsWith("yara")
+              ? jobsPercent
+              : null
+          }
         />
       );
       break;
@@ -853,7 +857,6 @@ export default function App() {
       <TopBar
         importing={importing}
         analyzing={busy || jobsRunning}
-        error={error}
         appVersion={appMeta.version}
         onImport={() => void onImport()}
         onAnalyze={() => void onAnalyze()}
@@ -872,6 +875,7 @@ export default function App() {
           active={nav}
           onSelect={(id) => {
             if (importing && navLockedDuringImport(id)) return;
+            if (id === "processes") setSelectedProcessId(null);
             setNav(id);
           }}
           evidenceLabel={evidence?.filename}

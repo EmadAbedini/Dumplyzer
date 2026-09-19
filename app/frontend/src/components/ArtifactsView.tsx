@@ -82,6 +82,7 @@ export function ArtifactsView({
   coverage,
   jobsRunning = false,
   activeJobKind = null,
+  jobPercent = null,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
@@ -90,6 +91,7 @@ export function ArtifactsView({
   coverage?: CapabilityCoverage;
   jobsRunning?: boolean;
   activeJobKind?: string | null;
+  jobPercent?: string | null;
 }) {
   const caps = useCapabilityStatus();
   const [items, setItems] = useState<Artifact[]>([]);
@@ -321,6 +323,7 @@ export function ArtifactsView({
                 ) : null}
                 <Button
                   size="sm"
+                  className="min-w-[5.75rem]"
                   disabled={actionsLocked || !extractionAvailable}
                   onClick={() => requestDiskWrite("extraction")}
                 >
@@ -337,7 +340,15 @@ export function ArtifactsView({
             <AntivirusBanner />
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            {latestBe ? (
+            {submitting === "extraction" || activeJobKind === "bulk_extractor_scan" ? (
+              <CenteredLoading
+                label={
+                  jobPercent
+                    ? `Carving artifacts… ${jobPercent}`
+                    : "Carving artifacts…"
+                }
+              />
+            ) : latestBe ? (
               <BulkExtractorResults bundle={latestBe} onError={onError} />
             ) : (
               <EmptyHint
@@ -374,6 +385,7 @@ export function ArtifactsView({
                   </label>
                   <Button
                     size="sm"
+                    className="min-w-[5.75rem]"
                     disabled={actionsLocked || !peAvailable}
                     onClick={() => requestDiskWrite("pe")}
                   >
@@ -620,6 +632,7 @@ function ExtractedFileDetail({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
+            className="min-w-[5.75rem]"
             disabled={actionsLocked || !yaraReady}
             title={!yaraReady ? UNAVAILABLE_DETAIL : undefined}
             onClick={() => void onQueue("yara.scan_artifact", runParams, "yara")}
@@ -630,6 +643,7 @@ function ExtractedFileDetail({
             <>
               <Button
                 size="sm"
+                className="min-w-[5.75rem]"
                 disabled={actionsLocked || !capaReady}
                 title={!capaReady ? UNAVAILABLE_DETAIL : undefined}
                 onClick={() => void onQueue("capa.scan_artifact", runParams, "capa")}
@@ -644,6 +658,7 @@ function ExtractedFileDetail({
               </Button>
               <Button
                 size="sm"
+                className="min-w-[5.75rem]"
                 disabled={actionsLocked || !flossReady}
                 title={!flossReady ? UNAVAILABLE_DETAIL : undefined}
                 onClick={() => void onQueue("floss.scan_artifact", runParams, "floss")}

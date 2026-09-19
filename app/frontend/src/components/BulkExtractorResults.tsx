@@ -11,6 +11,7 @@ import type {
 } from "../lib/types";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { CenteredLoading } from "./CoverageStatus";
 import { ResultFilterBar } from "./ResultFilterBar";
 import { SortableTh } from "./SortableTh";
 import { StatusToast, useStatusToast } from "./StatusToast";
@@ -162,9 +163,13 @@ export function BulkExtractorResults({
 
   if (scan.status !== "completed") {
     return (
-      <div className="p-6 text-sm text-muted">
-        Artifact extraction has not finished yet. Status: {scan.ui_state || scan.status}.
-      </div>
+      <CenteredLoading
+        label={
+          scan.status === "running" || scan.status === "queued"
+            ? "Carving artifacts…"
+            : `Artifact extraction ${scan.ui_state || scan.status}.`
+        }
+      />
     );
   }
 
