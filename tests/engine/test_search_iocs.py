@@ -82,16 +82,21 @@ def test_global_search_and_iocs(tmp_path: Path) -> None:
 
     iocs = extract_iocs(db, ev["id"])
     assert iocs["extracted"] >= 1
-    types = {i["ioc_type"] for i in iocs["items"]}
-    assert "ipv4" in types or "url" in types or "domain" in types
-
     listed = list_iocs(db, ev["id"])
+    types = {i["ioc_type"] for i in listed["items"]}
+    assert "ipv4" in types or "url" in types or "domain" in types
     assert listed["total"] == iocs["total"]
     assert listed["total"] == len(listed["items"])
+    assert listed["type_counts"]
+    assert sum(listed["type_counts"].values()) == listed["total"]
     assert any(i.get("process_id") == proc_id or i.get("pid") == 4242 for i in listed["items"])
     capped = list_iocs(db, ev["id"], limit=1)
     assert len(capped["items"]) == 1
     assert capped["total"] == listed["total"]
+    page = list_iocs(db, ev["id"], limit=1, offset=1)
+    assert len(page["items"]) <= 1
+    if listed["total"] > 1:
+        assert page["items"][0]["id"] != capped["items"][0]["id"]
     db.close()
 
 
@@ -111,8 +116,10 @@ def test_extract_iocs_keeps_bulk_extractor_rows(tmp_path: Path) -> None:
         (str(uuid4()), ev["id"], now),
     )
     result = extract_iocs(db, ev["id"])
-    values = {i["value"] for i in result["items"]}
-    sources = {i["source"] for i in result["items"]}
+    listed = list_iocs(db, ev["id"])
+    values = {i["value"] for i in listed["items"]}
+    sources = {i["source"] for i in listed["items"]}
+    assert result["extracted"] >= 1
     assert "http://kept.example" in values
     assert "bulk_extractor" in sources
     db.close()

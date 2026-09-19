@@ -484,7 +484,7 @@ def extract_iocs(db: Database, evidence_id: str) -> dict[str, Any]:
         )
         inserted += 1
 
-    return list_iocs(db, evidence_id) | {"extracted": inserted}
+    return list_iocs(db, evidence_id, limit=0) | {"extracted": inserted}
 
 
 def _ioc_item(row: dict[str, Any]) -> dict[str, Any]:
@@ -515,12 +515,21 @@ def _ioc_count(db: Database, evidence_id: str, ioc_type: str | None = None) -> i
     return int((row or {}).get("n") or 0)
 
 
+def _ioc_type_counts(db: Database, evidence_id: str) -> dict[str, int]:
+    rows = db.fetchall(
+        "SELECT ioc_type, COUNT(*) AS n FROM iocs WHERE evidence_id = ? GROUP BY ioc_type",
+        (evidence_id,),
+    )
+    return {str(row["ioc_type"]): int(row["n"] or 0) for row in rows}
+
+
 def list_iocs(
     db: Database,
     evidence_id: str,
     *,
     ioc_type: str | None = None,
     limit: int | None = None,
+    offset: int = 0,
 ) -> dict[str, Any]:
     total = _ioc_count(db, evidence_id, ioc_type)
     sql = "SELECT * FROM iocs WHERE evidence_id = ?"
@@ -529,12 +538,20 @@ def list_iocs(
         sql += " AND ioc_type = ?"
         args.append(ioc_type)
     sql += " ORDER BY ioc_type, value"
+    start = max(0, int(offset or 0))
     if limit is not None:
-        sql += " LIMIT ?"
-        args.append(max(0, int(limit)))
+        sql += " LIMIT ? OFFSET ?"
+        args.extend([max(0, int(limit)), start])
     rows = db.fetchall(sql, tuple(args))
     items = [_ioc_item(r) for r in rows]
-    return {"evidence_id": evidence_id, "total": total, "items": items}
+    return {
+        "evidence_id": evidence_id,
+        "total": total,
+        "items": items,
+        "type_counts": _ioc_type_counts(db, evidence_id),
+        "offset": start,
+        "limit": int(limit) if limit is not None else None,
+    }
 
 
 _EXPORT_ITEM_KEYS = ("ioc_type", "value", "pid", "source")
