@@ -22,6 +22,20 @@ from memscope_engine.storage import Database
 log = logging.getLogger("memscope.analysis")
 
 
+def _emit_yara_progress(
+    progress: Callable[..., None],
+    message: str,
+    percent: float,
+    *,
+    phase: str = "yara",
+) -> None:
+    pct = max(1, min(99, int(percent)))
+    try:
+        progress(message, {"phase": phase, "percent": pct})
+    except TypeError:
+        progress(message)
+
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -379,7 +393,7 @@ def run_yara_extracted_files_job(
         raise AppError(
             code="extracted_pe_missing",
             message="No extracted PE files are available to scan.",
-            suggestion="Run Extracted Files from Carved Data first.",
+            suggestion="Open Carved Data → Extracted Files and run PE Reconstruction first.",
             entity="yara",
         )
 
@@ -390,6 +404,11 @@ def run_yara_extracted_files_job(
             raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
         name = art.get("filename") or art["id"]
         progress(f"Scanning extracted file {index}/{total}: {name}")
+        _emit_yara_progress(
+            progress,
+            f"Scanning extracted file {index}/{total}: {name}",
+            5 + 90 * (index - 1) / max(total, 1),
+        )
         bundle = run_yara_artifact_scan_job(
             db,
             {
@@ -508,8 +527,19 @@ def run_yara_memory_scan_job(
         if cancelled():
             raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
         progress("Compiling memory Signature Detection rules")
+        _emit_yara_progress(progress, "Compiling memory Signature Detection rules", 4)
         progress(f"Scanning memory dump {ev['filename']}")
-        result = provider.scan_memory_image(target, cancelled=cancelled)
+        _emit_yara_progress(progress, f"Scanning memory dump {ev['filename']}", 8)
+        result = provider.scan_memory_image(
+            target,
+            cancelled=cancelled,
+            progress=lambda frac: _emit_yara_progress(
+                progress,
+                f"Scanning memory dump {ev['filename']}",
+                8 + 87 * max(0.0, min(1.0, float(frac))),
+            ),
+        )
+        _emit_yara_progress(progress, "Saving signature matches", 96)
         _persist_matches(
             db,
             scan_id=scan_id,
@@ -672,7 +702,7 @@ def _persist_matches(
         if filename:
             explanation += f" Artifact: {filename}." if target_kind == KIND_ARTIFACT else f" Dump: {filename}."
         meta = m.get("meta") or {}
-        severity = str(meta.get("severity") or "info")
+        severity = str(meta.get("severity") or meta.get("level") or "info")
         if severity not in {"info", "low", "medium", "high", "critical"}:
             severity = "info"
         db.execute(

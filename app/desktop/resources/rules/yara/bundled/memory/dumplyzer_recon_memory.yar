@@ -10,6 +10,7 @@ rule dumplyzer_recon_sharphound_memory : recon memory
         author = "Dumplyzer"
         license = "Apache-2.0"
         category = "recon"
+        severity = "medium"
         target = "memory"
         description = "SharpHound / BloodHound collector strings in raw memory"
         origin = "original"

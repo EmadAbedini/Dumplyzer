@@ -499,6 +499,7 @@ class YaraProvider:
         rule_files: list[Path] | None = None,
         timeout_secs: float | None = None,
         cancelled: Any = None,
+        progress: Any = None,
     ) -> dict[str, Any]:
         """Scan an original memory dump in place. The dump is never modified."""
         timeout = timeout_secs if timeout_secs is not None else self.memory_timeout_secs
@@ -509,6 +510,7 @@ class YaraProvider:
             timeout_secs=timeout,
             cancelled=cancelled,
             allow_chunked=True,
+            progress=progress,
         )
 
     def _scan_target(
@@ -520,6 +522,7 @@ class YaraProvider:
         timeout_secs: float,
         cancelled: Any,
         allow_chunked: bool,
+        progress: Any = None,
     ) -> dict[str, Any]:
         info = detect_yara()
         if not info["available"]:
@@ -543,13 +546,21 @@ class YaraProvider:
         chunked = allow_chunked and size >= _chunk_threshold()
         if chunked:
             matches, scan_mode = self._match_chunked(
-                rules, target, timeout_secs=timeout_secs, cancelled=cancelled
+                rules,
+                target,
+                timeout_secs=timeout_secs,
+                cancelled=cancelled,
+                progress=progress,
             )
         else:
+            if callable(progress):
+                progress(0.12)
             matches = self._match_filepath(
                 rules, target, timeout_secs=timeout_secs, cancelled=cancelled
             )
             scan_mode = "filepath"
+            if callable(progress):
+                progress(1.0)
         normalized = [normalize_match(m, ruleset_meta) for m in matches]
         return {
             "status": "completed",
@@ -585,6 +596,7 @@ class YaraProvider:
         *,
         timeout_secs: float,
         cancelled: Any,
+        progress: Any = None,
     ) -> tuple[list[Any], str]:
         """Overlapping windows for large dumps. Does not load the entire file into Python.
 
@@ -607,6 +619,8 @@ class YaraProvider:
                             code="job_cancelled", message="Job was cancelled.", entity="job"
                         )
                     end = min(size, offset + chunk)
+                    if callable(progress):
+                        progress(min(end, size) / max(size, 1))
                     window = mapping[offset:end]
                     raw = self._run_native_match(
                         lambda data=window: rules.match(

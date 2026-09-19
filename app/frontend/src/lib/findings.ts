@@ -59,6 +59,34 @@ export function findingSeverityClass(severity: string): string {
   return "finding-sev-info";
 }
 
+const RULE_CATEGORY_LEVEL: Record<string, string> = {
+  c2: "high",
+  malware: "high",
+  inject: "high",
+  injection: "high",
+  credtheft: "high",
+  credential_theft: "high",
+  command_script: "medium",
+  script: "medium",
+  recon: "medium",
+};
+
+export function ruleLevelFromMeta(meta?: Record<string, unknown> | null): string | null {
+  if (!meta) return null;
+  for (const key of ["severity", "level"]) {
+    const raw = meta[key];
+    if (typeof raw === "string" && raw.trim()) return raw.trim().toLowerCase();
+  }
+  const category = typeof meta.category === "string" ? meta.category.trim().toLowerCase() : "";
+  return RULE_CATEGORY_LEVEL[category] ?? null;
+}
+
+export function formatRuleLevel(level: string): string {
+  const value = level.trim();
+  if (!value) return "";
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
 function humanizeToken(value: string): string {
   return value
     .replace(/[_-]+/g, " ")
