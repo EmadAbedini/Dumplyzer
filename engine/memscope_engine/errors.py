@@ -27,19 +27,22 @@ class AppError(Exception):
 
 def rpc_error_payload(exc: BaseException) -> dict[str, Any]:
     if isinstance(exc, AppError):
+        data: dict[str, Any] = {
+            "app_code": exc.code,
+            "suggestion": exc.suggestion,
+            "entity": exc.entity,
+        }
+        for key, value in exc.data.items():
+            if key in {"details", "traceback", "raw", "stack"}:
+                continue
+            data[key] = value
         return {
             "code": -32000,
             "message": exc.message,
-            "data": {
-                "app_code": exc.code,
-                "details": exc.details,
-                "suggestion": exc.suggestion,
-                "entity": exc.entity,
-                **exc.data,
-            },
+            "data": data,
         }
     return {
         "code": -32000,
-        "message": f"{type(exc).__name__}: {exc}",
-        "data": {"app_code": "internal_error", "details": str(exc)},
+        "message": "Something went wrong.",
+        "data": {"app_code": "internal_error"},
     }
