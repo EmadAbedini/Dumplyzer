@@ -124,8 +124,6 @@ const SPLASH_MS: u64 = 2000;
 /// Minimum time the native splash window stays visible before the main UI is shown.
 static SPLASH_PHASE: AtomicBool = AtomicBool::new(true);
 
-const MAIN_WIDTH: f64 = 960.0;
-const MAIN_HEIGHT: f64 = 640.0;
 const MAIN_MIN_WIDTH: f64 = 900.0;
 /// Sidebar at the default 13px font: top bar + evidence + 16 nav items + one
 /// extra item of space below About (~625px). 640px covers DPI rounding.
@@ -134,12 +132,11 @@ const MAIN_MIN_HEIGHT: f64 = 640.0;
 fn reveal_main_window(app: &tauri::AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.set_min_size(Some(tauri::LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
-        let _ = main.set_size(tauri::LogicalSize::new(MAIN_WIDTH, MAIN_HEIGHT));
-        let _ = main.center();
         let _ = main.unminimize();
         apply_windows_shell_icons(&main);
         disable_default_context_menu(&main);
         let _ = main.show();
+        let _ = main.maximize();
         let _ = main.set_focus();
         drag_drop::attach_after_show(app, &main);
     }

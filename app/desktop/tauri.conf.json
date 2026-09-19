@@ -38,6 +38,7 @@
         "height": 640,
         "minWidth": 900,
         "minHeight": 640,
+        "maximized": true,
         "theme": "Light",
         "resizable": true,
         "visible": false,
