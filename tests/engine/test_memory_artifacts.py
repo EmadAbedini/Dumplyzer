@@ -12,6 +12,7 @@ from memscope_engine.analysis.memory_artifacts import (
     list_artifacts,
     list_memory_regions,
     region_indicators,
+    resolve_memory_region,
 )
 from memscope_engine.analysis.workflows import import_evidence
 from memscope_engine.artifacts import store as artifact_store
@@ -59,6 +60,41 @@ def test_region_indicators_rwx_and_private() -> None:
     )
     assert enriched["size_bytes"] == 0x2000
     assert enriched["indicators"] == []
+
+
+def test_resolve_memory_region_falls_back_to_pid_and_start(tmp_path: Path) -> None:
+    db = Database(tmp_path / "db.db")
+    img = tmp_path / "img.raw"
+    img.write_bytes(b"region-fixture")
+    ev = import_evidence(db, str(img))
+    run_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'vad_scan', 'completed', '2020-01-01T00:00:00+00:00', 4, '[]')
+        """,
+        (run_id, ev["id"]),
+    )
+    region_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO memory_regions (
+          id, evidence_id, analysis_run_id, pid, start_vpn, end_vpn, source_plugin
+        ) VALUES (?, ?, ?, 4242, '0x1000', '0x2000', 'windows.vadinfo')
+        """,
+        (region_id, ev["id"], run_id),
+    )
+    found = resolve_memory_region(
+        db,
+        evidence_id=ev["id"],
+        region_id="missing-id",
+        pid=4242,
+        start_vpn="0x1000",
+        end_vpn="0x2000",
+    )
+    assert found["id"] == region_id
+    db.close()
 
 
 def test_artifact_paths_and_hash(tmp_path: Path) -> None:

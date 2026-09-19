@@ -28,7 +28,6 @@ import { cn } from "../lib/utils";
 
 export function MemoryExplorerView({
   evidenceId,
-  processes,
   selectedProcessId,
   onSelectProcess,
   onJobSubmitted,
@@ -57,16 +56,11 @@ export function MemoryExplorerView({
   const { toast, showToast } = useStatusToast();
 
   const activePid = useMemo(() => {
-    if (pidFilter.trim()) {
-      const n = Number(pidFilter);
-      return Number.isFinite(n) ? n : null;
-    }
-    if (selectedProcessId) {
-      const p = processes.find((x) => x.id === selectedProcessId);
-      return p?.pid ?? null;
-    }
-    return null;
-  }, [pidFilter, selectedProcessId, processes]);
+    const raw = pidFilter.trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  }, [pidFilter]);
 
   const listKey = evidenceId
     ? `${evidenceId}:${activePid ?? ""}:${suspiciousOnly ? "1" : "0"}`
@@ -74,15 +68,34 @@ export function MemoryExplorerView({
 
   const load = useCallback(async () => {
     if (!evidenceId || !listKey) return;
+    if (activePid == null) {
+      setItems([]);
+      setSelected(null);
+      setLoadedKey(listKey);
+      return;
+    }
     try {
       const res = await engineCall<{ items: MemoryRegion[] }>("memory.list", {
         evidence_id: evidenceId,
-        pid: activePid ?? undefined,
+        pid: activePid,
         suspicious_only: suspiciousOnly,
         limit: 20000,
       });
       setItems(res.items);
       setLoadedKey(listKey);
+      setSelected((cur) => {
+        if (!cur) return null;
+        const still = res.items.find((r) => r.id === cur.id);
+        if (still) return still;
+        return (
+          res.items.find(
+            (r) =>
+              r.pid === cur.pid &&
+              r.start_vpn === cur.start_vpn &&
+              r.end_vpn === cur.end_vpn,
+          ) ?? null
+        );
+      });
     } catch (e) {
       setItems([]);
       setLoadedKey(listKey);
@@ -132,10 +145,7 @@ export function MemoryExplorerView({
   const working = busy || (job != null && isActiveJobStatus(job.status));
 
   const scan = async () => {
-    if (!evidenceId || activePid == null) {
-      onError("Select or enter a PID before scanning VADs.");
-      return;
-    }
+    if (!evidenceId || activePid == null) return;
     setBusy(true);
     try {
       const submitted = await engineCall<Job>("memory.scan", {
@@ -161,6 +171,8 @@ export function MemoryExplorerView({
         memory_region_id: region.id,
         pid: region.pid,
         process_id: region.process_id ?? undefined,
+        start_vpn: region.start_vpn ?? undefined,
+        end_vpn: region.end_vpn ?? undefined,
       });
       setJob(submitted);
       onJobSubmitted(submitted);
@@ -228,7 +240,11 @@ export function MemoryExplorerView({
           placeholder="PID"
           value={pidFilter}
           onChange={(e) => setPidFilter(e.target.value)}
-          onClear={() => setPidFilter("")}
+          onClear={() => {
+            setPidFilter("");
+            setItems([]);
+            setSelected(null);
+          }}
         />
         <label className="flex items-center gap-1 text-muted">
           <input
@@ -276,8 +292,13 @@ export function MemoryExplorerView({
         <div className="min-h-0 min-w-0 flex-1 overflow-auto">
           {loading &&
           items.length === 0 &&
+          activePid != null &&
           coverageLiveKind(coverage) !== "in_progress" ? (
             <CenteredLoading />
+          ) : activePid == null ? (
+            <div className="p-4 text-muted">
+              Enter a PID, then click Scan VADs to list memory regions for that process.
+            </div>
           ) : items.length === 0 ? (
             <CoverageEmptyState
               item={coverage}
@@ -285,8 +306,8 @@ export function MemoryExplorerView({
               showTitle={false}
               inProgressDetail="Memory / VAD is still being analyzed."
               analyzedZeroDetail="Memory / VAD analysis completed and found no regions."
-              notAnalyzedDetail="Memory / VAD is process-scoped and is not part of Quick Triage or Complete Analysis."
-              notAnalyzedHint="Select a process and run Analyze process or Scan VADs."
+              notAnalyzedDetail="Memory / VAD is process-scoped. Enter a PID and click Scan VADs."
+              notAnalyzedHint="Enter the PID, then click Scan VADs."
               failedDetail="Memory / VAD analysis failed."
             />
           ) : visibleRegions.length === 0 ? (
@@ -403,14 +424,15 @@ export function MemoryExplorerView({
             </table>
           )}
         </div>
+        {visibleRegions.length > 0 ? (
         <aside
           className={cn(
             "max-h-[42%] shrink-0 overflow-auto border-t border-border p-3",
-            selected ? "selected-record-detail" : "bg-surface-2",
+            selected ? "selected-record-detail" : "bg-accent/10",
           )}
         >
           {!selected ? (
-            <div className="text-muted">
+            <div className="rounded-md border border-accent/40 bg-accent/15 px-3 py-2.5 text-xs text-foreground">
               Select a region for details and extraction.
             </div>
           ) : (
@@ -457,7 +479,7 @@ export function MemoryExplorerView({
                     variant="outline"
                     onClick={() => onSelectProcess(selected.process_id!)}
                   >
-                    Open process
+                    Open Process
                   </Button>
                 )}
                 <Button
@@ -465,7 +487,7 @@ export function MemoryExplorerView({
                   onClick={() => void extract(selected)}
                   disabled={working}
                 >
-                  {working ? "Working…" : "Extract region"}
+                  {working ? "Working…" : "Extract Region"}
                 </Button>
                 <div className="text-[11px] text-muted">
                   Extraction uses Volatility vad_dump into the controlled artifact
@@ -475,6 +497,7 @@ export function MemoryExplorerView({
             </div>
           )}
         </aside>
+        ) : null}
       </div>
       <StatusToast message={toast} />
     </div>

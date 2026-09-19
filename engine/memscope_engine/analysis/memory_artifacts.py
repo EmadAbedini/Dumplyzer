@@ -165,6 +165,46 @@ def list_memory_regions(
     }
 
 
+def resolve_memory_region(
+    db: Database,
+    *,
+    evidence_id: str,
+    region_id: str | None = None,
+    pid: int | None = None,
+    start_vpn: str | None = None,
+    end_vpn: str | None = None,
+) -> dict[str, Any]:
+    if region_id:
+        row = db.fetchone("SELECT * FROM memory_regions WHERE id = ?", (region_id,))
+        if row and row["evidence_id"] == evidence_id:
+            return row
+    if pid is not None and start_vpn:
+        row = db.fetchone(
+            """
+            SELECT * FROM memory_regions
+            WHERE evidence_id = ? AND pid = ? AND start_vpn = ?
+              AND (? IS NULL OR end_vpn = ?)
+            ORDER BY rowid DESC LIMIT 1
+            """,
+            (evidence_id, int(pid), str(start_vpn), end_vpn, end_vpn),
+        )
+        if row:
+            return row
+        start_i = _parse_hex(start_vpn)
+        end_i = _parse_hex(end_vpn) if end_vpn else None
+        if start_i is not None:
+            rows = db.fetchall(
+                "SELECT * FROM memory_regions WHERE evidence_id = ? AND pid = ?",
+                (evidence_id, int(pid)),
+            )
+            for cand in rows:
+                if _parse_hex(cand.get("start_vpn")) != start_i:
+                    continue
+                if end_i is None or _parse_hex(cand.get("end_vpn")) == end_i:
+                    return cand
+    raise AppError(code="region_missing", message="Memory region not found.", entity="memory")
+
+
 def get_memory_region(db: Database, region_id: str) -> dict[str, Any]:
     row = db.fetchone("SELECT * FROM memory_regions WHERE id = ?", (region_id,))
     if not row:
@@ -337,16 +377,25 @@ def run_vad_extract_job(
     """Extract one VAD region via Volatility3 VadInfo.vad_dump into artifact store."""
     evidence_id = params["evidence_id"]
     region_id = params.get("memory_region_id")
-    if not region_id:
+    pid_hint = params.get("pid")
+    start_hint = params.get("start_vpn")
+    end_hint = params.get("end_vpn")
+    if not region_id and (pid_hint is None or not start_hint):
         raise AppError(
             code="region_required",
             message="memory_region_id is required for VAD extraction.",
             entity="artifact",
         )
 
-    region = db.fetchone("SELECT * FROM memory_regions WHERE id = ?", (region_id,))
-    if not region or region["evidence_id"] != evidence_id:
-        raise AppError(code="region_missing", message="Memory region not found.", entity="memory")
+    region = resolve_memory_region(
+        db,
+        evidence_id=evidence_id,
+        region_id=str(region_id) if region_id else None,
+        pid=int(pid_hint) if pid_hint is not None and str(pid_hint).strip() != "" else None,
+        start_vpn=str(start_hint) if start_hint else None,
+        end_vpn=str(end_hint) if end_hint else None,
+    )
+    region_id = region["id"]
 
     evidence = db.fetchone("SELECT * FROM evidence WHERE id = ?", (evidence_id,))
     if not evidence:
@@ -458,14 +507,28 @@ def run_vad_extract_job(
             )
 
         vad_obj = None
+        containing = None
         for vad in proc_obj.get_vad_root().traverse():
             try:
                 vs = int(vad.get_start())
             except Exception:  # noqa: BLE001
                 continue
+            ve = None
+            try:
+                ve = int(vad.get_end())
+            except Exception:  # noqa: BLE001
+                ve = None
             if vs == start_i:
                 vad_obj = vad
                 break
+            if (
+                containing is None
+                and ve is not None
+                and vs <= start_i <= ve
+            ):
+                containing = vad
+        if vad_obj is None:
+            vad_obj = containing
 
         if vad_obj is None:
             raise AppError(
