@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from memscope_engine.errors import AppError
+from memscope_engine.errors import AppError, JobCancelled
 from memscope_engine.storage import Database
 
 log = logging.getLogger("memscope.analysis")
@@ -373,6 +373,11 @@ class JobManager:
                         job_id,
                     ),
                 )
+        except JobCancelled:
+            self._db.execute(
+                "UPDATE jobs SET status = 'cancelled', finished_at = ?, message = ? WHERE id = ?",
+                (_utcnow(), "Cancelled", job_id),
+            )
         except AppError as exc:
             if cancelled():
                 self._db.execute(

@@ -6,6 +6,19 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+class JobCancelled(BaseException):
+    """Abort in-flight Volatility work.
+
+    Subclass of BaseException (not Exception) so Volatility 3 cannot swallow
+    it. ``automagic.run`` and ``DataLayerInterface.scan`` catch Exception and
+    otherwise keep running the current plugin for tens of seconds.
+    """
+
+
+def job_cancelled_error() -> AppError:
+    return AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+
+
 @dataclass
 class AppError(Exception):
     """User-facing error with optional technical detail and next step."""

@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Type
 
-from memscope_engine.errors import AppError
+from memscope_engine.errors import AppError, JobCancelled, job_cancelled_error
 from memscope_engine.memory_image import app_error_for_unsatisfied
+from memscope_engine.volatility.cancel import interrupt_on_cancel
 from memscope_engine.volatility.treegrid import treegrid_to_table
 
 vollog = logging.getLogger("memscope.tool")
@@ -102,91 +103,23 @@ class VolatilitySession:
             ] = value
 
         if cancelled and cancelled():
-            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+            raise job_cancelled_error()
 
         def _progress(progress: float, description: str | None = None) -> None:
             if cancelled and cancelled():
-                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
+                raise JobCancelled()
             cb = progress_callback or _progress_mute
             cb(progress, description)
 
-        try:
-            constructed = self._plugins.construct_plugin(
-                self.context,
-                automagics,
+        with interrupt_on_cancel(cancelled):
+            constructed, table = self._construct_and_run(
                 plugin_cls,
-                self._base_config_path,
+                plugin_name,
+                automagics,
                 _progress,
                 open_method,
+                cancelled,
             )
-        except AppError:
-            raise
-        except self._exceptions.UnsatisfiedException as exc:
-            unsat = [str(x) for x in exc.unsatisfied]
-            vollog.error(
-                "plugin requirements unsatisfied plugin=%s unsatisfied=%s",
-                plugin_name,
-                unsat,
-                extra={"channel": "tool", "plugin": plugin_name, "unsatisfied": unsat},
-            )
-            raise app_error_for_unsatisfied(
-                self.image_path,
-                unsat,
-                plugin_name,
-                self.context,
-            ) from exc
-        except Exception as exc:  # noqa: BLE001
-            if cancelled and cancelled():
-                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
-            raise AppError(
-                code="volatility_construct_failed",
-                message=f"Failed to construct Volatility plugin {plugin_cls.__name__}.",
-                details=f"{type(exc).__name__}: {exc}",
-                suggestion="Inspect engine logs and confirm the memory image is valid.",
-                entity="volatility",
-                data={"plugin": plugin_name},
-            ) from exc
-
-        if cancelled and cancelled():
-            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
-
-        try:
-            grid = constructed.run()
-        except AppError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            if cancelled and cancelled():
-                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
-            raise AppError(
-                code="volatility_run_failed",
-                message=f"Volatility plugin {plugin_cls.__name__} failed during execution.",
-                details=f"{type(exc).__name__}: {exc}",
-                suggestion="Retry analysis or try a different plugin/strategy.",
-                entity="volatility",
-                data={"plugin": plugin_name},
-            ) from exc
-
-        if cancelled and cancelled():
-            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
-
-        try:
-            table = treegrid_to_table(grid, cancelled=cancelled)
-        except AppError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            if cancelled and cancelled():
-                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job") from exc
-            raise AppError(
-                code="volatility_run_failed",
-                message=f"Volatility plugin {plugin_cls.__name__} failed during execution.",
-                details=f"{type(exc).__name__}: {exc}",
-                suggestion="Retry analysis or try a different plugin/strategy.",
-                entity="volatility",
-                data={"plugin": plugin_name},
-            ) from exc
-
-        if cancelled and cancelled():
-            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
 
         columns = [str(c["name"]) for c in table.get("columns") or []]
         rows = [list(r.get("cells") or []) for r in table.get("rows") or []]
@@ -213,6 +146,102 @@ class VolatilitySession:
             transparency=transparency,
             table=table,
         )
+
+    def _construct_and_run(
+        self,
+        plugin_cls: Type[Any],
+        plugin_name: str,
+        automagics: Any,
+        progress: Callable[[float, str | None], None],
+        open_method: Type[Any] | None,
+        cancelled: Callable[[], bool] | None,
+    ) -> tuple[Any, dict[str, Any]]:
+        try:
+            constructed = self._plugins.construct_plugin(
+                self.context,
+                automagics,
+                plugin_cls,
+                self._base_config_path,
+                progress,
+                open_method,
+            )
+        except AppError:
+            raise
+        except JobCancelled:
+            raise
+        except self._exceptions.UnsatisfiedException as exc:
+            if cancelled and cancelled():
+                raise job_cancelled_error() from exc
+            unsat = [str(x) for x in exc.unsatisfied]
+            vollog.error(
+                "plugin requirements unsatisfied plugin=%s unsatisfied=%s",
+                plugin_name,
+                unsat,
+                extra={"channel": "tool", "plugin": plugin_name, "unsatisfied": unsat},
+            )
+            raise app_error_for_unsatisfied(
+                self.image_path,
+                unsat,
+                plugin_name,
+                self.context,
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            if cancelled and cancelled():
+                raise job_cancelled_error() from exc
+            raise AppError(
+                code="volatility_construct_failed",
+                message=f"Failed to construct Volatility plugin {plugin_cls.__name__}.",
+                details=f"{type(exc).__name__}: {exc}",
+                suggestion="Inspect engine logs and confirm the memory image is valid.",
+                entity="volatility",
+                data={"plugin": plugin_name},
+            ) from exc
+
+        if cancelled and cancelled():
+            raise job_cancelled_error()
+
+        try:
+            grid = constructed.run()
+        except AppError:
+            raise
+        except JobCancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if cancelled and cancelled():
+                raise job_cancelled_error() from exc
+            raise AppError(
+                code="volatility_run_failed",
+                message=f"Volatility plugin {plugin_cls.__name__} failed during execution.",
+                details=f"{type(exc).__name__}: {exc}",
+                suggestion="Retry analysis or try a different plugin/strategy.",
+                entity="volatility",
+                data={"plugin": plugin_name},
+            ) from exc
+
+        if cancelled and cancelled():
+            raise job_cancelled_error()
+
+        try:
+            table = treegrid_to_table(grid, cancelled=cancelled)
+        except AppError:
+            raise
+        except JobCancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if cancelled and cancelled():
+                raise job_cancelled_error() from exc
+            raise AppError(
+                code="volatility_run_failed",
+                message=f"Volatility plugin {plugin_cls.__name__} failed during execution.",
+                details=f"{type(exc).__name__}: {exc}",
+                suggestion="Retry analysis or try a different plugin/strategy.",
+                entity="volatility",
+                data={"plugin": plugin_name},
+            ) from exc
+
+        if cancelled and cancelled():
+            raise job_cancelled_error()
+        return constructed, table
 
 
 def _treegrid_to_rows(grid: Any) -> tuple[list[str], list[list[Any]]]:
