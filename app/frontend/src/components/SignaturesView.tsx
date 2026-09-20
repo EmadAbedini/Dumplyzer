@@ -1,7 +1,18 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Info } from "lucide-react";
 import { engineCall, EngineClientError } from "../lib/api";
-import { CHECKING_DETAIL, UNAVAILABLE_DETAIL } from "../lib/analysisCapabilities";
+import { activeJobOfKind, isActiveJobStatus } from "../lib/analysisOptions";
+import { jobProgressPercentText } from "../lib/jobDisplay";
+import {
+  CHECKING_DETAIL,
+  UNAVAILABLE_DETAIL,
+} from "../lib/analysisCapabilities";
 import { useCapabilityStatus } from "../lib/capabilityStatus";
 import { TimestampText } from "../lib/datetime";
 import {
@@ -26,16 +37,16 @@ export function SignaturesView({
   onJobSubmitted,
   refreshToken,
   jobsRunning = false,
-  activeJobKind = null,
-  jobPercent = null,
+  activeJobs = [],
+  nowMs = Date.now(),
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
   onJobSubmitted?: (job: Job) => void;
   refreshToken?: number | string;
   jobsRunning?: boolean;
-  activeJobKind?: string | null;
-  jobPercent?: string | null;
+  activeJobs?: Job[];
+  nowMs?: number;
 }) {
   const caps = useCapabilityStatus();
   const yara = caps.yara;
@@ -43,7 +54,9 @@ export function SignaturesView({
   const [tab, setTab] = useState<TabId>("memory");
   const [bundles, setBundles] = useState<YaraScanBundle[]>([]);
   const [peFiles, setPeFiles] = useState<Artifact[]>([]);
-  const [submitting, setSubmitting] = useState<"memory" | "extracted" | null>(null);
+  const [submitting, setSubmitting] = useState<"memory" | "extracted" | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     if (!evidenceId) {
@@ -78,11 +91,13 @@ export function SignaturesView({
   }, [peFiles]);
 
   const memoryBundles = useMemo(
-    () => bundles.filter((b) => (b.scan.target_kind || "artifact") === "memory"),
+    () =>
+      bundles.filter((b) => (b.scan.target_kind || "artifact") === "memory"),
     [bundles],
   );
   const extractedBundles = useMemo(
-    () => bundles.filter((b) => (b.scan.target_kind || "artifact") === "artifact"),
+    () =>
+      bundles.filter((b) => (b.scan.target_kind || "artifact") === "artifact"),
     [bundles],
   );
 
@@ -90,7 +105,10 @@ export function SignaturesView({
   const checking = yaraRow.kind === "checking";
   const actionsLocked = jobsRunning || submitting != null;
 
-  const queue = async (method: "yara.scan_memory" | "yara.scan_extracted", kind: "memory" | "extracted") => {
+  const queue = async (
+    method: "yara.scan_memory" | "yara.scan_extracted",
+    kind: "memory" | "extracted",
+  ) => {
     if (!evidenceId || submitting) return;
     setSubmitting(kind);
     try {
@@ -105,18 +123,26 @@ export function SignaturesView({
 
   if (!evidenceId) return <ImportEvidenceState title="Signatures" />;
 
+  const memoryJob = activeJobOfKind(activeJobs, "yara_memory_scan");
+  const extractedJob = activeJobOfKind(
+    activeJobs,
+    "yara_extracted_scan",
+    "yara_artifact_scan",
+  );
   const scanBusy =
     submitting === "memory" ||
-    activeJobKind === "yara_memory_scan" ||
+    (memoryJob != null && isActiveJobStatus(memoryJob.status)) ||
     (actionsLocked && tab === "memory");
   const extractedBusy =
     submitting === "extracted" ||
-    activeJobKind === "yara_extracted_scan" ||
-    activeJobKind === "yara_artifact_scan" ||
+    (extractedJob != null && isActiveJobStatus(extractedJob.status)) ||
     (actionsLocked && tab === "extracted");
-  const showPercent =
-    jobPercent &&
-    ((tab === "memory" && scanBusy) || (tab === "extracted" && extractedBusy));
+  const memoryPercent = jobProgressPercentText(memoryJob, nowMs);
+  const extractedPercent = jobProgressPercentText(extractedJob, nowMs);
+  const showMemoryPercent = Boolean(memoryPercent && scanBusy && memoryJob?.status !== "queued");
+  const showExtractedPercent = Boolean(
+    extractedPercent && extractedBusy && extractedJob?.status !== "queued",
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col text-xs">
@@ -156,16 +182,15 @@ export function SignaturesView({
               <ScanPanel
                 title="Memory Image"
                 description="Scan the imported memory image with YARA rules. Progress stays on this page."
-                buttonLabel={
-                  submitting === "memory" || activeJobKind === "yara_memory_scan"
-                    ? showPercent
-                      ? `Scanning… ${jobPercent}`
-                      : "Scanning…"
-                    : "Scan Memory Image"
-                }
+                buttonLabel={scanButtonLabel(
+                  submitting === "memory",
+                  memoryJob,
+                  showMemoryPercent ? memoryPercent : null,
+                  "Scan Memory Image",
+                )}
                 disabled={scanBusy}
                 extra={yara?.status_summary}
-                percent={showPercent ? jobPercent : null}
+                percent={showMemoryPercent ? memoryPercent : null}
                 onScan={() => void queue("yara.scan_memory", "memory")}
                 empty="No memory-image scans yet."
                 bundles={memoryBundles}
@@ -173,15 +198,13 @@ export function SignaturesView({
             ) : (
               <ScanPanel
                 title="Extracted PE Scan"
-                description="Scan reconstructed EXE and DLL files with YARA. This page only scans files that already exist — it does not extract them from the dump."
-                buttonLabel={
-                  submitting === "extracted" ||
-                  activeJobKind === "yara_extracted_scan"
-                    ? showPercent
-                      ? `Scanning… ${jobPercent}`
-                      : "Scanning…"
-                    : "Scan Extracted PE Files"
-                }
+                description="Scan reconstructed PE files with YARA. This page only scans files that already exist — it does not extract them from the dump."
+                buttonLabel={scanButtonLabel(
+                  submitting === "extracted",
+                  extractedJob,
+                  showExtractedPercent ? extractedPercent : null,
+                  "Scan Extracted PE Files",
+                )}
                 disabled={extractedBusy || peFiles.length === 0}
                 buttonTitle={
                   peFiles.length === 0
@@ -192,16 +215,20 @@ export function SignaturesView({
                   peFiles.length === 0 ? (
                     <AnalysisScopeNote>
                       Reconstruct files before scanning. Open{" "}
-                      <span className="font-semibold">Carved Data</span>, switch to{" "}
-                      <span className="font-semibold">Extracted Files</span>, and click{" "}
-                      <span className="font-semibold">Run PE Reconstruction</span>. When
-                      that job finishes, return here and scan those files.
+                      <span className="font-semibold">Carved Data</span>, switch
+                      to <span className="font-semibold">Extracted Files</span>,
+                      and click{" "}
+                      <span className="font-semibold">
+                        Run PE Reconstruction
+                      </span>
+                      . When that job finishes, return here and scan those
+                      files.
                     </AnalysisScopeNote>
                   ) : (
                     `${peFiles.length} reconstructed file${peFiles.length === 1 ? "" : "s"} ready to scan.`
                   )
                 }
-                percent={showPercent ? jobPercent : null}
+                percent={showExtractedPercent ? extractedPercent : null}
                 onScan={() => void queue("yara.scan_extracted", "extracted")}
                 empty={peFiles.length === 0 ? "" : "No scans yet."}
                 bundles={extractedBundles}
@@ -213,6 +240,20 @@ export function SignaturesView({
       </div>
     </div>
   );
+}
+
+function scanButtonLabel(
+  submitting: boolean,
+  job: Job | null,
+  percent: string | null,
+  idle: string,
+): string {
+  if (submitting && !job) return "Starting…";
+  if (job?.status === "queued") return "Queued";
+  if (job != null && isActiveJobStatus(job.status)) {
+    return percent ? `Scanning… ${percent}` : "Scanning…";
+  }
+  return idle;
 }
 
 function ScanPanel({
@@ -261,7 +302,9 @@ function ScanPanel({
         </Button>
         {percent ? (
           <div className="mt-2 max-w-xs">
-            <div className="mb-1 text-[11px] text-muted">Scan progress {percent}</div>
+            <div className="mb-1 text-[11px] text-muted">
+              Scan progress {percent}
+            </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
               <div
                 className="h-full rounded-full bg-accent transition-[width]"
@@ -272,7 +315,9 @@ function ScanPanel({
         ) : null}
       </div>
       {bundles.length === 0 ? (
-        empty ? <p className="px-4 text-sm text-muted">{empty}</p> : null
+        empty ? (
+          <p className="px-4 text-sm text-muted">{empty}</p>
+        ) : null
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           {bundles.map((b) => (
@@ -288,7 +333,8 @@ function scanStatusLabel(status: string): string {
   if (status === "completed") return "Completed";
   if (status === "failed") return "Failed";
   if (status === "cancelled" || status === "canceled") return "Cancelled";
-  if (status === "running" || status === "queued") return "Scanning";
+  if (status === "running") return "Scanning";
+  if (status === "queued") return "Queued";
   return status.replace(/_/g, " ");
 }
 
@@ -301,7 +347,9 @@ function ScanResultCard({
 }) {
   const scan = bundle.scan;
   const artifactName =
-    scan.artifact_id && peById ? peById.get(scan.artifact_id)?.filename : undefined;
+    scan.artifact_id && peById
+      ? peById.get(scan.artifact_id)?.filename
+      : undefined;
   const grouped = useMemo(() => groupMatches(bundle.matches), [bundle.matches]);
   const getValue = useCallback((row: GroupedRule, key: string) => {
     if (key === "rule") return row.rule_name;
@@ -366,25 +414,53 @@ function ScanResultCard({
             </colgroup>
             <thead className="sticky top-0 z-10 bg-surface-2 text-muted">
               <tr>
-                <SortableTh label="Rule" column="rule" sort={sort} onToggle={toggle} />
-                <SortableTh label="Level" column="level" sort={sort} onToggle={toggle} />
-                <SortableTh label="Namespace" column="namespace" sort={sort} onToggle={toggle} />
-                <SortableTh label="Hits" column="hits" sort={sort} onToggle={toggle} />
+                <SortableTh
+                  label="Rule"
+                  column="rule"
+                  sort={sort}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="Level"
+                  column="level"
+                  sort={sort}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="Namespace"
+                  column="namespace"
+                  sort={sort}
+                  onToggle={toggle}
+                />
+                <SortableTh
+                  label="Hits"
+                  column="hits"
+                  sort={sort}
+                  onToggle={toggle}
+                />
               </tr>
             </thead>
             <tbody>
               {sorted.map((row) => (
                 <tr key={row.key} className="border-t border-border/40">
-                  <td className="px-2 py-1.5 font-medium break-all">{row.rule_name}</td>
+                  <td className="px-2 py-1.5 font-medium break-all">
+                    {row.rule_name}
+                  </td>
                   <td className="px-2 py-1.5">
                     {row.level ? (
-                      <Badge className={findingSeverityClass(row.level)}>{formatRuleLevel(row.level)}</Badge>
+                      <Badge className={findingSeverityClass(row.level)}>
+                        {formatRuleLevel(row.level)}
+                      </Badge>
                     ) : (
                       <span className="text-muted">—</span>
                     )}
                   </td>
-                  <td className="px-2 py-1.5 font-mono text-muted break-all">{row.namespace || "—"}</td>
-                  <td className="px-2 py-1.5 tabular-nums">{row.hits.toLocaleString()}</td>
+                  <td className="px-2 py-1.5 font-mono text-muted break-all">
+                    {row.namespace || "—"}
+                  </td>
+                  <td className="px-2 py-1.5 tabular-nums">
+                    {row.hits.toLocaleString()}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -39,6 +39,36 @@ SELECT jobs.*,
 FROM jobs
 """
 
+# Jobs UI only needs scalars + progress/error labels. Full result_json can be
+# megabytes (plugin rows, FLOSS strings) and freezes the desktop webview.
+_JOB_LIST_SELECT = """
+SELECT
+  jobs.id,
+  jobs.kind,
+  jobs.status,
+  jobs.evidence_id,
+  jobs.process_id,
+  jobs.pid,
+  jobs.analysis_run_id,
+  jobs.created_at,
+  jobs.started_at,
+  jobs.finished_at,
+  jobs.progress_kind,
+  jobs.message,
+  jobs.cancel_requested,
+  (SELECT filename FROM evidence WHERE evidence.id = jobs.evidence_id) AS evidence_filename,
+  json_extract(jobs.result_json, '$.percent') AS result_percent,
+  json_extract(jobs.result_json, '$.phase') AS result_phase,
+  json_extract(jobs.result_json, '$.evidence.filename') AS result_evidence_filename,
+  json_extract(jobs.params_json, '$.profile') AS param_profile,
+  json_extract(jobs.params_json, '$.filename') AS param_filename,
+  json_extract(jobs.params_json, '$.path') AS param_path,
+  json_extract(jobs.error_json, '$.message') AS error_message,
+  json_extract(jobs.error_json, '$.suggestion') AS error_suggestion,
+  json_extract(jobs.error_json, '$.code') AS error_code
+FROM jobs
+"""
+
 
 ProgressFn = Callable[..., None]
 JobHandler = Callable[[Database, dict[str, Any], Callable[[], bool], ProgressFn], dict[str, Any]]
@@ -199,7 +229,7 @@ class JobManager:
         if evidence_id:
             rows = self._db.fetchall(
                 f"""
-                {_JOB_SELECT}
+                {_JOB_LIST_SELECT}
                 WHERE jobs.evidence_id = ? AND jobs.created_at >= ?
                 ORDER BY jobs.created_at DESC LIMIT ?
                 """,
@@ -208,13 +238,13 @@ class JobManager:
         else:
             rows = self._db.fetchall(
                 f"""
-                {_JOB_SELECT}
+                {_JOB_LIST_SELECT}
                 WHERE jobs.created_at >= ?
                 ORDER BY jobs.created_at DESC LIMIT ?
                 """,
                 (since, limit),
             )
-        return [self._dto(r) for r in rows]
+        return [self._list_dto(r) for r in rows]
 
     def _loop(self) -> None:
         while True:
@@ -422,6 +452,63 @@ class JobManager:
             "error": _json(row.get("error_json")),
             "result": _json(row.get("result_json")),
             "params": _json(row.get("params_json")) or {},
+            "cancel_requested": bool(row.get("cancel_requested")),
+            "evidence_filename": _evidence_filename(row),
+        }
+
+    def _list_dto(self, row: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] | None = None
+        percent = row.get("result_percent")
+        phase = row.get("result_phase")
+        evidence_name = row.get("result_evidence_filename")
+        if percent is not None or phase or evidence_name:
+            result = {}
+            if percent is not None:
+                result["percent"] = percent
+            if isinstance(phase, str) and phase:
+                result["phase"] = phase
+            if isinstance(evidence_name, str) and evidence_name.strip():
+                result["evidence"] = {"filename": evidence_name.strip()}
+
+        params: dict[str, Any] = {}
+        for key, column in (
+            ("profile", "param_profile"),
+            ("filename", "param_filename"),
+            ("path", "param_path"),
+        ):
+            value = row.get(column)
+            if isinstance(value, str) and value.strip():
+                params[key] = value.strip()
+
+        error: dict[str, Any] | None = None
+        err_message = row.get("error_message")
+        err_suggestion = row.get("error_suggestion")
+        err_code = row.get("error_code")
+        if err_message or err_suggestion or err_code:
+            error = {}
+            if isinstance(err_message, str) and err_message:
+                error["message"] = err_message
+            if isinstance(err_suggestion, str) and err_suggestion:
+                error["suggestion"] = err_suggestion
+            if isinstance(err_code, str) and err_code:
+                error["code"] = err_code
+
+        return {
+            "id": row["id"],
+            "kind": row["kind"],
+            "status": row["status"],
+            "evidence_id": row.get("evidence_id"),
+            "process_id": row.get("process_id"),
+            "pid": row.get("pid"),
+            "analysis_run_id": row.get("analysis_run_id"),
+            "created_at": row.get("created_at"),
+            "started_at": row.get("started_at"),
+            "finished_at": row.get("finished_at"),
+            "progress_kind": row.get("progress_kind") or "indeterminate",
+            "message": row.get("message"),
+            "error": error,
+            "result": result,
+            "params": params,
             "cancel_requested": bool(row.get("cancel_requested")),
             "evidence_filename": _evidence_filename(row),
         }

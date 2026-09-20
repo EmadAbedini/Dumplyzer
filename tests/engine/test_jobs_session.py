@@ -127,6 +127,49 @@ def test_list_jobs_includes_evidence_filename(tmp_path: Path) -> None:
     db.close()
 
 
+def test_list_jobs_omits_bulky_result_payload(tmp_path: Path) -> None:
+    db = Database(tmp_path / "j.db")
+    jobs = JobManager(db)
+    started = threading.Event()
+    release = threading.Event()
+
+    def handler(_db, params, cancelled, progress):
+        progress("working", {"percent": 12, "phase": "scan"})
+        started.set()
+        release.wait(timeout=2)
+        return {"ok": True, "items": ["x" * 4000], "blob": "y" * 8000}
+
+    jobs.register("test_job", handler)
+    jobs.start()
+    job = jobs.submit(
+        "test_job",
+        params={"profile": "full", "filename": "case.dmp", "extra": "z" * 4000},
+    )
+    assert started.wait(timeout=2)
+    mid = jobs.list_jobs()[0]
+    assert mid["result"]["percent"] == 12
+    assert mid["result"]["phase"] == "scan"
+    assert "items" not in (mid.get("result") or {})
+    assert "blob" not in (mid.get("result") or {})
+    assert mid["params"]["profile"] == "full"
+    assert mid["params"]["filename"] == "case.dmp"
+    assert "extra" not in mid["params"]
+    release.set()
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if jobs.get(job["id"])["status"] in ("completed", "failed", "cancelled"):
+            break
+        time.sleep(0.02)
+    full = jobs.get(job["id"])
+    listed = jobs.list_jobs()[0]
+    assert full["result"]["items"]
+    assert full["params"]["extra"]
+    assert "items" not in (listed.get("result") or {})
+    assert "blob" not in (listed.get("result") or {})
+    assert "extra" not in listed["params"]
+    db.close()
+
+
 def test_cancel_marker_stops_running_job_without_rpc(tmp_path: Path) -> None:
     db = Database(tmp_path / "j.db")
     jobs = JobManager(db)
@@ -254,6 +297,9 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     assert "jobFileName" in view
     assert "evidenceFilename" in view
     assert "Jobs updated" in view
+    assert "Loading jobs…" in view
+    assert "startTransition" in view
+    assert "jobPollBusyRef" in app
     assert "Refreshing…" in toast
     assert "app-toast" in toast
     assert "notMemoryImageToast" in helpers

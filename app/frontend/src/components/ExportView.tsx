@@ -378,9 +378,11 @@ export function ExportView({
                 {exportStatusLabel(uiState)}
               </Badge>
               <span className="text-xs text-muted">
-                {busy && (!message || message.toLowerCase() === "queued")
-                  ? "Generating…"
-                  : message}
+                {uiState === "queued"
+                  ? "Queued"
+                  : busy && (!message || message.toLowerCase() === "queued")
+                    ? "Generating…"
+                    : message}
               </span>
               </div>
             </section>

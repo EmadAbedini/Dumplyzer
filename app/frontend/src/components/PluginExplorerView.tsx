@@ -438,7 +438,7 @@ export function PluginExplorerView({
                     disabled={!canRun}
                     onClick={() => void run()}
                   >
-                    {pluginBusy ? "Running…" : "Run Plugin"}
+                    {pluginBusy ? (job?.status === "queued" ? "Queued" : "Running…") : "Run Plugin"}
                   </Button>
                 </span>
                 {analysisBusy ? (
@@ -808,7 +808,8 @@ function jobStateClass(status: string): string {
 }
 
 function pluginStatusLabel(status: string): string {
-  if (status === "queued" || status === "running") return "Analysing";
+  if (status === "queued") return "Queued";
+  if (status === "running") return "Analysing";
   if (status === "completed") return "Completed";
   if (status === "failed") return "Failed";
   if (status === "cancelled" || status === "canceled") return "Cancelled";

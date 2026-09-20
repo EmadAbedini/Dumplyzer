@@ -3,6 +3,7 @@ import {
   capabilityLabel,
   formatJobPercent,
   formatUserError,
+  isActiveJobStatus,
   isJobCancelling,
   isTerminalJobStatus,
   jobErrorPayload,
@@ -241,6 +242,9 @@ export function jobTableMessage(
   }
 
   const cancelling = isJobCancelling(job, pendingIds);
+  if (job.status === "queued" && !cancelling) {
+    return { text: "Queued", title: "Queued" };
+  }
   const stage = jobStageLabel(job);
   const percentText = jobProgressPercentText(job, nowMs, pendingIds);
   let text = stage;
@@ -258,9 +262,40 @@ export function jobProgressPercentText(
   pendingIds?: ReadonlySet<string>,
 ): string | null {
   if (!job || isTerminalJobStatus(job.status)) return null;
+  if (job.status === "queued" && !isJobCancelling(job, pendingIds)) return null;
   const cancelling = isJobCancelling(job, pendingIds);
   const percent = jobDisplayPercent(job, jobStageLabel(job), nowMs, cancelling);
   return percent != null ? formatJobPercent(percent) : null;
+}
+
+export function jobDisplayPercentValue(
+  job: Job,
+  nowMs: number = Date.now(),
+  pendingIds?: ReadonlySet<string>,
+): number | null {
+  if (isTerminalJobStatus(job.status)) return null;
+  if (job.status === "queued" && !isJobCancelling(job, pendingIds)) return 0;
+  const cancelling = isJobCancelling(job, pendingIds);
+  return jobDisplayPercent(job, jobStageLabel(job), nowMs, cancelling);
+}
+
+/** Average displayed percent across active jobs. Queued jobs count as 0%. */
+export function averageJobProgressPercentText(
+  jobs: readonly Job[],
+  nowMs: number = Date.now(),
+  pendingIds?: ReadonlySet<string>,
+): string | null {
+  const active = jobs.filter((job) => isActiveJobStatus(job.status));
+  if (active.length === 0) return null;
+  let sum = 0;
+  let started = 0;
+  for (const job of active) {
+    const queued = job.status === "queued" && !isJobCancelling(job, pendingIds);
+    if (!queued) started += 1;
+    sum += jobDisplayPercentValue(job, nowMs, pendingIds) ?? 0;
+  }
+  if (started === 0) return null;
+  return formatJobPercent(sum / active.length);
 }
 
 export function jobAnalysisTitle(job: Job): string {

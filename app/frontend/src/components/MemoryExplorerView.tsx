@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
-import { isActiveJobStatus } from "../lib/analysisOptions";
+import { activeJobOfKind, isActiveJobStatus } from "../lib/analysisOptions";
 import {
   coverageLiveKind,
   coverageResultCaption,
@@ -34,6 +34,7 @@ export function MemoryExplorerView({
   onError,
   refreshToken,
   coverage,
+  activeJobs = [],
 }: {
   evidenceId: string | null;
   processes: ProcessRow[];
@@ -43,8 +44,12 @@ export function MemoryExplorerView({
   onError: (m: string) => void;
   refreshToken?: number | string;
   coverage?: CapabilityCoverage;
+  activeJobs?: Job[];
 }) {
-  const [pidFilter, setPidFilter] = useState<string>("");
+  const [pidFilter, setPidFilter] = useState(() => {
+    const tracked = activeJobOfKind(activeJobs, "vad_scan", "vad_extract");
+    return tracked?.pid != null ? String(tracked.pid) : "";
+  });
   const [textFilter, setTextFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
   const [suspiciousOnly, setSuspiciousOnly] = useState(false);
@@ -52,7 +57,11 @@ export function MemoryExplorerView({
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<MemoryRegion | null>(null);
   const [busy, setBusy] = useState(false);
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob] = useState<Job | null>(() =>
+    activeJobOfKind(activeJobs, "vad_scan", "vad_extract"),
+  );
+  const restoredPidRef = useRef(Boolean(activeJobOfKind(activeJobs, "vad_scan", "vad_extract")?.pid != null));
+  const prevEvidenceRef = useRef(evidenceId);
   const { toast, showToast } = useStatusToast();
 
   const activePid = useMemo(() => {
@@ -108,8 +117,22 @@ export function MemoryExplorerView({
   }, [load, refreshToken]);
 
   useEffect(() => {
+    if (prevEvidenceRef.current === evidenceId) return;
+    prevEvidenceRef.current = evidenceId;
+    restoredPidRef.current = false;
     setJob(null);
+    setPidFilter("");
   }, [evidenceId]);
+
+  useEffect(() => {
+    const tracked = activeJobOfKind(activeJobs, "vad_scan", "vad_extract");
+    if (!tracked) return;
+    setJob(tracked);
+    if (tracked.pid != null && !restoredPidRef.current) {
+      restoredPidRef.current = true;
+      setPidFilter((cur) => (cur.trim() ? cur : String(tracked.pid)));
+    }
+  }, [activeJobs]);
 
   useEffect(() => {
     if (!job || !isActiveJobStatus(job.status)) return;
@@ -142,7 +165,13 @@ export function MemoryExplorerView({
     };
   }, [job, load, onError, showToast]);
 
-  const working = busy || (job != null && isActiveJobStatus(job.status));
+  const scanJob = job?.kind === "vad_scan" ? job : activeJobOfKind(activeJobs, "vad_scan");
+  const extractJob =
+    job?.kind === "vad_extract" ? job : activeJobOfKind(activeJobs, "vad_extract");
+  const memoryJob = scanJob ?? extractJob ?? job;
+  const working = busy || (memoryJob != null && isActiveJobStatus(memoryJob.status));
+  const scanLabel = memoryActionLabel(scanJob, busy && !extractJob, "Scan VADs");
+  const extractLabel = memoryActionLabel(extractJob, busy && !scanJob, "Extract Region");
 
   const scan = async () => {
     if (!evidenceId || activePid == null) return;
@@ -264,7 +293,7 @@ export function MemoryExplorerView({
           onClick={() => void scan()}
           disabled={working || activePid == null}
         >
-          {working ? "Working…" : "Scan VADs"}
+          {scanLabel}
         </Button>
         <ResultFilterBar
           query={textFilter}
@@ -487,7 +516,7 @@ export function MemoryExplorerView({
                   onClick={() => void extract(selected)}
                   disabled={working}
                 >
-                  {working ? "Working…" : "Extract Region"}
+                  {extractLabel}
                 </Button>
                 <div className="text-[11px] text-muted">
                   Extraction uses Volatility vad_dump into the controlled artifact
@@ -502,6 +531,13 @@ export function MemoryExplorerView({
       <StatusToast message={toast} />
     </div>
   );
+}
+
+function memoryActionLabel(job: Job | null, submitting: boolean, idle: string): string {
+  if (job?.status === "queued") return "Queued";
+  if (job != null && isActiveJobStatus(job.status)) return "Working…";
+  if (submitting) return "Queued";
+  return idle;
 }
 
 function KV({ k, v }: { k: string; v: unknown }) {

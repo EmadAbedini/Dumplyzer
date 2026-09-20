@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
 import { engineCall, EngineClientError, openLocalFolder } from "../lib/api";
 import { CAPABILITY, UNAVAILABLE_DETAIL } from "../lib/analysisCapabilities";
+import { activeJobOfKind, isActiveJobStatus } from "../lib/analysisOptions";
+import { jobProgressPercentText } from "../lib/jobDisplay";
 import { useCapabilityStatus, type CapabilitySnapshot } from "../lib/capabilityStatus";
 import { coverageIsUpdating, coverageLiveKind, coverageResultCaption } from "../lib/analysisCoverage";
-import { CoverageEmptyState, CenteredLoading, ImportEvidenceState } from "./CoverageStatus";
+import { CoverageEmptyState, CenteredLoading, ImportEvidenceState, AnalysisScopeNote } from "./CoverageStatus";
 import { TimestampText } from "../lib/datetime";
 import { matchesFieldQuery } from "../lib/resultFilter";
 import { useTableSort } from "../lib/tableSort";
@@ -57,19 +59,57 @@ function isBoilerplateNotes(notes: string | null | undefined): boolean {
 type ArtifactAction = "pe" | "extraction" | "yara" | "capa" | "floss";
 type DiskWriteAction = "pe" | "extraction";
 
+const ACTION_JOB_KINDS: Record<ArtifactAction, string[]> = {
+  pe: ["pe_extraction"],
+  extraction: ["bulk_extractor_scan"],
+  yara: ["yara_artifact_scan"],
+  capa: ["capa_artifact"],
+  floss: ["floss_artifact"],
+};
+
+function actionJob(
+  action: ArtifactAction,
+  activeJobs: Job[] | undefined,
+): Job | null {
+  return activeJobOfKind(activeJobs, ...ACTION_JOB_KINDS[action]);
+}
+
+function actionIsRunning(
+  action: ArtifactAction,
+  submitting: ArtifactAction | null,
+  activeJobs: Job[] | undefined,
+): boolean {
+  if (submitting === action) return true;
+  const job = actionJob(action, activeJobs);
+  return job != null && isActiveJobStatus(job.status);
+}
+
+function BusyLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-current/30 border-t-current"
+        aria-hidden
+      />
+      {children}
+    </span>
+  );
+}
+
 function actionButtonLabel(
   idle: string,
   action: ArtifactAction,
   submitting: ArtifactAction | null,
-  activeJobKind: string | null,
+  activeJobs: Job[] | undefined,
   locked: boolean,
-): string {
-  if (submitting === action) return "Starting…";
-  if (action === "pe" && activeJobKind === "pe_extraction") return "Running…";
-  if (action === "extraction" && activeJobKind === "bulk_extractor_scan") return "Running…";
-  if (action === "yara" && activeJobKind === "yara_artifact_scan") return "Running…";
-  if (action === "capa" && activeJobKind === "capa_artifact") return "Running…";
-  if (action === "floss" && activeJobKind === "floss_artifact") return "Running…";
+  percent?: string | null,
+): ReactNode {
+  if (submitting === action) return <BusyLabel>Starting…</BusyLabel>;
+  const job = actionJob(action, activeJobs);
+  if (job && isActiveJobStatus(job.status)) {
+    if (job.status === "queued") return <BusyLabel>Queued</BusyLabel>;
+    return <BusyLabel>{percent ? `Running… ${percent}` : "Running…"}</BusyLabel>;
+  }
   if (submitting || locked) return "Busy";
   return idle;
 }
@@ -81,8 +121,8 @@ export function ArtifactsView({
   refreshToken,
   coverage,
   jobsRunning = false,
-  activeJobKind = null,
-  jobPercent = null,
+  activeJobs = [],
+  nowMs = Date.now(),
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
@@ -90,8 +130,8 @@ export function ArtifactsView({
   refreshToken?: number | string;
   coverage?: CapabilityCoverage;
   jobsRunning?: boolean;
-  activeJobKind?: string | null;
-  jobPercent?: string | null;
+  activeJobs?: Job[];
+  nowMs?: number;
 }) {
   const caps = useCapabilityStatus();
   const [items, setItems] = useState<Artifact[]>([]);
@@ -268,6 +308,13 @@ export function ArtifactsView({
     items.length,
     visible.length !== items.length ? visible.length : undefined,
   );
+  const carvingJob = actionJob("extraction", activeJobs);
+  const peJob = actionJob("pe", activeJobs);
+  const carvingBusy =
+    submitting === "extraction" || (carvingJob != null && isActiveJobStatus(carvingJob.status));
+  const peBusy = submitting === "pe" || (peJob != null && isActiveJobStatus(peJob.status));
+  const carvingPercent = jobProgressPercentText(carvingJob, nowMs);
+  const pePercent = jobProgressPercentText(peJob, nowMs);
 
   const requestDiskWrite = (action: DiskWriteAction) => {
     if (actionsLocked) return;
@@ -331,8 +378,9 @@ export function ArtifactsView({
                     "Carve Artifacts",
                     "extraction",
                     submitting,
-                    activeJobKind,
+                    activeJobs,
                     actionsLocked,
+                    carvingBusy ? carvingPercent : null,
                   )}
                 </Button>
               </div>
@@ -340,12 +388,14 @@ export function ArtifactsView({
             <AntivirusBanner />
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            {submitting === "extraction" || activeJobKind === "bulk_extractor_scan" ? (
+            {carvingBusy ? (
               <CenteredLoading
                 label={
-                  jobPercent
-                    ? `Carving artifacts… ${jobPercent}`
-                    : "Carving artifacts…"
+                  carvingPercent
+                    ? `Carving artifacts… ${carvingPercent}`
+                    : carvingJob?.status === "queued"
+                      ? "Queued…"
+                      : "Carving artifacts…"
                 }
               />
             ) : latestBe ? (
@@ -389,17 +439,25 @@ export function ArtifactsView({
                     disabled={actionsLocked || !peAvailable}
                     onClick={() => requestDiskWrite("pe")}
                   >
-                    {actionButtonLabel(
+                  {actionButtonLabel(
                       "Run PE Reconstruction",
                       "pe",
                       submitting,
-                      activeJobKind,
+                      activeJobs,
                       actionsLocked,
+                      peBusy ? pePercent : null,
                     )}
                   </Button>
                 </div>
               </div>
               <AntivirusBanner />
+              <div className="mt-2">
+              <AnalysisScopeNote>
+                PE reconstruction walks the whole memory image. On large dumps this often
+                takes much longer than other jobs — you can keep using other sections while
+                it runs.
+              </AnalysisScopeNote>
+              </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <ResultFilterBar
                   className="ml-0 w-full max-w-xl flex-none basis-auto"
@@ -432,7 +490,19 @@ export function ArtifactsView({
               </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-            <div className="min-h-32 min-w-0 flex-1 overflow-auto">
+              {peBusy ? (
+                <CenteredLoading
+                  label={
+                    pePercent
+                      ? `Reconstructing files… ${pePercent}`
+                      : peJob?.status === "queued"
+                        ? "Queued…"
+                        : "Reconstructing files…"
+                  }
+                />
+              ) : (
+                <>
+                  <div className="min-h-32 min-w-0 flex-1 overflow-auto">
               {loading && items.length === 0 && peLiveKind !== "in_progress" ? (
                 <CenteredLoading />
               ) : visible.length === 0 ? (
@@ -520,17 +590,21 @@ export function ArtifactsView({
                 caps={caps}
                 actionsLocked={actionsLocked}
                 submitting={submitting}
-                activeJobKind={activeJobKind}
+                activeJobs={activeJobs}
+                nowMs={nowMs}
                 onQueue={queue}
               />
               )}
             </aside>
+                </>
+              )}
             </div>
         </div>
       )}
 
       <AntivirusConfirmDialog
         open={confirmAction != null}
+        action={confirmAction}
         busy={busy}
         onCancel={() => setConfirmAction(null)}
         onContinue={confirmDiskWrite}
@@ -559,6 +633,27 @@ function KV({ k, v }: { k: string; v: unknown }) {
   );
 }
 
+function fileScanBusyLabel(
+  submitting: ArtifactAction | null,
+  activeJobs: Job[] | undefined,
+  percent?: string | null,
+): string {
+  const job =
+    actionJob("capa", activeJobs) ??
+    actionJob("floss", activeJobs) ??
+    actionJob("yara", activeJobs);
+  if (job?.status === "queued") return "Queued";
+  let label = "Analyzing…";
+  if (submitting === "capa" || actionIsRunning("capa", submitting, activeJobs)) {
+    label = "Analyzing capabilities…";
+  } else if (submitting === "floss" || actionIsRunning("floss", submitting, activeJobs)) {
+    label = "Extracting strings…";
+  } else if (submitting === "yara" || actionIsRunning("yara", submitting, activeJobs)) {
+    label = "Scanning signatures…";
+  }
+  return percent ? `${label} ${percent}` : label;
+}
+
 function ExtractedFileDetail({
   detail,
   evidenceId,
@@ -568,7 +663,8 @@ function ExtractedFileDetail({
   caps,
   actionsLocked,
   submitting,
-  activeJobKind,
+  activeJobs,
+  nowMs,
   onQueue,
 }: {
   detail: Artifact;
@@ -579,7 +675,8 @@ function ExtractedFileDetail({
   caps: CapabilitySnapshot;
   actionsLocked: boolean;
   submitting: ArtifactAction | null;
-  activeJobKind: string | null;
+  activeJobs: Job[];
+  nowMs: number;
   onQueue: (method: string, params: Record<string, unknown>, action?: ArtifactAction) => Promise<void>;
 }) {
   const isPe = isPeArtifact(detail);
@@ -603,6 +700,13 @@ function ExtractedFileDetail({
     process_id: detail.process_id ?? undefined,
     pid: detail.pid ?? undefined,
   };
+  const yaraPercent = jobProgressPercentText(actionJob("yara", activeJobs), nowMs);
+  const capaPercent = jobProgressPercentText(actionJob("capa", activeJobs), nowMs);
+  const flossPercent = jobProgressPercentText(actionJob("floss", activeJobs), nowMs);
+  const scanBusy =
+    actionIsRunning("yara", submitting, activeJobs) ||
+    actionIsRunning("capa", submitting, activeJobs) ||
+    actionIsRunning("floss", submitting, activeJobs);
 
   return (
     <div className="space-y-3">
@@ -637,7 +741,14 @@ function ExtractedFileDetail({
             title={!yaraReady ? UNAVAILABLE_DETAIL : undefined}
             onClick={() => void onQueue("yara.scan_artifact", runParams, "yara")}
           >
-            {actionButtonLabel("Scan signatures", "yara", submitting, activeJobKind, actionsLocked)}
+            {actionButtonLabel(
+              "Scan signatures",
+              "yara",
+              submitting,
+              activeJobs,
+              actionsLocked,
+              actionIsRunning("yara", submitting, activeJobs) ? yaraPercent : null,
+            )}
           </Button>
           {isPe ? (
             <>
@@ -652,8 +763,9 @@ function ExtractedFileDetail({
                   "Analyze capabilities",
                   "capa",
                   submitting,
-                  activeJobKind,
+                  activeJobs,
                   actionsLocked,
+                  actionIsRunning("capa", submitting, activeJobs) ? capaPercent : null,
                 )}
               </Button>
               <Button
@@ -663,7 +775,14 @@ function ExtractedFileDetail({
                 title={!flossReady ? UNAVAILABLE_DETAIL : undefined}
                 onClick={() => void onQueue("floss.scan_artifact", runParams, "floss")}
               >
-                {actionButtonLabel("Extract strings", "floss", submitting, activeJobKind, actionsLocked)}
+                {actionButtonLabel(
+                  "Extract strings",
+                  "floss",
+                  submitting,
+                  activeJobs,
+                  actionsLocked,
+                  actionIsRunning("floss", submitting, activeJobs) ? flossPercent : null,
+                )}
               </Button>
             </>
           ) : null}
@@ -681,6 +800,12 @@ function ExtractedFileDetail({
         )}
       </div>
 
+      {scanBusy ? (
+        <CenteredLoading
+          label={fileScanBusyLabel(submitting, activeJobs, yaraPercent ?? capaPercent ?? flossPercent)}
+        />
+      ) : (
+        <>
       {yaraResults.length > 0 ? (
         <ResultBlock title={CAPABILITY.signatureDetection}>
           {yaraResults.map((b) => (
@@ -747,6 +872,8 @@ function ExtractedFileDetail({
           ))}
         </ResultBlock>
       ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -777,11 +904,13 @@ function AntivirusBanner() {
 
 function AntivirusConfirmDialog({
   open,
+  action,
   busy,
   onCancel,
   onContinue,
 }: {
   open: boolean;
+  action: DiskWriteAction | null;
   busy: boolean;
   onCancel: () => void;
   onContinue: () => void;
@@ -807,6 +936,13 @@ function AntivirusConfirmDialog({
                 Carved Artifacts and Extracted Files both write recovered content to the
                 Dumplyzer data folder. Real-time antivirus may quarantine those files and
                 interrupt the analysis.
+                {action === "pe" ? (
+                  <>
+                    {" "}
+                    PE reconstruction also walks the whole dump, so on large memory images it
+                    can take a long time.
+                  </>
+                ) : null}
               </p>
             </div>
           </div>

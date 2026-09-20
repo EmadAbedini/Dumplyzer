@@ -284,7 +284,7 @@ export function SearchView({
                 ? SEARCH_SCOPE
                 : `Search ${field.label.toLowerCase()} in stored analysis results.`
             }
-            hint={`${SEARCH_SOURCE_HINT} Press Enter or Search.`}
+            hint={SEARCH_SOURCE_HINT}
           />
         ) : items.length === 0 && !busy ? (
           <SearchEmptyPanel

@@ -44,7 +44,7 @@ import {
   jobErrorPayload,
   notMemoryImageToast,
 } from "./lib/analysisOptions";
-import { jobProgressPercentText } from "./lib/jobDisplay";
+import { averageJobProgressPercentText } from "./lib/jobDisplay";
 import {
   applyPreferences,
   persistPreferences,
@@ -76,7 +76,7 @@ export default function App() {
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
   const [jobTick, setJobTick] = useState(0);
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
-  const [runningJob, setRunningJob] = useState<Job | null>(null);
+  const [activeJobs, setActiveJobs] = useState<Job[]>([]);
   const [importJob, setImportJob] = useState<Job | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [importElapsedOriginMs, setImportElapsedOriginMs] = useState<number | null>(
@@ -128,7 +128,15 @@ export default function App() {
 
   const trackJob = useCallback((job: Job) => {
     setActiveJobIds((ids) => (ids.includes(job.id) ? ids : [...ids, job.id]));
-    setRunningJob(job);
+    setActiveJobs((jobs) => {
+      const index = jobs.findIndex((item) => item.id === job.id);
+      if (index >= 0) {
+        const next = jobs.slice();
+        next[index] = job;
+        return next;
+      }
+      return [...jobs, job];
+    });
     setJobTick((t) => t + 1);
   }, []);
 
@@ -265,83 +273,90 @@ export default function App() {
   );
 
   // Poll active jobs; refresh coverage while they run, and full views when they finish
+  const jobPollBusyRef = useRef(false);
   useEffect(() => {
     if (activeJobIds.length === 0 && !importJobId) return;
     const fast = !!importJobId;
     const timer = window.setInterval(() => {
+      if (jobPollBusyRef.current) return;
+      jobPollBusyRef.current = true;
       void (async () => {
-        const still: string[] = [];
-        let finished = false;
-        let latest: Job | null = null;
-        const tickGen = importGenerationRef.current;
-        const watchedImportId = importJobId;
-        const ids = watchedImportId
-          ? Array.from(new Set([...activeJobIds, watchedImportId]))
-          : activeJobIds;
-        for (const id of ids) {
-          try {
-            const j = await engineCall<Job>("jobs.get", { job_id: id });
-            if (watchedImportId && j.id === watchedImportId) {
-              if (!importStillCurrent(tickGen, watchedImportId)) {
-                continue;
-              }
-              if (isActiveJobStatus(j.status)) {
+        try {
+          const still: string[] = [];
+          let finished = false;
+          const found: Job[] = [];
+          const tickGen = importGenerationRef.current;
+          const watchedImportId = importJobId;
+          const ids = watchedImportId
+            ? Array.from(new Set([...activeJobIds, watchedImportId]))
+            : activeJobIds;
+          for (const id of ids) {
+            try {
+              const j = await engineCall<Job>("jobs.get", { job_id: id });
+              if (watchedImportId && j.id === watchedImportId) {
                 if (!importStillCurrent(tickGen, watchedImportId)) {
                   continue;
                 }
-                setImportJob((prev) =>
-                  importStillCurrent(tickGen, watchedImportId) ? j : prev,
-                );
-                still.push(id);
-                latest = j;
+                if (isActiveJobStatus(j.status)) {
+                  if (!importStillCurrent(tickGen, watchedImportId)) {
+                    continue;
+                  }
+                  setImportJob((prev) =>
+                    importStillCurrent(tickGen, watchedImportId) ? j : prev,
+                  );
+                  still.push(id);
+                  continue;
+                }
+                if (j.status === "completed") {
+                  await applyCompletedImport(j, tickGen);
+                } else if (j.status === "failed") {
+                  applyFailedImport(j, tickGen);
+                } else {
+                  applyCancelledImport(tickGen, j.id);
+                }
                 continue;
               }
-              if (j.status === "completed") {
-                await applyCompletedImport(j, tickGen);
-              } else if (j.status === "failed") {
-                applyFailedImport(j, tickGen);
+              if (isActiveJobStatus(j.status)) {
+                still.push(id);
+                found.push(j);
               } else {
-                applyCancelledImport(tickGen, j.id);
+                finished = true;
+                if (j.status === "failed" && j.error) {
+                  presentError(jobErrorPayload(j, "Job failed"));
+                }
               }
-              continue;
+            } catch {
+              /* ignore transient */
             }
-            if (isActiveJobStatus(j.status)) {
-              still.push(id);
-              latest = j;
-            } else {
-              finished = true;
-              if (j.status === "failed" && j.error) {
-                presentError(jobErrorPayload(j, "Job failed"));
+          }
+          setActiveJobIds((prev) => {
+            const next = still.filter((id) => id !== watchedImportId);
+            if (prev.length === next.length && prev.every((id, i) => id === next[i])) {
+              return prev;
+            }
+            return next;
+          });
+          setActiveJobs(found);
+          if (evidence) {
+            try {
+              if (finished) await refreshEvidenceViews(evidence);
+              else if (still.length > 0) {
+                await refreshOverview(evidence);
+                if (nav === "processes" || nav === "process_dive") {
+                  const procs = await engineCall<{ items: ProcessRow[]; total: number }>(
+                    "processes.list",
+                    { evidence_id: evidence.id, limit: 10000, offset: 0 },
+                  );
+                  setProcesses(procs.items);
+                  setProcessTotal(procs.total);
+                }
               }
+            } catch {
+              /* ignore */
             }
-          } catch {
-            /* ignore transient */
           }
-        }
-        setActiveJobIds((prev) => {
-          const next = still.filter((id) => id !== watchedImportId);
-          if (prev.length === next.length && prev.every((id, i) => id === next[i])) {
-            return prev;
-          }
-          return next;
-        });
-        setRunningJob(latest);
-        setJobTick((t) => t + 1);
-        if (evidence) {
-          try {
-            if (finished) await refreshEvidenceViews(evidence);
-            else if (still.length > 0) {
-              await refreshOverview(evidence);
-              const procs = await engineCall<{ items: ProcessRow[]; total: number }>(
-                "processes.list",
-                { evidence_id: evidence.id, limit: 10000, offset: 0 },
-              );
-              setProcesses(procs.items);
-              setProcessTotal(procs.total);
-            }
-          } catch {
-            /* ignore */
-          }
+        } finally {
+          jobPollBusyRef.current = false;
         }
       })();
     }, fast ? 400 : 800);
@@ -354,6 +369,7 @@ export default function App() {
     evidence,
     importJobId,
     importStillCurrent,
+    nav,
     presentError,
     refreshEvidenceViews,
     refreshOverview,
@@ -366,7 +382,7 @@ export default function App() {
     importStartRef.current = true;
     const generation = ++importGenerationRef.current;
     setActiveJobIds([]);
-    setRunningJob(null);
+    setActiveJobs([]);
     setJobTick((t) => t + 1);
     setNav("jobs");
     try {
@@ -381,7 +397,6 @@ export default function App() {
       importingRef.current = true;
       setImportElapsedOriginMs(Date.now());
       setImportJob(job);
-      setRunningJob(job);
       setNowMs(Date.now());
     } catch (err) {
       if (importStillCurrent(generation)) {
@@ -569,8 +584,11 @@ export default function App() {
   const jobsRunning =
     activeJobIds.length > 0 ||
     Boolean(importJob && isActiveJobStatus(importJob.status));
-  const jobsPercent = jobProgressPercentText(
-    runningJob && isActiveJobStatus(runningJob.status) ? runningJob : importJob,
+  const jobsPercent = averageJobProgressPercentText(
+    [
+      ...activeJobs,
+      ...(importJob && isActiveJobStatus(importJob.status) ? [importJob] : []),
+    ],
     nowMs,
   );
   const coverage = coverageFromOverview(overview);
@@ -668,10 +686,8 @@ export default function App() {
           }}
           onJobSubmitted={onPluginJobSubmitted}
           jobsRunning={jobsRunning}
-          activeJobKind={runningJob?.kind ?? null}
-          jobPercent={
-            runningJob?.kind === "pcap_reconstruction" ? jobsPercent : null
-          }
+          activeJobs={activeJobs}
+          nowMs={nowMs}
         />
       );
       break;
@@ -703,6 +719,7 @@ export default function App() {
           onError={setErr}
           refreshToken={coverageTick}
           coverage={coverageItem(coverage, "memory_vad")}
+          activeJobs={activeJobs}
         />
       );
       break;
@@ -769,10 +786,8 @@ export default function App() {
           refreshToken={coverageTick}
           coverage={coverageItem(coverage, "artifacts")}
           jobsRunning={jobsRunning}
-          activeJobKind={runningJob?.kind ?? null}
-          jobPercent={
-            runningJob?.kind === "bulk_extractor_scan" ? jobsPercent : null
-          }
+          activeJobs={activeJobs}
+          nowMs={nowMs}
         />
       );
       break;
@@ -784,12 +799,8 @@ export default function App() {
           onJobSubmitted={onPluginJobSubmitted}
           refreshToken={`${coverageTick}:${jobTick}`}
           jobsRunning={jobsRunning}
-          activeJobKind={runningJob?.kind ?? null}
-          jobPercent={
-            runningJob && String(runningJob.kind || "").startsWith("yara")
-              ? jobsPercent
-              : null
-          }
+          activeJobs={activeJobs}
+          nowMs={nowMs}
         />
       );
       break;

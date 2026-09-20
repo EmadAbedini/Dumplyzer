@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
+import { activeJobOfKind, isActiveJobStatus } from "../lib/analysisOptions";
+import { jobProgressPercentText } from "../lib/jobDisplay";
 import { formatResultCell } from "../lib/datetime";
 import { matchesFieldQuery } from "../lib/resultFilter";
 import { useTableSort } from "../lib/tableSort";
@@ -14,7 +16,6 @@ import {
   ImportEvidenceState,
   ListLoadingState,
   AnalysisScopeNote,
-  CenteredLoading,
   coverageShowsEmptyPanel,
 } from "./CoverageStatus";
 import {
@@ -102,8 +103,8 @@ export function NetworkView({
   onOpenProcess,
   onJobSubmitted,
   jobsRunning = false,
-  activeJobKind = null,
-  jobPercent = null,
+  activeJobs = [],
+  nowMs = Date.now(),
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
@@ -114,8 +115,8 @@ export function NetworkView({
   onOpenProcess: (processId: string) => void;
   onJobSubmitted?: (job: Job) => void;
   jobsRunning?: boolean;
-  activeJobKind?: string | null;
-  jobPercent?: string | null;
+  activeJobs?: Job[];
+  nowMs?: number;
 }) {
   const [tab, setTab] = useState<TabId>("connections");
   const [connections, setConnections] = useState<NetworkConnection[]>([]);
@@ -194,11 +195,14 @@ export function NetworkView({
   }
 
   const recon = pcap?.reconstruction;
+  const pcapJob = activeJobOfKind(activeJobs, "pcap_reconstruction");
   const reconstructing =
     recon?.status === "running" ||
     recon?.ui_state === "reconstructing" ||
     recon?.status === "queued" ||
-    activeJobKind === "pcap_reconstruction";
+    (pcapJob != null && isActiveJobStatus(pcapJob.status));
+  const pcapQueued = pcapJob?.status === "queued" || recon?.status === "queued";
+  const pcapPercent = jobProgressPercentText(pcapJob, nowMs);
   const actionsLocked = busy || jobsRunning;
 
   return (
@@ -253,8 +257,9 @@ export function NetworkView({
         <PcapPanel
           bundle={pcap}
           reconstructing={reconstructing}
+          queued={pcapQueued}
           busy={actionsLocked}
-          jobPercent={reconstructing ? jobPercent : null}
+          jobPercent={reconstructing && !pcapQueued ? pcapPercent : null}
           onReconstruct={() =>
             void queue(
               "pcap.reconstruct",
@@ -488,11 +493,18 @@ function ArtifactsPanel({
   const analyzedZeroDetail = showLimitedNote
     ? "Network artifact extraction ran against the data that was stored, and found no recoverable indicators."
     : "Network artifact extraction completed and found no recoverable indicators.";
+  const caption = coverageResultCaption(coverage, items.length, filtered.length);
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-        <div className="text-xs text-muted">
-          {coverageResultCaption(coverage, items.length, filtered.length)}
+        <div className="min-w-0 shrink-0">
+          <div className="flex items-baseline gap-2">
+            <div className="text-sm font-semibold">Network Artifacts</div>
+            {caption ? <div className="text-xs text-muted">{caption}</div> : null}
+          </div>
+          <div className="text-xs text-muted">
+            IPs, URLs, and hostnames recovered from stored analysis
+          </div>
         </div>
         <ResultFilterBar
           query={filter}
@@ -537,6 +549,7 @@ function ArtifactsPanel({
         <CoverageEmptyState
           item={coverage}
           title="Network Artifacts"
+          showTitle={false}
           inProgressDetail="Network artifacts are still being extracted."
           analyzedZeroDetail={analyzedZeroDetail}
           notAnalyzedDetail={notAnalyzedDetail}
@@ -588,9 +601,31 @@ function ArtifactsPanel({
   );
 }
 
+function pcapCoverageItem(
+  reconstructing: boolean,
+  queued: boolean,
+  finished: boolean,
+  recon: PcapReconstructionBundle["reconstruction"] | undefined,
+): CapabilityCoverage {
+  if (reconstructing || queued) {
+    return { id: "pcap", state: "not_analyzed", count: null, updating: true };
+  }
+  if (!finished || !recon) {
+    return { id: "pcap", state: "not_analyzed", count: null };
+  }
+  if (recon.status === "failed") {
+    return { id: "pcap", state: "failed", count: null };
+  }
+  if (recon.status === "cancelled" || recon.packet_count <= 0) {
+    return { id: "pcap", state: "analyzed_zero", count: 0 };
+  }
+  return { id: "pcap", state: "analyzed", count: recon.packet_count };
+}
+
 function PcapPanel({
   bundle,
   reconstructing,
+  queued = false,
   busy,
   jobPercent,
   onReconstruct,
@@ -598,6 +633,7 @@ function PcapPanel({
 }: {
   bundle: PcapReconstructionBundle | null;
   reconstructing: boolean;
+  queued?: boolean;
   busy: boolean;
   jobPercent?: string | null;
   onReconstruct: () => void;
@@ -606,7 +642,6 @@ function PcapPanel({
   const recon = bundle?.reconstruction;
   const flows = bundle?.flows ?? [];
   const recoverable = flows.filter((f) => f.packet_count > 0);
-  const status = recon?.display_status || "Not run";
   const outputName = recon?.output_path
     ? recon.output_path.replace(/\\/g, "/").split("/").pop()
     : null;
@@ -620,109 +655,132 @@ function PcapPanel({
     recon.status !== "running" &&
     recon.status !== "queued" &&
     recon.ui_state !== "reconstructing";
+  const coverage = pcapCoverageItem(reconstructing, queued, finished, recon);
+  const showResults = coverageLiveKind(coverage) === "analyzed";
+  const caption = reconstructing || queued
+    ? coverageResultCaption(coverage, recon?.packet_count ?? 0)
+    : finished
+      ? recon.display_status
+      : null;
+  const reconstructingDetail = jobPercent
+    ? `Packet records are still being reconstructed. ${jobPercent}`
+    : queued
+      ? "PCAP reconstruction is queued."
+      : "Packet records are still being reconstructed.";
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-3 space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={reconstructing || busy} onClick={onReconstruct}>
-          {reconstructing ? "Reconstructing…" : recon && finished ? "Reconstruct again" : "Reconstruct PCAP"}
-        </Button>
-        <Badge>{reconstructing ? "Reconstructing…" : finished ? status : "Not run"}</Badge>
+    <>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        <div className="min-w-0 shrink-0">
+          <div className="flex items-baseline gap-2">
+            <div className="text-sm font-semibold">PCAP Reconstruction</div>
+            {caption ? <div className="text-xs text-muted">{caption}</div> : null}
+          </div>
+          <div className="text-xs text-muted">
+            Packet capture rebuilt from recovered traffic
+          </div>
+        </div>
+        <div className="ml-auto">
+          <Button size="sm" disabled={reconstructing || busy} onClick={onReconstruct}>
+            {queued
+              ? "Queued"
+              : reconstructing
+                ? "Reconstructing…"
+                : recon && finished
+                  ? "Reconstruct again"
+                  : "Reconstruct PCAP"}
+          </Button>
+        </div>
       </div>
-      {reconstructing ? (
-        <CenteredLoading
-          label={
-            jobPercent
-              ? `Reconstructing packet records… ${jobPercent}`
-              : "Reconstructing packet records…"
+      {!showResults || !recon ? (
+        <CoverageEmptyState
+          item={coverage}
+          title="PCAP Reconstruction"
+          showTitle={false}
+          inProgressDetail={reconstructingDetail}
+          analyzedZeroDetail={
+            recon?.status === "cancelled"
+              ? "PCAP reconstruction was cancelled."
+              : "No reconstructable traffic was found in this memory image."
           }
+          notAnalyzedDetail="Writes a packets.pcap from recovered traffic. If Carved Data already produced one, that file is used."
+          notAnalyzedHint="No reconstruction has been run for this memory image."
+          failedDetail="PCAP reconstruction failed."
         />
       ) : (
-        <>
-      <p className="text-muted">
-        Writes a <span className="font-mono">packets.pcap</span> from recovered traffic. If
-        Carved Data already produced one, that file is used.
-      </p>
-      {finished ? (
-        <div className="rounded-md border border-border bg-surface-2/60 p-3 space-y-1 font-mono">
-          {outputName ? (
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+          {recon.limitations?.length ? (
+            <AnalysisScopeNote>
+              {recon.limitations.join(" ")}
+            </AnalysisScopeNote>
+          ) : null}
+          <div className="rounded-md border border-border bg-surface-2/60 p-3 space-y-1 font-mono">
+            {outputName ? (
+              <div>
+                Output file: <span className="text-foreground">{outputName}</span>
+              </div>
+            ) : (
+              <div>Output file: none</div>
+            )}
+            {recon.output_path ? (
+              <div className="break-all text-muted">{recon.output_path}</div>
+            ) : null}
+            <div>Packets: {recon.packet_count.toLocaleString()}</div>
+            <div>Truncated: {recon.truncated_count.toLocaleString()}</div>
+            <div>IPv4 packets: {(Number(recon.observed?.ipv4_count) || 0).toLocaleString()}</div>
+            <div>IPv6 packets: {(Number(recon.observed?.ipv6_count) || 0).toLocaleString()}</div>
+            <div>Ethernet frames: {recon.ethernet_count.toLocaleString()}</div>
+            <div>Raw IP records: {recon.raw_ip_count.toLocaleString()}</div>
+            {packetSource ? <div>Source: {packetSource}</div> : null}
+          </div>
+          {recoverable.length > 0 ? (
             <div>
-              Output file: <span className="text-foreground">{outputName}</span>
-            </div>
-          ) : (
-            <div>Output file: none</div>
-          )}
-          {recon.output_path ? (
-            <div className="break-all text-muted">{recon.output_path}</div>
-          ) : null}
-          <div>Packets: {recon.packet_count.toLocaleString()}</div>
-          <div>Truncated: {recon.truncated_count.toLocaleString()}</div>
-          <div>IPv4 packets: {(Number(recon.observed?.ipv4_count) || 0).toLocaleString()}</div>
-          <div>IPv6 packets: {(Number(recon.observed?.ipv6_count) || 0).toLocaleString()}</div>
-          <div>Ethernet frames: {recon.ethernet_count.toLocaleString()}</div>
-          <div>Raw IP records: {recon.raw_ip_count.toLocaleString()}</div>
-          {packetSource ? <div>Source: {packetSource}</div> : null}
-        </div>
-      ) : (
-        <div className="text-muted">No reconstruction has been run for this memory image.</div>
-      )}
-      {finished && recon.limitations?.length ? (
-        <ul className="list-disc space-y-1 pl-4 text-muted">
-          {recon.limitations.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      ) : null}
-      {finished && recoverable.length > 0 ? (
-        <div>
-          <div className="mb-1 font-semibold">Flows with recovered packets</div>
-          <table className="app-result-table w-full text-center">
-            <thead className="bg-surface-2 text-muted">
-              <tr>
-                {["PID", "Proto", "Local", "Remote", "Status", "Packets"].map((c) => (
-                  <th key={c} className="px-2 py-1 font-medium">
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {recoverable.map((flow) => (
-                <tr key={flow.id} className="border-t border-border/40">
-                  <td className="px-2 py-1 font-mono">
-                    <PidCell
-                      value={flow.pid ?? "—"}
-                      processId={flow.process_id}
-                      onOpenProcess={onOpenProcess}
-                    />
-                  </td>
-                  <td className="px-2 py-1 font-mono">{flow.protocol ?? "—"}</td>
-                  <td className="px-2 py-1 font-mono">
-                    {`${flow.local_address ?? ""}:${flow.local_port ?? ""}`}
-                  </td>
-                  <td className="px-2 py-1 font-mono">
-                    {`${flow.remote_address ?? ""}:${flow.remote_port ?? ""}`}
-                  </td>
-                  <td className="px-2 py-1">
-                    <Badge>{flow.display_status}</Badge>
-                  </td>
-                  <td className="px-2 py-1 font-mono">{flow.packet_count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {recoverable.some((f) => f.flow_pcap_path) ? (
-            <div className="mt-2 break-all text-muted">
-              Per-flow PCAPs were written next to the reconstructed capture when packets matched a
-              connection.
+              <div className="mb-1 font-semibold">Flows with recovered packets</div>
+              <table className="app-result-table w-full text-center">
+                <thead className="sticky top-0 bg-surface-2 text-muted">
+                  <tr>
+                    {["PID", "Proto", "Local", "Remote", "Status", "Packets"].map((c) => (
+                      <th key={c} className="px-2 py-1 font-medium">
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {recoverable.map((flow) => (
+                    <tr key={flow.id} className="border-t border-border/40">
+                      <td className="px-2 py-1 font-mono">
+                        <PidCell
+                          value={flow.pid ?? "—"}
+                          processId={flow.process_id}
+                          onOpenProcess={onOpenProcess}
+                        />
+                      </td>
+                      <td className="px-2 py-1 font-mono">{flow.protocol ?? "—"}</td>
+                      <td className="px-2 py-1 font-mono">
+                        {`${flow.local_address ?? ""}:${flow.local_port ?? ""}`}
+                      </td>
+                      <td className="px-2 py-1 font-mono">
+                        {`${flow.remote_address ?? ""}:${flow.remote_port ?? ""}`}
+                      </td>
+                      <td className="px-2 py-1">
+                        <Badge>{flow.display_status}</Badge>
+                      </td>
+                      <td className="px-2 py-1 font-mono">{flow.packet_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {recoverable.some((f) => f.flow_pcap_path) ? (
+                <div className="mt-2 break-all text-muted">
+                  Per-flow PCAPs were written next to the reconstructed capture when packets
+                  matched a connection.
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
-      ) : finished && recon.packet_count <= 0 ? (
-        <div className="text-muted">No reconstructable traffic was found in this memory image.</div>
-      ) : null}
-        </>
       )}
-    </div>
+    </>
   );
 }

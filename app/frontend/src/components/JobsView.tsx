@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
 import {
   isActiveJobStatus,
@@ -38,29 +38,51 @@ function statusBadgeClass(label: string): string {
 
 export function JobsView({ evidenceId, evidenceFilename, refreshToken, onError }: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [ready, setReady] = useState(false);
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(() => new Set());
   const [nowMs, setNowMs] = useState(() => Date.now());
   const { toast, showToast } = useStatusToast();
+  const loadInFlight = useRef(false);
+  const loadAgain = useRef(false);
 
   const load = useCallback(async () => {
+    if (loadInFlight.current) {
+      loadAgain.current = true;
+      return;
+    }
+    loadInFlight.current = true;
     try {
-      const res = await engineCall<{ items: Job[] }>("jobs.list", {
-        evidence_id: evidenceId ?? undefined,
-        limit: 100,
-      });
-      setJobs(res.items);
-      setCancellingIds((prev) => {
-        if (prev.size === 0) return prev;
-        const byId = new Map(res.items.map((job) => [job.id, job]));
-        const next = new Set<string>();
-        for (const id of prev) {
-          const job = byId.get(id);
-          if (job && isActiveJobStatus(job.status)) next.add(id);
+      do {
+        loadAgain.current = false;
+        try {
+          const res = await engineCall<{ items: Job[] }>("jobs.list", {
+            evidence_id: evidenceId ?? undefined,
+            limit: 100,
+          });
+          startTransition(() => {
+            setJobs(res.items);
+            setReady(true);
+            setCancellingIds((prev) => {
+              if (prev.size === 0) return prev;
+              const byId = new Map(res.items.map((job) => [job.id, job]));
+              const next = new Set<string>();
+              for (const id of prev) {
+                const job = byId.get(id);
+                if (job && isActiveJobStatus(job.status)) next.add(id);
+              }
+              return next;
+            });
+          });
+        } catch (err) {
+          setReady(true);
+          onError(err instanceof EngineClientError ? err.message : String(err));
         }
-        return next;
-      });
-    } catch (err) {
-      onError(err instanceof EngineClientError ? err.message : String(err));
+      } while (loadAgain.current);
+    } finally {
+      loadInFlight.current = false;
+      if (loadAgain.current) {
+        void load();
+      }
     }
   }, [evidenceId, onError]);
 
@@ -184,7 +206,7 @@ export function JobsView({ evidenceId, evidenceFilename, refreshToken, onError }
             {jobs.length === 0 && (
               <tr className="app-row-empty">
                 <td colSpan={5} className="px-3 py-6 text-muted">
-                  No jobs yet.
+                  {ready ? "No jobs yet." : "Loading jobs…"}
                 </td>
               </tr>
             )}

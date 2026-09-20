@@ -899,7 +899,8 @@ export type ExportUiState =
   | "cancelled";
 
 export function exportStatusLabel(state: ExportUiState): string {
-  if (state === "queued" || state === "running") return "generating";
+  if (state === "queued") return "queued";
+  if (state === "running") return "generating";
   return state;
 }
 

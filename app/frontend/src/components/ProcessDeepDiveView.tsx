@@ -307,7 +307,16 @@ export function ProcessDeepDiveView({
           {showAnalyze ? (
             <span className="inline-flex" title={ANALYZE_HINT}>
               <Button size="sm" onClick={() => void runRecommended()} disabled={analysing}>
-                {analysing ? "Analysing…" : "Analyze Process"}
+                {job?.status === "queued" ||
+                processKinds.some(
+                  (r) =>
+                    r.status === "queued" &&
+                    (r.kind === "process_recommended" || r.kind === "vad_scan"),
+                )
+                  ? "Queued"
+                  : analysing
+                    ? "Analysing…"
+                    : "Analyze Process"}
               </Button>
             </span>
           ) : null}

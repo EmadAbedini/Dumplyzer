@@ -154,6 +154,15 @@ export function isActiveJobStatus(status: string): boolean {
   return status === "queued" || status === "running";
 }
 
+export function activeJobOfKind(
+  jobs: readonly Job[] | null | undefined,
+  ...kinds: string[]
+): Job | null {
+  if (!jobs?.length || kinds.length === 0) return null;
+  const wanted = new Set(kinds);
+  return jobs.find((job) => wanted.has(job.kind) && isActiveJobStatus(job.status)) ?? null;
+}
+
 export function isTerminalJobStatus(status: string): boolean {
   return (
     status === "completed" ||
