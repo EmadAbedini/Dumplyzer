@@ -77,7 +77,7 @@ def test_nsis_installer_uses_dumplyzer_icon() -> None:
     conf = json.loads(conf_path.read_text(encoding="utf-8"))
     nsis = conf["bundle"]["windows"]["nsis"]
     assert conf["bundle"]["targets"] == ["nsis"]
-    assert conf["bundle"]["windows"]["webviewInstallMode"]["type"] == "offlineInstaller"
+    assert conf["bundle"]["windows"]["webviewInstallMode"]["type"] == "embedBootstrapper"
     assert conf["bundle"]["windows"]["webviewInstallMode"]["silent"] is True
     assert nsis["installMode"] == "perMachine"
     assert nsis["installerIcon"] == "icons/icon.ico"

@@ -1,7 +1,7 @@
 # Build the single Windows NSIS installer with a pinned engine runtime.
 # Downloads official CPython embeddable, bulk_extractor64.exe, CAPA, and FLOSS (SHA-256 pinned).
 # yara-python 4.5.4 is installed from the pinned lockfile into the embeddable runtime.
-# Tauri embeds the WebView2 Evergreen standalone (offline) installer. No MSI is produced.
+# Tauri embeds the WebView2 Evergreen bootstrapper (~1-2 MB). If WebView2 is missing, that bootstrapper downloads the runtime. No MSI is produced.
 
 [CmdletBinding()]
 param(

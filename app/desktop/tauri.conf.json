@@ -74,7 +74,7 @@
     "windows": {
       "digestAlgorithm": "sha256",
       "webviewInstallMode": {
-        "type": "offlineInstaller",
+        "type": "embedBootstrapper",
         "silent": true
       },
       "nsis": {

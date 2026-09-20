@@ -196,16 +196,19 @@ if ($nsiText -notmatch '!define INSTALLMODE "perMachine"') {
 if ($nsiText -notmatch 'StrCpy \$INSTDIR "\$PROGRAMFILES64\\\$\{PRODUCTNAME\}"') {
     throw "generated NSIS script does not default INSTDIR to Program Files"
 }
-if ($nsiText -notmatch '!define INSTALLWEBVIEW2MODE "offlineInstaller"') {
-    throw "generated NSIS script does not embed the offline WebView2 installer"
+if ($nsiText -notmatch '!define INSTALLWEBVIEW2MODE "embedBootstrapper"') {
+    throw "generated NSIS script does not embed the WebView2 Evergreen bootstrapper"
 }
-if ($nsiText -notmatch 'MicrosoftEdgeWebView2RuntimeInstaller') {
-    throw "generated NSIS script does not pack MicrosoftEdgeWebView2RuntimeInstaller"
+if ($nsiText -notmatch 'MicrosoftEdgeWebview2Setup') {
+    throw "generated NSIS script does not pack MicrosoftEdgeWebview2Setup.exe"
 }
-if ($nsiText -match '!define INSTALLWEBVIEW2MODE "downloadBootstrapper"' -or $nsiText -match '!define INSTALLWEBVIEW2MODE "embedBootstrapper"') {
-    throw "generated NSIS script still uses a WebView2 mode that requires Internet"
+if ($nsiText -match '!define INSTALLWEBVIEW2MODE "offlineInstaller"') {
+    throw "generated NSIS script still packs the 200+ MB offline WebView2 runtime"
 }
-Write-Host "nsis_script_embeds_offline_webview2"
+if ($nsiText -match '!define INSTALLWEBVIEW2MODE "downloadBootstrapper"') {
+    throw "generated NSIS script downloads the WebView2 bootstrapper instead of embedding it"
+}
+Write-Host "nsis_script_embeds_webview2_bootstrapper"
 if ($nsiText -notmatch "bulk_extractor64\.exe") {
     throw "generated NSIS script does not install bulk_extractor64.exe"
 }
@@ -262,22 +265,27 @@ if ($appIconHash -ne $setupIconHash) {
 Write-Host "installer_icon_matches_app sha256=$setupIconHash"
 
 $wvOffline = @(Get-ChildItem -Path $releaseRoot -Recurse -Filter "MicrosoftEdgeWebView2RuntimeInstaller*.exe" -ErrorAction SilentlyContinue)
-if ($wvOffline.Count -eq 0) {
-    if ($nsiText -match '!define WEBVIEW2INSTALLERPATH "([^"]+)"') {
-        $staged = $Matches[1]
-        if (Test-Path -LiteralPath $staged) {
-            $wvOffline = @(Get-Item -LiteralPath $staged)
-        }
+if ($wvOffline.Count -gt 0) {
+    throw "offline WebView2 runtime installer must not be staged: $($wvOffline[0].FullName)"
+}
+$wvBoot = @()
+if ($nsiText -match '!define WEBVIEW2BOOTSTRAPPERPATH "([^"]+)"') {
+    $staged = $Matches[1]
+    if (Test-Path -LiteralPath $staged) {
+        $wvBoot = @(Get-Item -LiteralPath $staged)
     }
 }
-if ($wvOffline.Count -eq 0) {
-    throw "WebView2 Evergreen standalone installer was not staged for NSIS packing"
+if ($wvBoot.Count -eq 0) {
+    $wvBoot = @(Get-ChildItem -Path "$env:LOCALAPPDATA\tauri" -Recurse -Filter "MicrosoftEdgeWebview2Setup.exe" -ErrorAction SilentlyContinue)
 }
-$wvSize = $wvOffline[0].Length
-if ($wvSize -lt 40MB) {
-    throw "WebView2 offline installer is too small to be the standalone payload: $wvSize bytes ($($wvOffline[0].FullName))"
+if ($wvBoot.Count -eq 0) {
+    throw "WebView2 Evergreen bootstrapper was not staged for NSIS packing"
 }
-Write-Host ("webview2_offline_installer {0} bytes={1}" -f $wvOffline[0].FullName, $wvSize)
+$wvSize = $wvBoot[0].Length
+if ($wvSize -lt 200KB -or $wvSize -gt 8MB) {
+    throw "WebView2 bootstrapper size is unexpected: $wvSize bytes ($($wvBoot[0].FullName))"
+}
+Write-Host ("webview2_bootstrapper {0} bytes={1}" -f $wvBoot[0].FullName, $wvSize)
 
 $removed = @(Get-ChildItem -Path $Runtime -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^(pe_sieve|mal_unpack|pe-sieve)' })
