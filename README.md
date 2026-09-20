@@ -13,12 +13,12 @@ This product was previously named MemScope. The Python engine package remains
 
 | Item | Value |
 |------|--------|
-| OS | Windows 10 21H2+ / Windows 11 |
+| OS | Windows 10 21H2+ (build 19044) / Windows 11 x64. Install-tested on Windows 11 Pro 10.0.26100. Not install-tested on Windows 10. Runtime floor from WebView2 Evergreen is Windows 10 1809 (build 17763). |
 | Arch | x64 |
 | App version | **0.1.0** |
 | Engine runtime | CPython **3.12.10** (bundled in the installer) |
 | Volatility 3 | **2.28.0** |
-| WebView2 | **Required.** Evergreen Runtime. The installer embeds the bootstrapper, which can download the runtime if it is missing. A system with neither WebView2 nor network connectivity is not a supported launch environment |
+| WebView2 | **Required** at runtime. The single NSIS installer embeds Microsoft’s Evergreen standalone (offline) installer and runs it locally if WebView2 is missing. Installation does not download WebView2 or any other dependency. |
 
 Linux is not a supported release target yet.
 
@@ -26,9 +26,8 @@ Linux is not a supported release target yet.
 
 You do **not** need Python, Node, Rust, or a source checkout.
 
-1. Run the NSIS installer (`Dumplyzer_0.1.0_x64-setup.exe`). It installs per-user and does not require administrator rights.
-2. An MSI (`Dumplyzer_0.1.0_x64_en-US.msi`) is also produced for managed deployment. MSI installs to Program Files and typically needs elevation.
-3. Launch **Dumplyzer** from the Start menu.
+1. Run the NSIS installer (`Dumplyzer_0.1.0_x64-setup.exe`). It defaults to `%ProgramFiles%\Dumplyzer` on the Windows system drive, requires administrator rights, and includes an offline WebView2 runtime installer. No other installer file is required.
+2. Launch **Dumplyzer** from the Start menu.
 
 First launch creates the user data directory and starts the bundled engine. PE Extraction is part of the Volatility 3 engine. bulk_extractor, CAPA, FLOSS, and Signature Detection (bundled yara-python **4.5.4** plus curated rules) are included. You do not install Python or YARA separately.
 
@@ -40,8 +39,7 @@ Install (binaries + engine runtime) and user data are separate. Forensic data is
 
 | Kind | Location |
 |------|----------|
-| Per-user install (NSIS) | `%LOCALAPPDATA%\Programs\Dumplyzer\` |
-| Per-machine install (MSI) | `%ProgramFiles%\Dumplyzer\` |
+| Install (NSIS default / MSI) | `%ProgramFiles%\Dumplyzer\` (Windows system drive) |
 | User data | `%LOCALAPPDATA%\Dumplyzer\` |
 | Database | `%LOCALAPPDATA%\Dumplyzer\memscope.db` |
 | Logs | `%LOCALAPPDATA%\Dumplyzer\logs\` |

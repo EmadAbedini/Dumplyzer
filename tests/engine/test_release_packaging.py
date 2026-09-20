@@ -72,6 +72,21 @@ def test_windows_icon_assets_exist() -> None:
     assert seen >= {16, 20, 24, 32, 40, 48, 64, 128, 256}
 
 
+def test_nsis_installer_uses_dumplyzer_icon() -> None:
+    conf_path = Path(__file__).resolve().parents[2] / "app" / "desktop" / "tauri.conf.json"
+    conf = json.loads(conf_path.read_text(encoding="utf-8"))
+    nsis = conf["bundle"]["windows"]["nsis"]
+    assert conf["bundle"]["targets"] == ["nsis"]
+    assert conf["bundle"]["windows"]["webviewInstallMode"]["type"] == "offlineInstaller"
+    assert conf["bundle"]["windows"]["webviewInstallMode"]["silent"] is True
+    assert nsis["installMode"] == "perMachine"
+    assert nsis["installerIcon"] == "icons/icon.ico"
+    assert nsis["uninstallerIcon"] == "icons/icon.ico"
+    ico = Path(__file__).resolve().parents[2] / "app" / "desktop" / nsis["installerIcon"]
+    assert ico.is_file()
+    assert ico.read_bytes()[:4] == b"\x00\x00\x01\x00"
+
+
 def test_app_version_is_release_coherent() -> None:
     assert APP_NAME == "Dumplyzer"
     assert APP_VERSION == "0.1.0"

@@ -1,11 +1,11 @@
-# Build Windows NSIS + MSI installers with a pinned engine runtime.
+# Build the single Windows NSIS installer with a pinned engine runtime.
 # Downloads official CPython embeddable, bulk_extractor64.exe, CAPA, and FLOSS (SHA-256 pinned).
 # yara-python 4.5.4 is installed from the pinned lockfile into the embeddable runtime.
+# Tauri embeds the WebView2 Evergreen standalone (offline) installer. No MSI is produced.
 
 [CmdletBinding()]
 param(
-    [switch]$SkipRuntime,
-    [switch]$SkipWix
+    [switch]$SkipRuntime
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,14 +25,11 @@ if (-not $SkipRuntime) {
 & (Join-Path $PSScriptRoot "prepare-bulk-extractor.ps1")
 & (Join-Path $PSScriptRoot "prepare-capa.ps1")
 & (Join-Path $PSScriptRoot "prepare-floss.ps1")
-if (-not $SkipWix) {
-    & (Join-Path $PSScriptRoot "prepare-wix-tools.ps1")
-}
 
 $Frontend = Join-Path $Root "app\frontend"
 $Desktop = Join-Path $Root "app\desktop"
 # Always build and verify the same tree. Cursor/CI may export CARGO_TARGET_DIR
-# to a sandbox cache; override it so NSIS/MSI land under app\desktop\target.
+# to a sandbox cache; override it so the NSIS installer lands under app\desktop\target.
 $env:CARGO_TARGET_DIR = Join-Path $Desktop "target"
 Write-Host "CARGO_TARGET_DIR=$($env:CARGO_TARGET_DIR)"
 $staleBundle = Join-Path $env:CARGO_TARGET_DIR "release\bundle"
@@ -48,8 +45,10 @@ if (Test-Path $staleResources) {
 
 Push-Location $Frontend
 try {
-    & $NpmCmd ci
-    if ($LASTEXITCODE -ne 0) { throw "frontend npm ci failed" }
+    if (-not (Test-Path "node_modules")) {
+        & $NpmCmd ci
+        if ($LASTEXITCODE -ne 0) { throw "frontend npm ci failed" }
+    }
 } finally {
     Pop-Location
 }
@@ -60,12 +59,8 @@ try {
         & $NpmCmd ci
         if ($LASTEXITCODE -ne 0) { throw "desktop npm ci failed" }
     }
-    # Build NSIS then MSI separately so a WebView2 download glitch cannot
-    # abort makensis while it is packing the 90+ MB bulk_extractor payload.
     & $NpxCmd tauri build --bundles nsis
     if ($LASTEXITCODE -ne 0) { throw "tauri NSIS build failed" }
-    & $NpxCmd tauri build --bundles msi
-    if ($LASTEXITCODE -ne 0) { throw "tauri MSI build failed" }
 } finally {
     Pop-Location
 }

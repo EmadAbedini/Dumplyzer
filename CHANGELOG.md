@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Keep the splash window until the workbench has painted, so a blank white main window is not shown between splash and UI.
+- Default the NSIS installer to `%ProgramFiles%\Dumplyzer` on the Windows system drive (`perMachine`; requires elevation). User data stays in `%LOCALAPPDATA%\Dumplyzer`.
+- Ship one NSIS installer only. Embed the WebView2 Evergreen standalone (offline) installer so a machine without WebView2 and without Internet can install Dumplyzer.
 - Remove PE-sieve and mal_unpack providers.
 - Add dedicated **PE Extraction** from Windows memory dumps (Volatility 3 `windows.pedump` reconstruction, loaded modules, mapped/unlinked PE, optional dumpfiles). Extracted files are labeled extracted PE artifacts, not malware.
 - Expand the bundled Signature Detection ruleset to a curated **42** original Dumplyzer YARA rules (memory-forensics oriented; Apache-2.0). Provenance: `engine/memscope_engine/rules/yara/RULES.md`. Settings continues to show the provider's live `bundled_rule_count`.

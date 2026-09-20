@@ -342,7 +342,7 @@ Interface: `Provider` protocol with `availability()`, `run(request) -> ProviderR
 
 ## 16. Packaging (Windows x64)
 
-- Tauri 2 bundler produces **NSIS** (per-user, no admin) and **MSI** (WiX 3.14.1).
+- Tauri 2 bundler produces one **NSIS** installer. Default install dir is `%ProgramFiles%\Dumplyzer` on the Windows system drive (elevation required). WebView2 Evergreen standalone is packed for offline install.
 - Engine: **official CPython 3.12.10 Windows embeddable** + `Lib\site-packages` containing `memscope-engine`, pinned Volatility 3 **2.28.0**, and **yara-python 4.5.4**. Not PyInstaller. Not a first-run venv. Not the developer's global Python.
 - Packaged spawn: absolute `runtime\python.exe -m memscope_engine` (argv, no shell, `CREATE_NO_WINDOW`, env scrubbed).
 - Developer spawn: source-tree `app/desktop/resources/runtime/python.exe` when present (`tauri dev`); otherwise `engine\.venv\Scripts\python.exe`. Packaged spawn is unchanged.
@@ -396,7 +396,7 @@ Tests grow with features; no “test only at the end.”
 | Volatility 3 | **2.28.0** (`volatility3.framework` import + plugin package walk) |
 | Tauri | **2.11.5** — debug `dumplyzer.exe` builds |
 | Node / npm | 22.18.0 / 10.9.3 |
-| WebView2 | Present on this developer host (Evergreen **152.0.4191.66**). Required at runtime. Installer uses `embedBootstrapper` (can download if missing). A machine without WebView2 and without network is **not** a supported launch environment |
+| WebView2 | Required at runtime. NSIS packs the Evergreen standalone installer (`offlineInstaller`) so a machine without WebView2 and without network can still install |
 
 ### Smoke path implemented
 
@@ -558,8 +558,8 @@ providers/
 3. **Python engine runtime:** **3.12.10** (decided)  
 4. **PE Extraction / CAPA / FLOSS:** PE Extraction is a Volatility 3 workflow. Official CAPA v9.4.0 and FLOSS v3.1.1 Windows standalones are bundled (Apache-2.0). **bulk_extractor:** official v2.2.0 Windows EXE is bundled (GPL-3.0-or-later, separate process + corresponding source). YARA remains an optional Python extra.  
 5. **Code signing:** procedure documented in `docs/windows-release.md`. No certificate is in the repository. 0.1.0 artifacts are unsigned.  
-6. **Clean-machine VM sign-off:** NSIS path executed 2026-09-07 (**PASS WITH LIMITATIONS**, `docs/clean-machine-validation.md`). MSI and WebView2-absent-offline remain untested.  
-7. **WebView2:** Evergreen required. Offline machines that do not already have WebView2 are unsupported with the current bootstrapper packaging.  
+6. **Clean-machine VM sign-off:** Offline NSIS path executed 2026-09-20 (**PASS WITH LIMITATIONS**, `docs/clean-machine-validation.md`). Windows 10 and WebView2-absent first install remain untested.  
+7. **WebView2:** Evergreen required. NSIS packs the Evergreen standalone (`offlineInstaller`); no Internet is required at install time.  
 
 Ordinary implementation choices proceed without further permission.
 

@@ -133,14 +133,17 @@ $nsis = @(Get-ChildItem -Path (Join-Path $Bundle "nsis") -Filter "*.exe" -ErrorA
 $msi = @(Get-ChildItem -Path (Join-Path $Bundle "msi") -Filter "*.msi" -ErrorAction SilentlyContinue)
 
 if ($nsis.Count -eq 0) { throw "NSIS installer not found under $Bundle\nsis" }
-if ($msi.Count -eq 0) { throw "MSI installer not found under $Bundle\msi" }
+if ($nsis.Count -ne 1) { throw "expected exactly one NSIS installer, found $($nsis.Count)" }
+if ($nsis[0].Name -ne "Dumplyzer_0.1.0_x64-setup.exe") {
+    throw "end-user installer name must be Dumplyzer_0.1.0_x64-setup.exe, got $($nsis[0].Name)"
+}
+if ($msi.Count -gt 0) {
+    throw "MSI must not be produced; Dumplyzer ships as one NSIS EXE. Found: $($msi[0].FullName)"
+}
 
-foreach ($item in ($nsis + $msi)) {
+foreach ($item in $nsis) {
     if ($item.Name -like "MemScope*") {
         throw "installer still uses old MemScope branding: $($item.Name)"
-    }
-    if ($item.Name -notlike "Dumplyzer*") {
-        throw "installer name is not Dumplyzer-branded: $($item.Name)"
     }
     $sha = (Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $sizeMb = [math]::Round($item.Length / 1MB, 1)
@@ -177,6 +180,32 @@ Write-Host "packaged_floss $($flossPackaged[0].FullName)"
 $nsi = Get-ChildItem -Path $releaseRoot -Recurse -Filter "installer.nsi" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $nsi) { throw "generated NSIS script not found under $releaseRoot" }
 $nsiText = Get-Content -Raw $nsi.FullName
+if ($nsiText -notmatch '(?im)!define INSTALLERICON "[^"]*icon\.ico"') {
+    throw "generated NSIS script does not set INSTALLERICON to Dumplyzer icon.ico (installer would get a generic NSIS icon)"
+}
+if ($nsiText -notmatch '(?im)!define UNINSTALLERICON "[^"]*icon\.ico"') {
+    throw "generated NSIS script does not set UNINSTALLERICON to Dumplyzer icon.ico"
+}
+if ($nsiText -notmatch '(?im)!define MUI_ICON "\$\{INSTALLERICON\}"' -and $nsiText -notmatch '(?im)!define MUI_ICON "[^"]*icon\.ico"') {
+    throw "generated NSIS script does not apply MUI_ICON from Dumplyzer icon.ico"
+}
+Write-Host "nsis_script_uses_dumplyzer_icon $($nsi.FullName)"
+if ($nsiText -notmatch '!define INSTALLMODE "perMachine"') {
+    throw "generated NSIS script is not perMachine (default must be Program Files on the Windows drive)"
+}
+if ($nsiText -notmatch 'StrCpy \$INSTDIR "\$PROGRAMFILES64\\\$\{PRODUCTNAME\}"') {
+    throw "generated NSIS script does not default INSTDIR to Program Files"
+}
+if ($nsiText -notmatch '!define INSTALLWEBVIEW2MODE "offlineInstaller"') {
+    throw "generated NSIS script does not embed the offline WebView2 installer"
+}
+if ($nsiText -notmatch 'MicrosoftEdgeWebView2RuntimeInstaller') {
+    throw "generated NSIS script does not pack MicrosoftEdgeWebView2RuntimeInstaller"
+}
+if ($nsiText -match '!define INSTALLWEBVIEW2MODE "downloadBootstrapper"' -or $nsiText -match '!define INSTALLWEBVIEW2MODE "embedBootstrapper"') {
+    throw "generated NSIS script still uses a WebView2 mode that requires Internet"
+}
+Write-Host "nsis_script_embeds_offline_webview2"
 if ($nsiText -notmatch "bulk_extractor64\.exe") {
     throw "generated NSIS script does not install bulk_extractor64.exe"
 }
@@ -191,19 +220,64 @@ if ($nsiText -notmatch "floss\.exe") {
 }
 Write-Host "nsis_script_includes_bulk_extractor_capa_floss $($nsi.FullName)"
 
-$wxs = Get-ChildItem -Path $releaseRoot -Recurse -Filter "*.wxs" -ErrorAction SilentlyContinue |
-    Where-Object { (Get-Content -Raw $_.FullName) -match "bulk_extractor64\.exe" } |
-    Select-Object -First 1
-if (-not $wxs) {
-    $harvest = Get-ChildItem -Path $releaseRoot -Recurse -Filter "*.wxs" -ErrorAction SilentlyContinue
-    if ($harvest.Count -eq 0) {
-        Write-Host "warning: no WiX source found to grep; MSI file list will be checked after light.exe"
-    } else {
-        throw "generated WiX sources do not mention bulk_extractor64.exe"
+Add-Type -AssemblyName System.Drawing
+function Get-AssociatedIconPngHash([string]$Path) {
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($Path)
+    if (-not $icon) { throw "could not extract associated icon from $Path" }
+    try {
+        $bmp = $icon.ToBitmap()
+        try {
+            $ms = New-Object System.IO.MemoryStream
+            try {
+                $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+                $sha = [System.Security.Cryptography.SHA256]::Create()
+                try {
+                    return [BitConverter]::ToString($sha.ComputeHash($ms.ToArray())).Replace("-", "").ToLowerInvariant()
+                } finally {
+                    $sha.Dispose()
+                }
+            } finally {
+                $ms.Dispose()
+            }
+        } finally {
+            $bmp.Dispose()
+        }
+    } finally {
+        $icon.Dispose()
     }
-} else {
-    Write-Host "wix_source_includes_bulk_extractor $($wxs.FullName)"
 }
+$appExe = Get-ChildItem -Path $releaseRoot -Filter "dumplyzer.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $appExe) {
+    $appExe = Get-ChildItem -Path $releaseRoot -Recurse -Filter "dumplyzer.exe" -ErrorAction SilentlyContinue |
+        Where-Object { $_.DirectoryName -notmatch '\\resources\\' } |
+        Select-Object -First 1
+}
+if (-not $appExe) { throw "release dumplyzer.exe not found under $releaseRoot" }
+$setupExe = $nsis[0]
+$appIconHash = Get-AssociatedIconPngHash $appExe.FullName
+$setupIconHash = Get-AssociatedIconPngHash $setupExe.FullName
+if ($appIconHash -ne $setupIconHash) {
+    throw "NSIS installer Explorer icon does not match dumplyzer.exe ($setupIconHash vs $appIconHash)"
+}
+Write-Host "installer_icon_matches_app sha256=$setupIconHash"
+
+$wvOffline = @(Get-ChildItem -Path $releaseRoot -Recurse -Filter "MicrosoftEdgeWebView2RuntimeInstaller*.exe" -ErrorAction SilentlyContinue)
+if ($wvOffline.Count -eq 0) {
+    if ($nsiText -match '!define WEBVIEW2INSTALLERPATH "([^"]+)"') {
+        $staged = $Matches[1]
+        if (Test-Path -LiteralPath $staged) {
+            $wvOffline = @(Get-Item -LiteralPath $staged)
+        }
+    }
+}
+if ($wvOffline.Count -eq 0) {
+    throw "WebView2 Evergreen standalone installer was not staged for NSIS packing"
+}
+$wvSize = $wvOffline[0].Length
+if ($wvSize -lt 40MB) {
+    throw "WebView2 offline installer is too small to be the standalone payload: $wvSize bytes ($($wvOffline[0].FullName))"
+}
+Write-Host ("webview2_offline_installer {0} bytes={1}" -f $wvOffline[0].FullName, $wvSize)
 
 $removed = @(Get-ChildItem -Path $Runtime -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^(pe_sieve|mal_unpack|pe-sieve)' })

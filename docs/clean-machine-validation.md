@@ -1,6 +1,6 @@
 # Clean-machine validation (Windows x64)
 
-Product branding is **Dumplyzer**. The 2026-09-07 run below recorded a previous **MemScope** installer and is kept as a historical result. Repeat the procedure with `Dumplyzer_0.1.0_x64-setup.exe` / `dumplyzer.exe` and `%LOCALAPPDATA%\Programs\Dumplyzer\` / `%LOCALAPPDATA%\Dumplyzer\`.
+Product branding is **Dumplyzer**. There is one end-user installer: `Dumplyzer_0.1.0_x64-setup.exe`. Default install layout is `%ProgramFiles%\Dumplyzer\` on the Windows system drive, with user data in `%LOCALAPPDATA%\Dumplyzer\`.
 
 Use a Windows 10 21H2+ or Windows 11 **x64** VM or spare host that does **not** have:
 
@@ -13,9 +13,152 @@ Use a Windows 10 21H2+ or Windows 11 **x64** VM or spare host that does **not** 
 
 A memory image is not required. Do not fabricate forensic results.
 
+## Status (2026-09-20, offline NSIS)
+
+**CLEAN-MACHINE OFFLINE PASS WITH LIMITATIONS**
+
+Executed from the packaging host over SSH against the Windows 11 x64 guest at `192.168.12.133`. Only `Dumplyzer_0.1.0_x64-setup.exe` was copied onto the guest for install. Outbound traffic was blocked with a Windows Firewall rule before install (`ping 8.8.8.8` failed). No Python, Node.js, Rust, Git, Volatility, YARA, CAPA, FLOSS, or bulk_extractor was installed by hand. Nothing was downloaded during install.
+
+WebView2 Evergreen **153.0.4234.48** was already present. `setup.exe --force-uninstall` exited **93** and left the runtime installed, so the packed offline WebView2 payload was **not** exercised as a first-time WebView2 install. The generated NSIS script is `INSTALLWEBVIEW2MODE "offlineInstaller"` and packs `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` (213,053,648 bytes). The installer does not use `downloadBootstrapper` / `embedBootstrapper`.
+
+Windows 10 was **not** install-tested. Documented support is Windows 10 21H2+ / Windows 11 x64; the WebView2 Evergreen technical floor is Windows 10 1809 (build 17763). Authenticode remains unsigned.
+
+### Validation target (VM)
+
+| Item | Value |
+|------|--------|
+| Role | Clean-machine offline install target (not the build host) |
+| Access | SSH from host to `192.168.12.133` |
+| OS | Microsoft Windows 11 Pro **10.0.26100** x64 |
+| Computer name | JOHN |
+| Interactive user | `John Doe` |
+| Developer Python / Node / Rust / Git | Absent |
+| Dumplyzer source | Absent |
+| Dumplyzer before test | Previous per-user `%LOCALAPPDATA%\Programs\Dumplyzer` uninstalled first. `%ProgramFiles%\Dumplyzer` was absent. |
+| Internet during install | Unavailable (outbound firewall block `DumplyzerOfflineTestBlock`) |
+| WebView2 before test | Present — Evergreen **153.0.4234.48** (could not be removed; exit 93) |
+| Manual prerequisites installed | None |
+
+### Installer under test
+
+| Item | Value |
+|------|--------|
+| File | `Dumplyzer_0.1.0_x64-setup.exe` (single NSIS per-machine EXE) |
+| Host path | `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.0_x64-setup.exe` |
+| Size | 312.3 MB (327,510,849 bytes) |
+| SHA-256 | `49bd1f759986f92de17a39589aed2dd122d612c379b3313f355de15e31b10f81` |
+| Host hash = VM hash after SCP | Yes |
+| Authenticode | NotSigned (expected for 0.1.0) |
+| WebView2 payload | Packed Evergreen standalone `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` (213,053,648 bytes, SHA-256 `ad9b350625e132481bc0953eee9e032810134df9fedbd7be364c3f4e0e4dbd64`) |
+| Installer / app / uninstaller Explorer icon | Dumplyzer `icon.ico` (associated-icon hash `90c7b1918bab7e02794718a709dd49a0988e0a297b236d26c5939ccf0f44bf74` on setup EXE, `dumplyzer.exe`, and `uninstall.exe`) |
+| Install command | NSIS silent `/S` (SSH cannot click the wizard). Default `%ProgramFiles%\Dumplyzer`. |
+
+### Installed layout
+
+```
+%ProgramFiles%\Dumplyzer\
+  dumplyzer.exe
+  uninstall.exe
+  resources\runtime\     # bundled CPython 3.12.10 + site-packages (Volatility 2.28.0, yara-python 4.5.4)
+  resources\tools\       # bulk_extractor 2.2.0, CAPA 9.4.0, FLOSS 3.1.1
+  resources\rules\       # bundled Signature Detection YARA rules
+```
+
+Start menu shortcut: `%ProgramData%\Microsoft\Windows\Start Menu\Programs\Dumplyzer.lnk` (target `C:\Program Files\Dumplyzer\dumplyzer.exe`).
+Silent install also created `%Public%\Desktop\Dumplyzer.lnk`.
+Uninstall registry: HKLM DisplayName `Dumplyzer`, DisplayVersion `0.1.0`, DisplayIcon `dumplyzer.exe`.
+User data remained under `%LOCALAPPDATA%\Dumplyzer\`. Bundled Python `sys.path` contained no development-host paths.
+
+### Pass / fail log (2026-09-20 offline)
+
+| # | Check | Result | Evidence |
+|---|--------|--------|----------|
+| 1 | Copy only the NSIS installer onto the VM | **PASS** | SCP of `Dumplyzer_0.1.0_x64-setup.exe`. SHA-256 matched host. |
+| 2 | Internet unavailable | **PASS** | Outbound block before install. `ping 8.8.8.8` = False. |
+| 3 | Prerequisites not installed by hand | **PASS** | No Python/Node/Rust/WebView2/tools installed to make the test pass. |
+| 4 | Run the installer | **PASS** | `/S` exit 0. `dumplyzer.exe` and bundled `python.exe` under Program Files. |
+| 5 | WebView2 provided by installer | **PASS WITH LIMITATION** | Offline standalone is packed. Guest already had WebView2 153; uninstall failed (exit 93), so first-time WebView2 install was not observed. |
+| 6 | Bundled engine / Volatility | **PASS** | Packaged smoke `ok=true`. Volatility **2.28.0**. Python **3.12.10** from `C:\Program Files\Dumplyzer\resources\runtime\python.exe`. **191** plugins. |
+| 7 | Bundled optional tools | **PASS** | YARA, PE Extraction, CAPA, FLOSS, bulk_extractor all `available=true`. |
+| 8 | Import a test memory image | **PASS** | `evidence.import` of `C:\Users\Public\memscope-import-test.raw` completed. Dump was not copied into Program Files. |
+| 9 | Launch from Start Menu | **PASS WITH LIMITATION** | All-users shortcut started `dumplyzer.exe` with child `resources\runtime\python.exe -m memscope_engine`. `engine.jsonl`: `engine initialized` at 2026-09-20T11:48:21Z and again after reinstall at 11:49:07Z. SSH cannot read the interactive-desktop window title. |
+| 10 | No development-machine paths | **PASS** | `sys.executable` and Volatility/engine modules are under Program Files. `rootman_in_syspath` False. |
+| 11 | Uninstall | **PASS** | `uninstall.exe /S` exit 0. Program Files tree, Start Menu shortcut, and desktop shortcut removed. |
+| 12 | Reinstall | **PASS** | Second `/S` exit 0. Shortcuts restored. `dumplyzer.exe` launched again (PID 1888). |
+
+## Status (2026-09-20, earlier per-user online run)
+
+**CLEAN-MACHINE PASS WITH LIMITATIONS (superseded installer)**
+
+Executed from the packaging host over SSH against the Windows 11 x64 guest at `192.168.12.133`. NSIS `Dumplyzer_0.1.0_x64-setup.exe` was the artifact under test. No Python, Node.js, Rust, Git, or Volatility was installed on the guest. WebView2 Evergreen was already present. The installer, Start Menu shortcut, and `dumplyzer.exe` all use Dumplyzer `icons/icon.ico`.
+
+This run used an older **per-user** NSIS (107.9 MB) without the packed Evergreen standalone. It is kept for history. The current end-user installer is the 312.3 MB offline NSIS above.
+
+### Validation target (VM)
+
+| Item | Value |
+|------|--------|
+| Role | Clean-machine install target (not the build host) |
+| Access | SSH from host to `192.168.12.133` |
+| OS | Microsoft Windows 11 Pro **10.0.26100** x64 |
+| Computer name | JOHN |
+| Interactive user | console session 1, `John Doe`, logged on |
+| Developer Python | Absent (only 0-byte WindowsApps Store aliases for `python.exe` / `python3.exe`) |
+| Node.js / npm / pnpm | Absent |
+| Rust / cargo | Absent |
+| Git / MSVC | Absent |
+| Dumplyzer source | Absent |
+| Dumplyzer before test | Not installed |
+| Leftover MemScope | Previous `%LOCALAPPDATA%\Programs\MemScope` was uninstalled before this run. `%LOCALAPPDATA%\MemScope` user data remained and was copied into `%LOCALAPPDATA%\Dumplyzer\` on first launch (existing migration behavior). |
+| WebView2 | Present — Evergreen **153.0.4234.48** (supported launch path) |
+
+### Installer under test
+
+| Item | Value |
+|------|--------|
+| File | `Dumplyzer_0.1.0_x64-setup.exe` (NSIS per-user) |
+| Host path | `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.0_x64-setup.exe` |
+| Size | 107.9 MB (113,120,281 bytes) |
+| SHA-256 | `87479a07c3348d605784a448f3e5c3289bd71c598dfe88f840af6999b5523b93` |
+| Host hash = VM hash after SCP | Yes |
+| Authenticode | NotSigned (expected for 0.1.0) |
+| Installer Explorer icon | Dumplyzer `icon.ico` (associated-icon hash matches `dumplyzer.exe`) |
+| MSI also produced, **not installed** | `Dumplyzer_0.1.0_x64_en-US.msi` 119.6 MB (125,431,601 bytes) SHA-256 `108b00ee9d03fa214d752fa632cf1cd6085c6d2c951c57e5cbe8494b9a0cdded` |
+| Install command | NSIS silent `/S` (SSH cannot click the wizard). Default per-user layout, no custom `INSTDIR`. |
+
+### Installed layout
+
+```
+%LOCALAPPDATA%\Programs\Dumplyzer\
+  dumplyzer.exe
+  uninstall.exe
+  resources\runtime\     # bundled CPython 3.12.10 + site-packages (Volatility 2.28.0, yara-python 4.5.4)
+  resources\tools\       # bulk_extractor 2.2.0, CAPA 9.4.0, FLOSS 3.1.1
+  resources\rules\       # bundled Signature Detection YARA rules
+```
+
+Start menu shortcut: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Dumplyzer.lnk` (target `dumplyzer.exe`, icon index 0).
+Uninstall registry: HKCU DisplayName `Dumplyzer`, DisplayVersion `0.1.0`.
+
+### Pass / fail log (2026-09-20)
+
+| # | Check | Result | Evidence |
+|---|--------|--------|----------|
+| 1 | Copy only the NSIS installer onto the VM | **PASS** | SCP of `Dumplyzer_0.1.0_x64-setup.exe` only. SHA-256 matched host. |
+| 2 | Prerequisites absent before install | **PASS** | No Node/Rust/Git/real Python/pnpm. Store `python.exe` is 0 bytes. WebView2 already present. |
+| 3 | Run the installer | **PASS WITH LIMITATION** | `/S` silent because SSH cannot click the NSIS wizard. Exit code 0. Per-user, no elevation. |
+| 4 | Install path `%LOCALAPPDATA%\Programs\Dumplyzer\` | **PASS** | `dumplyzer.exe`, bundled `resources\runtime\python.exe`, Volatility, tools, and YARA rules present. |
+| 5 | Installer and app icons | **PASS** | Setup EXE and `dumplyzer.exe` associated-icon hashes match Dumplyzer artwork. Start Menu `.lnk` uses the EXE icon (index 0). |
+| 6 | Bundled engine / Volatility | **PASS** | Packaged `smoke.e2e` `ok=true`. Volatility **2.28.0** from install-tree `resources\runtime`. Python **3.12.10**. `MEMSCOPE_PACKAGED=1`. **191** plugins. |
+| 7 | Bundled optional tools | **PASS** | YARA, PE Extraction, CAPA, FLOSS, bulk_extractor all `available=true` from the installer bundle. |
+| 8 | Import a test memory image | **PASS** | `evidence.import` of `C:\Users\Public\memscope-import-test.raw` (32 MiB) completed. Evidence row stored the original path; the dump was not copied into the install directory. |
+| 9 | Launch from Start Menu | **PASS WITH LIMITATION** | Shortcut launch started `dumplyzer.exe` with child `resources\runtime\python.exe -m memscope_engine`. Engine log: `engine initialized` at 2026-09-20T10:42:31Z. SSH cannot read the interactive-desktop window title (session isolation). |
+| 10 | Data vs install separation | **PASS** | Mutable data under `%LOCALAPPDATA%\Dumplyzer\`. No dump files under the Programs install tree. |
+| 11 | Uninstall | **PASS WITH LIMITATION** | `uninstall.exe /S` exit 0. Start Menu shortcut and HKCU ARP entry removed. User data kept. Install directory still present immediately after uninstall (nested resource dirs / NSIS `RMDir`). Reinstall succeeded. |
+
 ## Status (2026-09-07)
 
-**CLEAN-MACHINE PASS WITH LIMITATIONS**
+**CLEAN-MACHINE PASS WITH LIMITATIONS (historical MemScope branding)**
 
 Executed from the packaging host over SSH against a VMware Windows 11 x64 guest. Feature scope remained frozen; no product code was changed. NSIS `MemScope_0.1.0_x64-setup.exe` was transferred and installed. The application launched as an end user from the Start menu, used the bundled CPython runtime (not host/Store Python), and did not require the source tree.
 
@@ -120,8 +263,8 @@ The conceptual docs still say `runtime\` next to the EXE. The packaged tree is `
 1. Copy only the NSIS `Dumplyzer_*-setup.exe` (preferred) or the MSI onto the machine.
 2. Run the installer without extra command-line flags.
 3. Confirm install path:
-   - NSIS: `%LOCALAPPDATA%\Programs\Dumplyzer\`
-   - MSI: `%ProgramFiles%\Dumplyzer\` (elevation likely)
+   - NSIS default: `%ProgramFiles%\Dumplyzer\` (Windows system drive; elevation required)
+   - MSI: `%ProgramFiles%\Dumplyzer\` (elevation required)
 4. Launch Dumplyzer from the Start menu.
 5. Confirm first launch created `%LOCALAPPDATA%\Dumplyzer\` (`logs`, `artifacts`, `cache`, `exports`, `yara_rules`, `tools`). If an older `%LOCALAPPDATA%\MemScope\` database exists and the new database does not, the copy into Dumplyzer should appear without deleting the source.
 6. Empty Evidence: the UI should load without an imported image. A ~2 second Dumplyzer splash should appear first.

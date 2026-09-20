@@ -68,8 +68,7 @@
   "application": {
     "version": "0.1.0",
     "identifier": "com.dumplyzer.workbench",
-    "install_nsis": "%LOCALAPPDATA%\\Programs\\Dumplyzer",
-    "install_msi": "%ProgramFiles%\\Dumplyzer",
+    "install_nsis": "%ProgramFiles%\\Dumplyzer",
     "data_dir": "%LOCALAPPDATA%\\Dumplyzer"
   }
 }

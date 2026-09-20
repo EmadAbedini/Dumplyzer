@@ -54,7 +54,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": ["nsis"],
     "publisher": "Dumplyzer",
     "licenseFile": "../../LICENSE",
     "shortDescription": "Volatility 3 memory forensics workbench",
@@ -74,12 +74,14 @@
     "windows": {
       "digestAlgorithm": "sha256",
       "webviewInstallMode": {
-        "type": "embedBootstrapper",
+        "type": "offlineInstaller",
         "silent": true
       },
       "nsis": {
-        "installMode": "currentUser",
-        "template": "../../packaging/windows/nsis/installer.nsi"
+        "installMode": "perMachine",
+        "template": "../../packaging/windows/nsis/installer.nsi",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
       },
       "wix": {
         "language": "en-US",

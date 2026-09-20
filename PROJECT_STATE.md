@@ -2,7 +2,7 @@
 
 > Single source of truth for project continuity. Update after every meaningful milestone.
 
-**Last updated:** 2026-09-09  
+**Last updated:** 2026-09-20  
 **Version target:** 0.1.0  
 **Current phase:** Release engineering — final validation / hardening
 
@@ -12,15 +12,15 @@
 
 **Windows packaging** is complete. Product branding is **Dumplyzer** (formerly MemScope). This milestone is **release validation and hardening**, not new forensic features.
 
-- End-user installers: NSIS per-user (`%LOCALAPPDATA%\Programs\Dumplyzer`) and WiX 3.14 MSI
+- End-user installer: one NSIS EXE (`Dumplyzer_0.1.0_x64-setup.exe`), default `%ProgramFiles%\Dumplyzer`, with an embedded WebView2 Evergreen standalone (offline) installer
 - Executable: `dumplyzer.exe`; installer identity `Dumplyzer_0.1.0_x64-setup.exe`
 - Engine: official CPython **3.12.10** embeddable + `memscope-engine` **0.1.0** + Volatility 3 **2.28.0** (no global Python)
 - User data: `%LOCALAPPDATA%\Dumplyzer\` (db, logs, cache, artifacts, exports, `rules\yara`, tools)
 - Legacy data: first launch copies `%LOCALAPPDATA%\MemScope\` or `%APPDATA%\com.memscope.workbench\` into the canonical directory when the new `memscope.db` does not exist. The source is never deleted.
 - Application source license: **Apache-2.0** (`LICENSE`). Redistributed Volatility 3 remains **VSL** (`THIRD_PARTY_NOTICES.md`)
 - Installers are **unsigned**. Authenticode procedure is documented; no certificate is configured
-- WebView2 Evergreen is required. The installer embeds the bootstrapper; a machine **without WebView2 and without network** is not a supported launch environment
-- Clean-machine NSIS install on a Windows 11 x64 VM **was executed** (2026-09-07): **PASS WITH LIMITATIONS**. See `docs/clean-machine-validation.md`. MSI and WebView2-absent-offline were not tested. Authenticode remains unsigned.
+- WebView2 Evergreen is required at runtime. The NSIS installer embeds the Evergreen standalone installer so a machine **without WebView2 and without network** can still install
+- Clean-machine **offline** NSIS install on a Windows 11 x64 VM **was executed** (2026-09-20): **PASS WITH LIMITATIONS**. See `docs/clean-machine-validation.md`. WebView2 was already present and could not be uninstalled (exit 93). The installer packs the Evergreen standalone payload and did not download anything. Authenticode remains unsigned. Windows 10 was not install-tested.
 
 Forensic workflows are unchanged.
 
@@ -47,8 +47,9 @@ Forensic workflows are unchanged.
 ## In Progress / Next
 
 1. Authenticode signing with a real code-signing certificate — **blocker for trusted public installers**
-2. Optional follow-up: MSI clean-machine install; WebView2-absent offline launch (documented unsupported)
-3. Linux packaging (out of scope for 0.1.0)
+2. Optional follow-up: install on a machine that truly has no WebView2, to watch the packed Evergreen standalone run
+3. Windows 10 21H2+ install test (dependency-compatible; not yet executed)
+4. Linux packaging (out of scope for 0.1.0)
 
 ---
 
@@ -76,10 +77,10 @@ Forensic workflows are unchanged.
 | Export destination | Engine-chosen under app data `exports/` only; client paths rejected |
 | HTML is static | No JavaScript; open as a file. Command lines/paths are escaped text, not executed |
 | No desktop UI browser pass | Export view verified via TypeScript build + engine IPC tests |
-| Clean-machine install | **PASS WITH LIMITATIONS** (2026-09-07 NSIS on Windows 11 Pro 10.0.26100 VM). MSI / WebView2-absent-offline not run |
+| Clean-machine install | **OFFLINE PASS WITH LIMITATIONS** (2026-09-20 NSIS on Windows 11 Pro 10.0.26100). WebView2 already present; Windows 10 not install-tested |
 | Code signing | Not configured. 0.1.0 NSIS/MSI/`Dumplyzer.exe` are unsigned |
-| WebView2 offline-absent | `embedBootstrapper` can download Evergreen if the runtime is missing; without WebView2 **and** without network, launch is not guaranteed |
-| Per-user install is writable | Windows current-user install directory is user-writable |
+| WebView2 offline-absent | NSIS embeds the Evergreen standalone installer (`offlineInstaller`); no Internet is required at install time |
+| Program Files install is protected | Default `%ProgramFiles%\Dumplyzer` requires elevation; user data stays in `%LOCALAPPDATA%\Dumplyzer` |
 
 ---
 
@@ -104,10 +105,10 @@ Recorded on the developer host (Windows 11 Pro 10.0.26200 x64, WebView2 152.0.41
 | cargo test | **12 passed** (engine IPC + launch resolution + data-dir vs install-dir + bundled rules dir) |
 | frontend build | **PASS** (`tsc --noEmit && vite build`) |
 | cargo build | **PASS** (debug); **PASS** (release via `tauri build`) |
-| NSIS installer | **PASS** unsigned `Dumplyzer_0.1.0_x64-setup.exe` (13.3 MB, SHA-256 `9c8aed368da3f9481bee9f56b393b8f6c55bf6f8e21f1d11769d69ab566daac4`) rebuilt 2026-09-07 from HEAD `4b61077` + existing runtime |
-| MSI installer | **PASS** unsigned `Dumplyzer_0.1.0_x64_en-US.msi` (17.6 MB, SHA-256 `7ba6d2f578970c79f7d86acca997b4a03d014ff3535fceff112ae155f8eb6fe8`) produced on host; **not** installed on the clean VM |
-| Authenticode | **NotSigned** (NSIS, MSI, `dumplyzer.exe`) |
-| Clean-machine install | **PASS WITH LIMITATIONS** — Windows 11 Pro 10.0.26100 x64 VM via SSH; NSIS per-user; bundled CPython 3.12.10; Volatility 2.28.0; 181 plugins. Details in `docs/clean-machine-validation.md` |
+| NSIS installer | **PASS** unsigned `Dumplyzer_0.1.0_x64-setup.exe` (312.3 MB, 327,510,849 bytes, SHA-256 `49bd1f759986f92de17a39589aed2dd122d612c379b3313f355de15e31b10f81`) with bundled CPython, Volatility, tools, Dumplyzer icon, and offline WebView2 Evergreen standalone |
+| MSI installer | Not an end-user artifact. Build produces NSIS only. |
+| Authenticode | **NotSigned** (`Dumplyzer_0.1.0_x64-setup.exe`, `dumplyzer.exe`) |
+| Clean-machine install | **OFFLINE PASS WITH LIMITATIONS** — Windows 11 Pro 10.0.26100 x64 VM via SSH; NSIS per-machine `%ProgramFiles%\Dumplyzer`; outbound blocked; bundled CPython 3.12.10; Volatility 2.28.0; 191 plugins. Details in `docs/clean-machine-validation.md` |
 
 ---
 
@@ -117,10 +118,10 @@ Recorded on the developer host (Windows 11 Pro 10.0.26200 x64, WebView2 152.0.41
 |----|----------|--------|
 | AD-023–AD-042 | Prior forensic / export decisions | Accepted |
 | AD-043 | Ship official CPython 3.12.10 Windows embeddable + site-packages, not PyInstaller and not a first-run venv | Accepted |
-| AD-044 | NSIS `currentUser` default install dir is `%LOCALAPPDATA%\Programs\Dumplyzer` so it does not collide with user data | Accepted |
+| AD-044 | NSIS/MSI default install dir is `%ProgramFiles%\Dumplyzer` on the Windows system drive; user data stays `%LOCALAPPDATA%\Dumplyzer` | Accepted |
 | AD-045 | Canonical user data is `%LOCALAPPDATA%\Dumplyzer\` (not Tauri roaming identifier) | Accepted |
 | AD-046 | WiX Toolset **3.14.1** for MSI, prefetch with pinned SHA-256 | Accepted |
 | AD-047 | Application/engine/installer version is **0.1.0**; report schema and SQLite schema stay independent | Accepted |
 | AD-048 | Dumplyzer application source is Apache-2.0; redistributed Volatility 3 remains VSL; notices live in `THIRD_PARTY_NOTICES.md` | Accepted |
 | AD-049 | Do not invent a signing certificate. Unsigned 0.1.0 artifacts stay labeled unsigned; Authenticode procedure is documented | Accepted |
-| AD-050 | Keep `webviewInstallMode.embedBootstrapper`. Do not pretend offline WebView2-absent machines can launch | Accepted |
+| AD-050 | Embed WebView2 Evergreen standalone (`offlineInstaller`) so a machine without WebView2 and without network can install | Accepted |

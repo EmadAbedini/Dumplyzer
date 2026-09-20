@@ -101,6 +101,8 @@ Get-ChildItem -Path $site -Directory -Filter "memscope_engine-*.dist-info" | For
     $EngineDir
 if ($LASTEXITCODE -ne 0) { throw "engine package install failed" }
 
+# Developer source still contains PE-sieve / mal_unpack for tests. They must
+# not ship in the end-user runtime (no EXE is bundled; UI must not offer them).
 $stale = @(
     "providers\pe_sieve.py",
     "providers\mal_unpack.py",
@@ -110,11 +112,18 @@ $stale = @(
 foreach ($rel in $stale) {
     $leftover = Join-Path $enginePkg $rel
     if (Test-Path $leftover) {
-        throw "removed provider is still in the packaged engine: $leftover (wipe engine/build and rebuild)"
+        Write-Host "Stripping removed provider from runtime: $leftover"
+        Remove-Item -LiteralPath $leftover -Force
     }
     $pycDir = Join-Path $enginePkg ((Split-Path $rel) + "\__pycache__")
     $pycName = ((Split-Path $rel -Leaf) -replace '\.py$', '') + ".cpython-312.pyc"
     $pyc = Join-Path $pycDir $pycName
+    if (Test-Path $pyc) {
+        Remove-Item -LiteralPath $pyc -Force
+    }
+    if (Test-Path $leftover) {
+        throw "removed provider is still in the packaged engine: $leftover"
+    }
     if (Test-Path $pyc) { throw "removed provider pyc is still packaged: $pyc" }
 }
 

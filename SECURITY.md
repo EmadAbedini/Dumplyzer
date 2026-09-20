@@ -36,13 +36,13 @@ Dumplyzer is an offline, single-user forensic workstation. Memory images, extrac
 ## Packaging
 
 - Runtime zip and WiX 3.14.1 zip are pinned by SHA-256 (see `packaging/windows/runtime-manifest.json`).
-- Per-user NSIS install does not require administrator rights. The install directory is still user-writable; the engine is spawned by absolute path and does not add that directory to `PATH`.
+- NSIS/MSI default to `%ProgramFiles%\Dumplyzer` and require administrator rights. The engine is spawned by absolute path and does not add that directory to `PATH`.
 - DLL search for `python.exe` uses the runtime directory. Packaged engine `PATH` is reduced to `System32`.
 - Startup writes logs/tmp/database under `%LOCALAPPDATA%\Dumplyzer\`, not under Program Files or `%LOCALAPPDATA%\Programs\Dumplyzer`.
 
 ## WebView2
 
-The desktop UI requires the Microsoft Edge WebView2 Runtime. The Windows bundle uses Tauri `webviewInstallMode.embedBootstrapper` (silent). On a system that already has WebView2, the application can launch without installing another copy. If WebView2 is missing, the embedded bootstrapper downloads Evergreen from Microsoft and therefore needs network access. **A machine that has neither WebView2 nor network connectivity is not a supported launch environment.** This packaging does not switch to the large offline WebView2 installer.
+The desktop UI requires the Microsoft Edge WebView2 Runtime. The Windows bundle uses Tauri `webviewInstallMode.offlineInstaller` (silent). The Evergreen standalone installer is packed into `Dumplyzer_0.1.0_x64-setup.exe` and runs locally if WebView2 is missing. **No Internet connection is required at install time.** If WebView2 is already present, the bundled installer is skipped.
 
 Dumplyzer itself does not phone home. The WebView2 bootstrapper is Microsoft's installer, not Dumplyzer telemetry.
 
