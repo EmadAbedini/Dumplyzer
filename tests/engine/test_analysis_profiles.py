@@ -814,3 +814,36 @@ def test_process_recommended_completed_keeps_module_counts(tmp_path: Path) -> No
     assert items["iocs"]["count"] is None
     db.close()
 
+
+def test_signatures_coverage_sums_both_yara_tabs(tmp_path: Path) -> None:
+    from memscope_engine.analysis.coverage import coverage_for_evidence
+
+    db, ev = _import(tmp_path)
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["signatures"]["state"] == "not_analyzed"
+    assert items["signatures"]["count"] is None
+
+    db.execute(
+        """
+        INSERT INTO yara_scans (
+          id, evidence_id, artifact_id, target_kind, process_id, pid, memory_region_id,
+          analysis_run_id, job_id, status, match_count, yara_version, ruleset_json,
+          error_json, started_at, finished_at
+        ) VALUES (?, ?, NULL, 'memory', NULL, NULL, NULL, NULL, NULL, 'completed', 3, NULL, '{}', NULL, datetime('now'), datetime('now'))
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    db.execute(
+        """
+        INSERT INTO yara_scans (
+          id, evidence_id, artifact_id, target_kind, process_id, pid, memory_region_id,
+          analysis_run_id, job_id, status, match_count, yara_version, ruleset_json,
+          error_json, started_at, finished_at
+        ) VALUES (?, ?, NULL, 'artifact', NULL, NULL, NULL, NULL, NULL, 'completed', 5, NULL, '{}', NULL, datetime('now'), datetime('now'))
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["signatures"]["count"] == 8
+    db.close()
+

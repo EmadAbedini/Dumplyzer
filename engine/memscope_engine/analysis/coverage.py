@@ -29,6 +29,9 @@ KIND_CAPABILITIES: dict[str, tuple[str, ...]] = {
     "vad_scan": ("memory_vad",),
     "vad_extract": ("artifacts",),
     "network_artifact_extraction": ("network_artifacts",),
+    "yara_artifact_scan": ("signatures",),
+    "yara_memory_scan": ("signatures",),
+    "yara_extracted_scan": ("signatures",),
 }
 
 # Capabilities a running standalone job is actively filling. Used for live
@@ -135,6 +138,13 @@ def _counts(db: Database, evidence_id: str) -> dict[str, int]:
             db, "SELECT COUNT(*) AS c FROM artifacts WHERE evidence_id = ?", (evidence_id,)
         )
         if _table_exists(db, "artifacts")
+        else 0,
+        "signatures": _count(
+            db,
+            "SELECT COALESCE(SUM(match_count), 0) AS c FROM yara_scans WHERE evidence_id = ?",
+            (evidence_id,),
+        )
+        if _table_exists(db, "yara_scans")
         else 0,
         "recommended": 0,
         "process_deep_dive": 0,
@@ -318,6 +328,12 @@ def coverage_for_evidence(db: Database, evidence_id: str) -> dict[str, Any]:
                 n if show_count else None,
                 updating,
             )
+    sig_count = int(counts.get("signatures") or 0)
+    sig_updating = "signatures" in pending
+    if sig_count > 0:
+        items["signatures"] = _item("signatures", "not_analyzed", sig_count, sig_updating)
+    else:
+        items["signatures"] = _item("signatures", "not_analyzed", None, sig_updating)
     executed = {cid for cid, item in items.items() if item["state"] in ("analyzed", "analyzed_zero")}
     failed = {cid for cid, item in items.items() if item["state"] == "failed"}
     return {

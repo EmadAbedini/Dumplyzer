@@ -165,9 +165,12 @@ export function AnalysisOptionsDialog({
                         <div className="analysis-profile-note mt-2 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs leading-snug">
                           <Info size={14} className="shrink-0" aria-hidden />
                           <span className="min-w-0 flex-1 text-justify">
-                            Extracted files and carved artifacts are not
-                            included by default. Run these from{" "}
-                            <span className="font-bold">Carved Data</span> when
+                            Extracted files, carved artifacts, and signatures are
+                            not included by default. Run extracted files and
+                            carved artifacts from{" "}
+                            <span className="font-bold">Carved Data</span>, and
+                            signatures from{" "}
+                            <span className="font-bold">Signatures</span>, when
                             needed. They are optional and can take significantly
                             longer to complete.
                           </span>
