@@ -21,3 +21,23 @@ export const ABOUT_COMPONENTS_HEADING = "Analysis Components";
 
 export const ABOUT_COMPONENTS_INTRO =
   "Dumplyzer integrates established open-source analysis engines and tools.";
+
+/** Product license as shown in About. SPDX id matches package.json / LICENSE. */
+export const ABOUT_LICENSE = {
+  heading: "License",
+  copyright: `© 2026 ${ABOUT_DEVELOPER.name}`,
+  summary:
+    "Dumplyzer application source is licensed under the Apache License, Version 2.0.",
+  thirdParty:
+    "Bundled analysis engines and tools remain under their original licenses. Dumplyzer does not relicense them.",
+  links: [
+    {
+      label: "Apache License 2.0",
+      url: "https://www.apache.org/licenses/LICENSE-2.0",
+    },
+    {
+      label: "Third-Party Notices",
+      url: "https://github.com/EmadAbedini/Dumplyzer/blob/main/THIRD_PARTY_NOTICES.md",
+    },
+  ],
+} as const;

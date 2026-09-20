@@ -3,6 +3,7 @@ import {
   ABOUT_COMPONENTS_HEADING,
   ABOUT_COMPONENTS_INTRO,
   ABOUT_DEVELOPER,
+  ABOUT_LICENSE,
   ABOUT_LINKS,
   ABOUT_TAGLINE,
 } from "../lib/about";
@@ -31,6 +32,42 @@ function ComponentItem({
     <div className="min-w-0">
       <div className="text-sm font-medium tracking-tight">{capability}</div>
       <div className="mt-0.5 text-xs text-muted">{detail}</div>
+    </div>
+  );
+}
+
+function AboutLink({ href, children }: { href: string; children: string }) {
+  return (
+    <a
+      href={href}
+      className="text-accent underline-offset-2 hover:underline"
+      onClick={(event) => {
+        event.preventDefault();
+        void openExternalUrl(href);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+function AboutLinkRow({
+  links,
+}: {
+  links: readonly { label: string; url: string }[];
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      {links.map((link, index) => (
+        <span key={link.url} className="flex items-center gap-2">
+          {index > 0 ? (
+            <span className="text-accent" aria-hidden="true">
+              ·
+            </span>
+          ) : null}
+          <AboutLink href={link.url}>{link.label}</AboutLink>
+        </span>
+      ))}
     </div>
   );
 }
@@ -121,27 +158,7 @@ export function AboutView({ appName, appVersion }: Props) {
           <div className="text-sm font-semibold">{ABOUT_DEVELOPER.heading}</div>
           <div className="mt-1 text-sm font-semibold">{ABOUT_DEVELOPER.name}</div>
           <div className="mt-0.5 text-sm text-muted">{ABOUT_DEVELOPER.role}</div>
-          <div className="mt-3 flex items-center gap-2 text-sm">
-            {ABOUT_LINKS.map((link, index) => (
-              <span key={link.url} className="flex items-center gap-2">
-                {index > 0 ? (
-                  <span className="text-accent" aria-hidden="true">
-                    ·
-                  </span>
-                ) : null}
-                <a
-                  href={link.url}
-                  className="text-accent underline-offset-2 hover:underline"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    void openExternalUrl(link.url);
-                  }}
-                >
-                  {link.label}
-                </a>
-              </span>
-            ))}
-          </div>
+          <AboutLinkRow links={ABOUT_LINKS} />
         </div>
       </section>
 
@@ -157,6 +174,18 @@ export function AboutView({ appName, appVersion }: Props) {
             />
           ))}
         </div>
+      </section>
+
+      <section className="card mt-4 p-4" aria-labelledby="about-license-heading">
+        <h3 id="about-license-heading" className="text-sm font-semibold">
+          {ABOUT_LICENSE.heading}
+        </h3>
+        <div className="mt-1 space-y-2.5 text-sm leading-relaxed">
+          <p>{ABOUT_LICENSE.summary}</p>
+          <p>{ABOUT_LICENSE.thirdParty}</p>
+        </div>
+        <AboutLinkRow links={ABOUT_LICENSE.links} />
+        <p className="mt-3 text-sm text-muted">{ABOUT_LICENSE.copyright}</p>
       </section>
     </div>
   );

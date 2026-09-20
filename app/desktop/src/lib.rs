@@ -464,9 +464,12 @@ async fn get_app_paths(state: State<'_, EngineState>) -> Result<Value, EngineErr
     call_engine_locked(&state, "app.paths", json!({}), 30)
 }
 
+/// Must stay in sync with About links in `app/frontend/src/lib/about.ts`.
 const ALLOWED_EXTERNAL_URLS: &[&str] = &[
     "https://github.com/EmadAbedini/Dumplyzer",
     "https://www.linkedin.com/in/emad-abedini",
+    "https://www.apache.org/licenses/LICENSE-2.0",
+    "https://github.com/EmadAbedini/Dumplyzer/blob/main/THIRD_PARTY_NOTICES.md",
 ];
 
 #[tauri::command]
@@ -933,5 +936,32 @@ mod tests {
         for size in [16u32, 20, 24, 32, 40, 48, 64, 128, 256] {
             assert!(seen.contains(&size), "icon.ico missing {size}x{size} frame");
         }
+    }
+
+    #[test]
+    fn about_external_urls_are_allowlisted() {
+        let root = engine::repo_root_from_manifest().expect("repo");
+        let about = std::fs::read_to_string(
+            root.join("app")
+                .join("frontend")
+                .join("src")
+                .join("lib")
+                .join("about.ts"),
+        )
+        .expect("about.ts");
+        let mut found = 0usize;
+        let mut rest = about.as_str();
+        while let Some(idx) = rest.find("https://") {
+            rest = &rest[idx..];
+            let end = rest.find('"').expect("unterminated About URL");
+            let url = &rest[..end];
+            found += 1;
+            assert!(
+                ALLOWED_EXTERNAL_URLS.contains(&url),
+                "About link {url} is missing from ALLOWED_EXTERNAL_URLS"
+            );
+            rest = &rest[end..];
+        }
+        assert!(found >= 4, "expected About external URLs, found {found}");
     }
 }
