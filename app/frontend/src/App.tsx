@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Sidebar, IMPORTING_NAV_HINT, navLockedDuringImport, navSectionTitle } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -53,6 +53,7 @@ import {
   type ThemeId,
 } from "./lib/preferences";
 import { DisplayTimeZoneProvider } from "./lib/datetime";
+import { notifyMainWindowReady } from "./lib/mainWindowReady";
 import type {
   AnalysisProfileCatalog,
   AppErrorPayload,
@@ -94,6 +95,10 @@ export default function App() {
   const importGenerationRef = useRef(0);
   const importJobIdRef = useRef<string | null>(null);
   const analysisPromptAfterImportRef = useRef(false);
+
+  useLayoutEffect(() => {
+    notifyMainWindowReady();
+  }, []);
 
   const presentError = useCallback(
     (payload: AppErrorPayload) => {

@@ -121,30 +121,65 @@ fn launch_plan_for_state(state: &EngineState) -> Result<EngineLaunchPlan, Engine
 }
 
 const SPLASH_MS: u64 = 2000;
+/// If the UI never signals ready, still leave the splash so the app is usable.
+const SPLASH_FALLBACK_MS: u64 = 10000;
+/// Light workbench chrome (`--bg` in styles.css). Avoids a white WebView2 flash.
+const MAIN_WINDOW_BG: tauri::window::Color = tauri::window::Color(0xf3, 0xf5, 0xf8, 255);
+const SPLASH_WINDOW_BG: tauri::window::Color = tauri::window::Color(0x07, 0x14, 0x28, 255);
 /// Minimum time the native splash window stays visible before the main UI is shown.
 static SPLASH_PHASE: AtomicBool = AtomicBool::new(true);
+static SPLASH_MIN_DONE: AtomicBool = AtomicBool::new(false);
+static UI_READY: AtomicBool = AtomicBool::new(false);
+static MAIN_REVEALED: AtomicBool = AtomicBool::new(false);
 
 const MAIN_MIN_WIDTH: f64 = 900.0;
 /// Sidebar at the default 13px font: top bar + evidence + 16 nav items + one
 /// extra item of space below About (~625px). 640px covers DPI rounding.
 const MAIN_MIN_HEIGHT: f64 = 640.0;
 
+fn prepare_main_window(main: &tauri::WebviewWindow) {
+    let _ = main.set_min_size(Some(tauri::LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
+    let _ = main.set_background_color(Some(MAIN_WINDOW_BG));
+    let _ = main.hide();
+    apply_windows_shell_icons(main);
+    disable_default_context_menu(main);
+}
+
+fn try_reveal_main_window(app: &tauri::AppHandle) {
+    if !SPLASH_MIN_DONE.load(Ordering::SeqCst) || !UI_READY.load(Ordering::SeqCst) {
+        return;
+    }
+    reveal_main_window(app);
+}
+
 fn reveal_main_window(app: &tauri::AppHandle) {
+    if MAIN_REVEALED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    SPLASH_PHASE.store(false, Ordering::SeqCst);
     if let Some(main) = app.get_webview_window("main") {
-        let _ = main.set_min_size(Some(tauri::LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
+        prepare_main_window(&main);
         let _ = main.unminimize();
-        apply_windows_shell_icons(&main);
-        disable_default_context_menu(&main);
+        // Maximize while still hidden so Windows never shows a 960×640 blank frame.
+        let _ = main.maximize();
         let _ = main.show();
         let _ = main.maximize();
         let _ = main.set_focus();
         drag_drop::attach_after_show(app, &main);
     }
-    SPLASH_PHASE.store(false, Ordering::SeqCst);
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.hide();
         let _ = splash.close();
     }
+}
+
+#[tauri::command]
+fn ui_ready(app: tauri::AppHandle) {
+    UI_READY.store(true, Ordering::SeqCst);
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        try_reveal_main_window(&handle);
+    });
 }
 
 /// Taskbar / Alt+Tab use ICON_BIG. Tauri only sets ICON_SMALL, and historically
@@ -763,12 +798,10 @@ pub fn run() {
                 .lock()
                 .map_err(|_| std::io::Error::other("lock"))? = Some(dir.clone());
             if let Some(main) = app.get_webview_window("main") {
-                let _ = main.set_min_size(Some(tauri::LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
-                let _ = main.hide();
-                apply_windows_shell_icons(&main);
-                disable_default_context_menu(&main);
+                prepare_main_window(&main);
             }
             if let Some(splash) = app.get_webview_window("splash") {
+                let _ = splash.set_background_color(Some(SPLASH_WINDOW_BG));
                 let _ = splash.set_decorations(false);
                 let _ = splash.set_shadow(false);
                 let _ = splash.set_always_on_top(true);
@@ -786,10 +819,21 @@ pub fn run() {
             let splash_handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(SPLASH_MS));
+                SPLASH_MIN_DONE.store(true, Ordering::SeqCst);
                 let handle = splash_handle.clone();
                 let _ = splash_handle.run_on_main_thread(move || {
-                    reveal_main_window(&handle);
+                    try_reveal_main_window(&handle);
                 });
+                std::thread::sleep(Duration::from_millis(
+                    SPLASH_FALLBACK_MS.saturating_sub(SPLASH_MS),
+                ));
+                if !MAIN_REVEALED.load(Ordering::SeqCst) {
+                    UI_READY.store(true, Ordering::SeqCst);
+                    let handle = splash_handle.clone();
+                    let _ = splash_handle.run_on_main_thread(move || {
+                        try_reveal_main_window(&handle);
+                    });
+                }
             });
             Ok(())
         })
@@ -800,7 +844,8 @@ pub fn run() {
             open_external_url,
             copy_export_file,
             engine_call,
-            smoke_e2e
+            smoke_e2e,
+            ui_ready
         ])
         .build(tauri::generate_context!())
         .expect("error while running Dumplyzer");
@@ -809,6 +854,8 @@ pub fn run() {
         RunEvent::ExitRequested { api, .. } => {
             if SPLASH_PHASE.load(Ordering::SeqCst) {
                 api.prevent_exit();
+                SPLASH_MIN_DONE.store(true, Ordering::SeqCst);
+                UI_READY.store(true, Ordering::SeqCst);
                 reveal_main_window(app_handle);
                 return;
             }
@@ -884,6 +931,10 @@ mod tests {
         assert!(
             conf.contains("\"theme\": \"Light\""),
             "main window default theme must be Light"
+        );
+        assert!(
+            conf.contains("\"visible\": false") && conf.contains("\"maximized\": false"),
+            "main window must stay hidden until the UI has painted"
         );
         let frontend = root.join("app").join("frontend");
         assert!(frontend.join("splash.html").is_file(), "missing splash.html");

@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dumplyzer</title>
+    <style>
+      html, body, #root { margin: 0; height: 100%; background: #f3f5f8; }
+      html[data-theme="dark"], html[data-theme="dark"] body, html[data-theme="dark"] #root {
+        background: #0b0f16;
+      }
+    </style>
     <script>
       (function () {
         try {
@@ -11,6 +17,7 @@
           var theme = t === "dark" ? "dark" : "light";
           document.documentElement.setAttribute("data-theme", theme);
           document.documentElement.style.colorScheme = theme;
+          document.documentElement.style.background = theme === "dark" ? "#0b0f16" : "#f3f5f8";
           var f = localStorage.getItem("dumplyzer.ui.fontSize") || localStorage.getItem("memscope.ui.fontSize");
           var n = f ? parseInt(f, 10) : 13;
           if (n < 12) n = 12;

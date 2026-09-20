@@ -29,7 +29,8 @@
         "focus": true,
         "visible": true,
         "skipTaskbar": true,
-        "alwaysOnTop": true
+        "alwaysOnTop": true,
+        "backgroundColor": "#071428"
       },
       {
         "label": "main",
@@ -38,11 +39,12 @@
         "height": 640,
         "minWidth": 900,
         "minHeight": 640,
-        "maximized": true,
+        "maximized": false,
         "theme": "Light",
         "resizable": true,
         "visible": false,
-        "focus": false
+        "focus": false,
+        "backgroundColor": "#f3f5f8"
       }
     ],
     "security": {
