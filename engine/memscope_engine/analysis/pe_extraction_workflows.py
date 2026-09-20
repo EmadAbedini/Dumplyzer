@@ -236,6 +236,8 @@ def run_pe_extraction_job(
         process_lookup = _process_lookup(db, evidence_id)
         stored: list[dict[str, Any]] = []
         for item in items:
+            if cancelled():
+                raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
             art = _persist_item(
                 db,
                 paths,

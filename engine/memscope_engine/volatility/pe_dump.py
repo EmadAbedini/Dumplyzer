@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import logging
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -138,7 +139,14 @@ def _pe_table(context: Any, config_path: str) -> str:
     )
 
 
-def _reconstruct_pe(pedump_cls: Any, context: Any, pe_table_name: str, layer_name: str, base: int) -> bytes | None:
+def _reconstruct_pe(
+    pedump_cls: Any,
+    context: Any,
+    pe_table_name: str,
+    layer_name: str,
+    base: int,
+    cancelled: Callable[[], bool] | None = None,
+) -> bytes | None:
     collected: list[dict[str, Any]] = []
     handler_cls = _make_seekable_handler(Path("."), collected)
     # dump_pe writes via FileHandler; use an isolated temp via BytesIO close override
@@ -163,10 +171,24 @@ def _reconstruct_pe(pedump_cls: Any, context: Any, pe_table_name: str, layer_nam
                 offset=int(base),
                 layer_name=layer_name,
             )
+            chunks = 0
+            last_check = 0.0
             for offset, data in dos_header.reconstruct():
+                chunks += 1
+                now = time.monotonic()
+                if cancelled and (chunks == 1 or chunks % 8 == 0 or now - last_check >= 0.1):
+                    last_check = now
+                    if cancelled():
+                        raise AppError(
+                            code="job_cancelled",
+                            message="Job was cancelled.",
+                            entity="job",
+                        )
                 handle.seek(offset)
                 handle.write(data)
             raw = handle.getvalue()
+    except AppError:
+        raise
     except (OSError, exceptions.VolatilityException, OverflowError, ValueError, TypeError):
         return None
     except Exception:  # noqa: BLE001
@@ -490,7 +512,9 @@ def _extract_pe_images_impl(
         if image_base is None:
             skipped.append({"reason": "no_image_base", "pid": pid, "name": name})
         else:
-            raw = _reconstruct_pe(pedump_cls, session.context, pe_table_name, proc_layer, image_base)
+            raw = _reconstruct_pe(
+                pedump_cls, session.context, pe_table_name, proc_layer, image_base, cancelled
+            )
             if raw:
                 if METHOD_PROCESS_IMAGE not in methods_used:
                     methods_used.append(METHOD_PROCESS_IMAGE)
@@ -529,7 +553,9 @@ def _extract_pe_images_impl(
             mod_name, mod_path = _module_names(mod)
             if image_base is not None and dll_base == image_base:
                 continue
-            raw = _reconstruct_pe(pedump_cls, session.context, pe_table_name, proc_layer, dll_base)
+            raw = _reconstruct_pe(
+                pedump_cls, session.context, pe_table_name, proc_layer, dll_base, cancelled
+            )
             if not raw:
                 skipped.append(
                     {
@@ -611,7 +637,9 @@ def _extract_pe_images_impl(
                 continue
             if image_base is not None and start == image_base:
                 continue
-            raw = _reconstruct_pe(pedump_cls, session.context, pe_table_name, proc_layer, start)
+            raw = _reconstruct_pe(
+                pedump_cls, session.context, pe_table_name, proc_layer, start, cancelled
+            )
             if not raw:
                 # Keep the VAD prefix only if it already looks like a full PE reconstruct failure
                 skipped.append(
@@ -724,6 +752,8 @@ def _extract_dumpfiles_pe(
     pe_items: list[dict[str, Any]] = []
     tmp_dir = output_dir / "_dumpfiles_tmp"
     for rec in collected:
+        if cancelled and cancelled():
+            raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
         data = rec.get("data") or b""
         path: Path = rec["path"]
         if not data and path.is_file():
