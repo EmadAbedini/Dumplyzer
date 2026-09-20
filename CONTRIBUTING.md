@@ -1,6 +1,6 @@
 # Contributing
 
-Dumplyzer is feature-frozen on forensic workflows. Prefer packaging, reliability, security, tests, and documentation unless a change is a clear bug fix.
+Prefer packaging, reliability, security, tests, and documentation unless a change is a clear bug fix or a discussed forensic feature. Architecture: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Developer machine (source)
 
@@ -67,7 +67,7 @@ cargo test
 cargo build
 ```
 
-Release installer build (downloads official CPython embeddable + WiX 3.14.1 with SHA-256 checks):
+Release installer build (downloads official CPython embeddable and bundled tools with SHA-256 checks):
 
 ```powershell
 .\scripts\windows\build-release.ps1

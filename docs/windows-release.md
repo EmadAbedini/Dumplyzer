@@ -3,7 +3,7 @@
 Application version: **0.1.0**  
 Python runtime: official CPython **3.12.10** Windows embeddable x64  
 Volatility 3: **2.28.0**  
-Installers: one NSIS EXE (default `%ProgramFiles%\Dumplyzer`, offline WebView2 payload)
+Installers: one NSIS EXE (default `%ProgramFiles%\Dumplyzer`, small WebView2 Evergreen bootstrapper)
 
 This procedure produces the single NSIS installer. It does **not** perform a clean-machine installation test. The produced EXE is **unsigned** unless a certificate is supplied outside this repository.
 
@@ -35,10 +35,11 @@ YARA / Signature Detection (yara-python **4.5.4**) is installed into the Python 
 | Rust | 1.98.1 `x86_64-pc-windows-msvc` | `rust-toolchain.toml` |
 | VS Build Tools | 2022 MSVC | Tauri / Rust |
 | WebView2 | Evergreen | Runtime on the build machine |
-| VBScript optional feature | enabled | Required by WiX `light.exe` ICE |
 | Git | any | Clean tree preferred |
 
-Do not use an arbitrary Python from another user profile. The previous `engine\.venv` in this checkout pointed at a non-portable 3.13 path and is not a release input.
+WiX 3.14.1 is recorded in `packaging/windows/runtime-manifest.json` and `scripts/windows/prepare-wix-tools.ps1` for optional MSI experiments. The release path is NSIS only (`tauri build --bundles nsis`) and does not require WiX.
+
+Use Python 3.12.10 on the build host. Do not use a global 3.13 environment for the engine. `engine\.venv` is for tests only and is not a release input.
 
 ## Pinned download (hash-verified)
 
@@ -46,13 +47,10 @@ Only these remote zips/binaries are fetched, and only after SHA-256 verification
 
 1. `https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip`  
    SHA-256 `4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3` (Python.org SPDX)
-2. `https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip`  
-   SHA-256 `6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31`  
-   Extracted to `%LOCALAPPDATA%\tauri\WixTools314` (Tauri 2.11 cache layout)
-3. `https://github.com/simsong/bulk_extractor/releases/download/v2.2.0/bulk_extractor64.exe` (and corresponding source tarball)
-4. `https://github.com/mandiant/capa/releases/download/v9.4.0/capa-v9.4.0-windows.zip`  
+2. `https://github.com/simsong/bulk_extractor/releases/download/v2.2.0/bulk_extractor64.exe` (and corresponding source tarball)
+3. `https://github.com/mandiant/capa/releases/download/v9.4.0/capa-v9.4.0-windows.zip`  
    SHA-256 `670ab1a58b81f59cb57533bf4021ac1e7033fbe9b5d5cc180f796976081e3bb5`
-5. `https://github.com/mandiant/flare-floss/releases/download/v3.1.1/floss-v3.1.1-windows.zip`  
+4. `https://github.com/mandiant/flare-floss/releases/download/v3.1.1/floss-v3.1.1-windows.zip`  
    SHA-256 `6c71089b8c629c69424b042769f1565f71adc6cd24b2f8d3713c96fa7fdac2fb`
 
 YARA rules and `yara-python` are never downloaded. bulk_extractor64.exe, capa.exe, and floss.exe are fetched at **build time** from official GitHub releases with pinned SHA-256.
@@ -84,7 +82,7 @@ cd app\desktop; cargo test; cargo build; cd ..\..
 2. `prepare-bulk-extractor.ps1` — official `bulk_extractor64.exe` v2.2.0 + corresponding source into `app/desktop/resources/tools/bulk_extractor/` (always, even with `-SkipRuntime`)
 3. `prepare-capa.ps1` / `prepare-floss.ps1` — official Windows standalones into `app/desktop/resources/tools/`
 4. `npm ci` in `app/frontend` if `node_modules` is missing (the release script calls `npm.cmd` / `npx.cmd` so Windows PowerShell StrictMode does not hit Node's `npm.ps1`)
-5. `npx tauri build --bundles nsis` in `app/desktop` (NSIS only; WebView2 Evergreen standalone is packed, not downloaded at install time)
+5. `npx tauri build --bundles nsis` in `app/desktop` (NSIS only; WebView2 Evergreen bootstrapper is packed, ~1–2 MB)
 6. `verify-installer.ps1`
 
 ## Generated artifacts (not committed)
@@ -93,11 +91,11 @@ cd app\desktop; cargo test; cargo build; cd ..\..
 |------|---------|
 | `app/desktop/resources/runtime/` | Bundled engine runtime |
 | `app/desktop/target/release/dumplyzer.exe` | Unpackaged desktop binary |
-| `app/desktop/target/release/bundle/nsis/Dumplyzer_0.1.0_x64-setup.exe` | End-user NSIS installer (per-machine, offline WebView2) |
+| `app/desktop/target/release/bundle/nsis/Dumplyzer_0.1.0_x64-setup.exe` | End-user NSIS installer (per-machine, WebView2 bootstrapper) |
 | `$env:CARGO_TARGET_DIR/release/bundle/` | Same artifact if `CARGO_TARGET_DIR` is overridden |
 | `packaging/cache/` | Downloaded zips |
 
-Version stamping: `0.1.0` in `tauri.conf.json`, `app/desktop/Cargo.toml`, frontend/desktop `package.json`, `engine/pyproject.toml`, and `memscope_engine.version.APP_VERSION`. Report schema v1 and SQLite schema v10 stay independent.
+Version stamping: `0.1.0` in `tauri.conf.json`, `app/desktop/Cargo.toml`, frontend/desktop `package.json`, `engine/pyproject.toml`, and `memscope_engine.version.APP_VERSION`. Report schema v1 and SQLite schema v14 stay independent.
 
 ## Installed layout (conceptual)
 
@@ -138,7 +136,7 @@ User data (writable, not removed as part of a normal uninstall of binaries):
 - bundled `resources/rules/yara/bundled` memory and artifact rules are present
 - bundled `resources/tools/bulk_extractor/bulk_extractor64.exe` is present with matching SHA-256
 - exactly one NSIS `Dumplyzer_0.1.0_x64-setup.exe`; no MSI
-- `offlineInstaller` WebView2 payload is staged and referenced
+- `embedBootstrapper` WebView2 payload is staged and referenced
 
 It does not install the NSIS onto a clean VM.
 
@@ -151,14 +149,14 @@ It does not install the NSIS onto a clean VM.
 Configured in `tauri.conf.json` as:
 
 ```json
-"webviewInstallMode": { "type": "offlineInstaller", "silent": true }
+"webviewInstallMode": { "type": "embedBootstrapper", "silent": true }
 ```
 
 | Environment | Expected behavior |
 |-------------|-------------------|
-| Windows 10 1803+ / 11 x64 with WebView2 already installed | Application can launch. The bundled standalone installer is skipped. |
-| WebView2 missing, no network | Bundled Evergreen standalone installer runs from the NSIS payload. No download. |
-| WebView2 missing, network available | Same as above; the installer still uses the packed standalone payload. |
+| Windows 10 1803+ / 11 x64 with WebView2 already installed | Application can launch. The bundled bootstrapper is skipped. |
+| WebView2 missing, network available | Bundled Evergreen bootstrapper (~1–2 MB) runs and downloads the runtime from Microsoft. |
+| WebView2 missing, no network | Setup cannot install WebView2. The UI will not launch until the runtime is present. |
 
 Dumplyzer ships **one** NSIS EXE. MSI is not an end-user artifact.
 
@@ -196,9 +194,9 @@ Until that is done, SmartScreen and some enterprise policies will treat the inst
 
 ## Known limitations
 
-- Clean-machine **offline** NSIS install was executed on a Windows 11 x64 VM. See `docs/clean-machine-validation.md` (**PASS WITH LIMITATIONS**). WebView2 was already present; first-time packed WebView2 install was not observed. Windows 10 was not install-tested.
+- Clean-machine NSIS install was executed on a Windows 11 x64 VM. See `docs/clean-machine-validation.md`. That run used an older offline WebView2 payload. Current packaging uses `embedBootstrapper`. Windows 10 was not install-tested.
 - Default install directory is `%ProgramFiles%\Dumplyzer` (Windows system drive; elevation required). User data remains `%LOCALAPPDATA%\Dumplyzer`.
-- WebView2 Evergreen standalone is packed into the NSIS installer (`offlineInstaller`). No Internet is required at install time.
+- WebView2 Evergreen bootstrapper is packed into the NSIS installer (`embedBootstrapper`). If WebView2 is missing, setup downloads the runtime.
 - Volatility plugins that need capstone or pycryptodome may appear as import failures. That is intentional: those extras are not bundled. Failed imports must not be marked available. yara-python 4.5.4 **is** bundled, so Volatility YARA plugins may become available as a side effect.
 - Code signing / Authenticode is not configured. Artifacts are unsigned.
 - Linux packaging is out of scope.

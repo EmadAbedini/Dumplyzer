@@ -18,7 +18,7 @@ This product was previously named MemScope. The Python engine package remains
 | App version | **0.1.0** |
 | Engine runtime | CPython **3.12.10** (bundled in the installer) |
 | Volatility 3 | **2.28.0** |
-| WebView2 | **Required** at runtime. The single NSIS installer embeds Microsoft’s Evergreen standalone (offline) installer and runs it locally if WebView2 is missing. Installation does not download WebView2 or any other dependency. |
+| WebView2 | **Required** at runtime. The installer embeds the small Evergreen bootstrapper (~1–2 MB). If WebView2 is already installed, it is skipped. If it is missing, the bootstrapper downloads the runtime during setup (Internet required for that case only). |
 
 Linux is not a supported release target yet.
 
@@ -26,7 +26,7 @@ Linux is not a supported release target yet.
 
 You do **not** need Python, Node, Rust, or a source checkout.
 
-1. Run the NSIS installer (`Dumplyzer_0.1.0_x64-setup.exe`). It defaults to `%ProgramFiles%\Dumplyzer` on the Windows system drive, requires administrator rights, and includes an offline WebView2 runtime installer. No other installer file is required.
+1. Run the NSIS installer (`Dumplyzer_0.1.0_x64-setup.exe`). It defaults to `%ProgramFiles%\Dumplyzer` on the Windows system drive and requires administrator rights. Python, Volatility, and analysis tools are bundled. If WebView2 is missing, the embedded Evergreen bootstrapper downloads it during setup.
 2. Launch **Dumplyzer** from the Start menu.
 
 First launch creates the user data directory and starts the bundled engine. PE Extraction is part of the Volatility 3 engine. bulk_extractor, CAPA, FLOSS, and Signature Detection (bundled yara-python **4.5.4** plus curated rules) are included. You do not install Python or YARA separately.
@@ -84,6 +84,15 @@ None of these tools are downloaded at runtime. Extracted PE files are never exec
 
 Treat memory images, dumps, and extracted artifacts as hostile. Dumplyzer does not execute them. Exports are written only under the user data `exports\` directory.
 
+## Limitations
+
+- Windows x64 only. Linux is not a supported release target.
+- 0.1.0 installers are **unsigned**. SmartScreen or organization policy may warn on first run.
+- WebView2 Evergreen is required. If it is missing, the installer bootstrapper needs Internet to download it.
+- Signature Detection, CAPA, FLOSS, bulk_extractor, and PE Extraction are explicit jobs. They are not a malware verdict.
+
+Architecture: [ARCHITECTURE.md](ARCHITECTURE.md). Security notes: [SECURITY.md](SECURITY.md).
+
 ## Developer build
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for a source checkout.
@@ -113,4 +122,3 @@ The Windows installer also redistributes third-party components under their own 
 
 PE-sieve and mal_unpack are not part of Dumplyzer. bulk_extractor v2.2.0 is redistributed as a separate GPLv3 program with corresponding source. CAPA v9.4.0 and FLOSS v3.1.1 official Windows standalones are redistributed under Apache-2.0.
 
-0.1.0 Windows installers are **unsigned**. SmartScreen or organization policy may warn on first run.

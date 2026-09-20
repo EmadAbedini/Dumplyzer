@@ -43,4 +43,4 @@ Frontend (`app/frontend/package-lock.json`) and desktop (`app/desktop/Cargo.lock
 
 ## Installer toolchain (not shipped to end users)
 
-WiX Toolset 3.14.1 binaries are used on the **build machine** only (`packaging/windows/runtime-manifest.json`). NSIS is cached by the Tauri 2.11 CLI. They are not Dumplyzer application code.
+WiX Toolset 3.14.1 binaries are recorded for optional MSI experiments on the **build machine** only (`packaging/windows/runtime-manifest.json`). The shipped installer is NSIS, cached by the Tauri 2.11 CLI. They are not Dumplyzer application code.
