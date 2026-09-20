@@ -27,9 +27,10 @@ def test_analysis_options_includes_timezone_not_a_wizard() -> None:
         encoding="utf-8"
     )
     app = (FRONTEND / "App.tsx").read_text(encoding="utf-8")
+    normalized = " ".join(dialog.split())
     assert "Time Zone" in dialog
     assert "TimeZoneSelect" in dialog
-    assert "Stored timestamps and the original memory image are not modified." in dialog
+    assert "Stored timestamps and the original memory image are not modified." in normalized
     assert "onTimeZoneChange" in dialog
     assert 'engineCall<Job>("analysis.run"' in app
     assert "timeZone" not in app.split('engineCall<Job>("analysis.run"')[1].split(");")[0]
