@@ -25,6 +25,15 @@ You are in the right place.
 
 **Dumplyzer** is an open-source, offline desktop workbench for memory forensics. It is built for DFIR analysts, threat hunters, and malware researchers who need to move from a raw dump to a structured investigation without sending evidence off the workstation.
 
+<p align="center">
+  <a href="docs/assets/screenshots/01-processes.png"><img src="docs/assets/screenshots/01-processes.png" alt="Process list with command lines" width="48%"></a>
+  <a href="docs/assets/screenshots/02-network.png"><img src="docs/assets/screenshots/02-network.png" alt="Network artifacts recovered from the dump" width="48%"></a>
+</p>
+<p align="center">
+  <a href="docs/assets/screenshots/03-timeline.png"><img src="docs/assets/screenshots/03-timeline.png" alt="Investigation timeline with time-range histogram" width="48%"></a>
+  <a href="docs/assets/screenshots/04-memory.png"><img src="docs/assets/screenshots/04-memory.png" alt="Memory VAD regions for a selected process" width="48%"></a>
+</p>
+
 Analysis runs locally. The memory image stays where you imported it. There is no cloud account, no telemetry, and no malware score.
 
 <p align="center">
