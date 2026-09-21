@@ -1,4 +1,4 @@
-from memscope_engine.analysis.progress import AnalysisProgress, step_ranges
+from memscope_engine.analysis.progress import AnalysisProgress, heartbeat_tau, step_ranges
 
 
 def test_handles_owns_most_of_the_full_analysis_bar() -> None:
@@ -34,3 +34,17 @@ def test_analysis_progress_emits_weighted_percent() -> None:
     assert percents[0] < 30
     assert percents[1] > percents[0]
     assert percents[1] < 70
+
+
+def test_processes_only_owns_the_full_bar() -> None:
+    ranges = step_ranges(["processes"])
+    assert ranges["processes"][0] == 0.0
+    assert abs(ranges["processes"][1] - 100.0) < 0.05
+
+
+def test_heartbeat_tau_does_not_stretch_with_bar_span() -> None:
+    solo = heartbeat_tau("processes", step_count=1)
+    full = heartbeat_tau("processes", step_count=10)
+    assert solo <= 50.0
+    assert full > solo
+    assert abs(full - (80.0 + 14 * 3.2)) < 0.01

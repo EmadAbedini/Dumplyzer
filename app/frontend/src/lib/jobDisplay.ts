@@ -82,6 +82,62 @@ const PHASE_RANGE: Record<string, [number, number]> = {
   yara: [2, 98],
 };
 
+/** Same relative wall-time weights as engine STEP_WEIGHTS. */
+const ANALYSIS_STEP_WEIGHTS: Record<string, number> = {
+  processes: 14,
+  session: 6,
+  command_lines: 7,
+  modules: 10,
+  network: 10,
+  handles: 42,
+  findings: 3,
+  iocs: 3,
+  network_artifacts: 3,
+  timeline: 5,
+  recommended: 10,
+  vad: 8,
+};
+
+const PLUGIN_CAPS = ["command_lines", "modules", "network", "handles"] as const;
+const FOLLOW_ON_CAPS = ["findings", "iocs", "network_artifacts", "timeline"] as const;
+
+function plannedAnalysisSteps(job: Job): string[] | null {
+  if (job.kind === "basic_triage") return ["processes"];
+  if (job.kind !== "analysis_profile") return null;
+  const profile = String(job.params?.profile ?? "").toLowerCase();
+  if (profile === "recommended") return ["processes"];
+  if (profile === "full") return null;
+  const caps = Array.isArray(job.params?.capabilities)
+    ? job.params.capabilities.map(String)
+    : [];
+  const evidence = new Set(caps);
+  const pluginCaps = PLUGIN_CAPS.filter((id) => evidence.has(id));
+  const followOn = pluginCaps.length > 0 || FOLLOW_ON_CAPS.some((id) => evidence.has(id));
+  const planned: string[] = [];
+  if (evidence.has("processes") || followOn) planned.push("processes");
+  if (pluginCaps.length) {
+    planned.push("session");
+    planned.push(...pluginCaps);
+  }
+  for (const id of FOLLOW_ON_CAPS) {
+    if (evidence.has(id)) planned.push(id);
+  }
+  return planned.length ? planned : ["processes"];
+}
+
+function analysisStepRanges(stepIds: string[]): Record<string, [number, number]> {
+  const weights = stepIds.map((id) => ANALYSIS_STEP_WEIGHTS[id] ?? 6);
+  const total = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const ranges: Record<string, [number, number]> = {};
+  let acc = 0;
+  stepIds.forEach((id, index) => {
+    const lo = (100 * acc) / total;
+    acc += weights[index];
+    ranges[id] = [lo, (100 * acc) / total];
+  });
+  return ranges;
+}
+
 const lastShownPercent = new Map<string, number>();
 const creepOrigin = new Map<string, { base: number; at: number; phase: string }>();
 const frozenPercent = new Map<string, number>();
@@ -321,12 +377,20 @@ function jobDisplayPercent(
   }
   const stored = jobPercent(job);
   const phase = jobPhase(job);
+  const analysisSteps = plannedAnalysisSteps(job);
+  const analysisRanges = analysisSteps?.length ? analysisStepRanges(analysisSteps) : null;
   const phaseKey =
-    (phase && (PHASE_PERCENT[phase] != null || PHASE_RANGE[phase]) ? phase : null) ??
-    Object.entries(PHASE_LABELS).find(([, label]) => label === stage)?.[0];
-  const range = phaseKey ? PHASE_RANGE[phaseKey] : undefined;
+    (phase &&
+    (PHASE_PERCENT[phase] != null || PHASE_RANGE[phase] || (analysisRanges && phase in analysisRanges))
+      ? phase
+      : null) ?? Object.entries(PHASE_LABELS).find(([, label]) => label === stage)?.[0];
+  const range =
+    (analysisRanges && phaseKey ? analysisRanges[phaseKey] : undefined) ??
+    (phaseKey ? PHASE_RANGE[phaseKey] : undefined);
   let base = stored;
-  if (base == null && phaseKey && PHASE_PERCENT[phaseKey] != null) {
+  if (base == null && range) {
+    base = range[0];
+  } else if (base == null && phaseKey && PHASE_PERCENT[phaseKey] != null) {
     base = PHASE_PERCENT[phaseKey];
   }
   if (base == null) return lastShownPercent.get(job.id) ?? null;

@@ -45,6 +45,21 @@ def step_ranges(step_ids: list[str]) -> dict[str, tuple[float, float]]:
     return ranges
 
 
+def heartbeat_tau(step_id: str, *, step_count: int) -> float:
+    """Expected remaining-time constant for the in-step heartbeat.
+
+    Uses typical step wall time (STEP_WEIGHTS), not the percent span. A
+    processes-only job still takes about as long as the processes step of
+    Complete Analysis; stretching tau with span=100 made Quick Triage crawl
+    to ~10% and then jump to 100.
+    """
+    weight = STEP_WEIGHTS.get(step_id, 6.0)
+    tau = 80.0 + weight * 3.2
+    if step_count <= 1:
+        return min(tau, 50.0)
+    return tau
+
+
 class AnalysisProgress:
     def __init__(
         self,
@@ -108,7 +123,7 @@ class AnalysisProgress:
         best = [lo]
         last_pub = [0.0]
         started = time.monotonic()
-        tau = 80.0 + span * 3.2
+        tau = heartbeat_tau(step_id, step_count=len(self.ranges))
 
         def publish(frac: float, *, force: bool = False) -> None:
             if self._is_cancelled():
