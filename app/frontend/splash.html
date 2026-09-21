@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title></title>
+    <link rel="preload" as="image" href="./src/assets/dumplyzer-splash.jpg" />
     <style>
       html,
       body {
@@ -11,13 +12,14 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: #071428;
+        background: #071428 url("./src/assets/dumplyzer-splash.jpg") center / cover
+          no-repeat;
       }
       img {
         display: block;
         width: 100%;
         height: 100%;
-        object-fit: contain;
+        object-fit: cover;
         object-position: center;
         user-select: none;
         -webkit-user-drag: none;
@@ -26,15 +28,7 @@
     </style>
   </head>
   <body>
-    <script>
-      document.addEventListener(
-        "contextmenu",
-        function (e) {
-          e.preventDefault();
-        },
-        true,
-      );
-    </script>
     <img src="./src/assets/dumplyzer-splash.jpg" alt="Dumplyzer" />
+    <script type="module" src="./splash.js"></script>
   </body>
 </html>

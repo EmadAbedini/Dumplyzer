@@ -7,6 +7,7 @@ use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
+use tauri::webview::PageLoadEvent;
 use tauri::{Manager, RunEvent, State, WebviewEvent, WindowEvent};
 use thiserror::Error;
 
@@ -120,15 +121,20 @@ fn launch_plan_for_state(state: &EngineState) -> Result<EngineLaunchPlan, Engine
     resolve_engine(&resolve_inputs_from_env(exe_dir, resource_dir)).map_err(EngineError::from)
 }
 
-const SPLASH_MS: u64 = 2000;
+/// Minimum time the splash stays visible after first paint.
+/// Long enough to read the brand mark; the main window still waits on `ui_ready`.
+const SPLASH_MS: u64 = 4000;
 /// If the UI never signals ready, still leave the splash so the app is usable.
 const SPLASH_FALLBACK_MS: u64 = 10000;
+/// Show a late splash if the page never reports the JPEG is decoded.
+const SPLASH_SHOW_FALLBACK_MS: u64 = 2500;
 /// Light workbench chrome (`--bg` in styles.css). Avoids a white WebView2 flash.
 const MAIN_WINDOW_BG: tauri::window::Color = tauri::window::Color(0xf3, 0xf5, 0xf8, 255);
 const SPLASH_WINDOW_BG: tauri::window::Color = tauri::window::Color(0x07, 0x14, 0x28, 255);
 /// Minimum time the native splash window stays visible before the main UI is shown.
 static SPLASH_PHASE: AtomicBool = AtomicBool::new(true);
 static SPLASH_MIN_DONE: AtomicBool = AtomicBool::new(false);
+static SPLASH_SHOWN: AtomicBool = AtomicBool::new(false);
 static UI_READY: AtomicBool = AtomicBool::new(false);
 static MAIN_REVEALED: AtomicBool = AtomicBool::new(false);
 
@@ -143,6 +149,96 @@ fn prepare_main_window(main: &tauri::WebviewWindow) {
     let _ = main.hide();
     apply_windows_shell_icons(main);
     disable_default_context_menu(main);
+}
+
+fn prepare_splash_window(splash: &tauri::WebviewWindow) {
+    let _ = splash.set_background_color(Some(SPLASH_WINDOW_BG));
+    let _ = splash.set_decorations(false);
+    let _ = splash.set_shadow(false);
+    let _ = splash.set_always_on_top(true);
+    let _ = splash.center();
+    disable_default_context_menu(splash);
+}
+
+/// Make the already-created splash HWND and WebView2 controller actually visible.
+///
+/// `WebviewWindow::show()` only sets the Tao window flag. On Windows an
+/// undecorated, skip-taskbar, always-on-top window created with `visible: false`
+/// often stays `IsWindowVisible=0` after that call, and WebView2 is created with
+/// `SetIsVisible(false)` so the JPEG never paints. Style updates (decorations /
+/// shadow) while hidden also call `ShowWindow(SW_HIDE)` in Tao, so they must not
+/// run again here.
+fn present_splash_window(splash: &tauri::WebviewWindow) {
+    // Show first. Re-applying decorations/shadow/always-on-top while still hidden
+    // goes through Tao apply_diff, which ends in ShowWindow(SW_HIDE).
+    let _ = splash.show();
+    let _ = splash.as_ref().show();
+    #[cfg(windows)]
+    force_win32_splash_visible(splash);
+    let _ = splash.set_always_on_top(true);
+    let _ = splash.center();
+    let _ = splash.set_focus();
+}
+
+#[cfg(windows)]
+fn force_win32_splash_visible(splash: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsWindowVisible, SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_SHOWWINDOW, SW_SHOW, SW_SHOWNOACTIVATE,
+    };
+
+    let Ok(raw) = splash.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as *mut c_void);
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE,
+        );
+        let _ = InvalidateRect(Some(hwnd), None, true);
+        let _ = UpdateWindow(hwnd);
+        if !IsWindowVisible(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
+    }
+    let _ = splash.with_webview(|webview| unsafe {
+        let _ = webview.controller().SetIsVisible(true);
+    });
+}
+
+/// Show the splash only after the JPEG can paint, so a solid color frame is not seen first.
+/// The 4s minimum starts here — after the window/webview have been presented — not merely
+/// after a hidden HWND exists.
+fn show_splash_window(app: &tauri::AppHandle) {
+    if MAIN_REVEALED.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Some(splash) = app.get_webview_window("splash") {
+        present_splash_window(&splash);
+    }
+    if SPLASH_SHOWN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let splash_handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(SPLASH_MS));
+        SPLASH_MIN_DONE.store(true, Ordering::SeqCst);
+        let handle = splash_handle.clone();
+        let _ = splash_handle.run_on_main_thread(move || {
+            try_reveal_main_window(&handle);
+        });
+    });
 }
 
 fn try_reveal_main_window(app: &tauri::AppHandle) {
@@ -179,6 +275,14 @@ fn ui_ready(app: tauri::AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         try_reveal_main_window(&handle);
+    });
+}
+
+#[tauri::command]
+fn splash_ready(app: tauri::AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        show_splash_window(&handle);
     });
 }
 
@@ -777,6 +881,26 @@ pub fn run() {
                 drag_drop::emit_tauri_drag(webview.app_handle(), drag);
             }
         })
+        .on_page_load(|webview, payload| {
+            if webview.label() != "splash" || payload.event() != PageLoadEvent::Finished {
+                return;
+            }
+            let _ = webview.eval(
+                r#"
+                (function () {
+                  var img = document.querySelector("img");
+                  if (img && !(img.complete && img.naturalWidth)) {
+                    return;
+                  }
+                  var invoke =
+                    window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+                  if (invoke) {
+                    invoke("splash_ready");
+                  }
+                })();
+                "#,
+            );
+        })
         .setup(|app| {
             let exe_dir = std::env::current_exe()
                 .ok()
@@ -801,14 +925,11 @@ pub fn run() {
                 prepare_main_window(&main);
             }
             if let Some(splash) = app.get_webview_window("splash") {
-                let _ = splash.set_background_color(Some(SPLASH_WINDOW_BG));
-                let _ = splash.set_decorations(false);
-                let _ = splash.set_shadow(false);
-                let _ = splash.set_always_on_top(true);
-                let _ = splash.center();
-                disable_default_context_menu(&splash);
-                let _ = splash.show();
-                let _ = splash.set_focus();
+                prepare_splash_window(&splash);
+                // Keep the config `visible: false` start. Do not hide() again:
+                // Tao style refresh while hidden ends in ShowWindow(SW_HIDE), and
+                // hide() can race with splash_ready and leave the HWND invisible
+                // after the 4s timer has already started.
             }
             let engine_handle = app.handle().clone();
             let engine_dir = dir.clone();
@@ -818,19 +939,22 @@ pub fn run() {
             });
             let splash_handle = app.handle().clone();
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(SPLASH_MS));
-                SPLASH_MIN_DONE.store(true, Ordering::SeqCst);
-                let handle = splash_handle.clone();
-                let _ = splash_handle.run_on_main_thread(move || {
-                    try_reveal_main_window(&handle);
-                });
-                std::thread::sleep(Duration::from_millis(
-                    SPLASH_FALLBACK_MS.saturating_sub(SPLASH_MS),
-                ));
-                if !MAIN_REVEALED.load(Ordering::SeqCst) {
-                    UI_READY.store(true, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(SPLASH_SHOW_FALLBACK_MS));
+                if !SPLASH_SHOWN.load(Ordering::SeqCst) && !MAIN_REVEALED.load(Ordering::SeqCst) {
                     let handle = splash_handle.clone();
                     let _ = splash_handle.run_on_main_thread(move || {
+                        show_splash_window(&handle);
+                    });
+                }
+            });
+            let fallback_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(SPLASH_FALLBACK_MS));
+                if !MAIN_REVEALED.load(Ordering::SeqCst) {
+                    SPLASH_MIN_DONE.store(true, Ordering::SeqCst);
+                    UI_READY.store(true, Ordering::SeqCst);
+                    let handle = fallback_handle.clone();
+                    let _ = fallback_handle.run_on_main_thread(move || {
                         try_reveal_main_window(&handle);
                     });
                 }
@@ -845,7 +969,8 @@ pub fn run() {
             copy_export_file,
             engine_call,
             smoke_e2e,
-            ui_ready
+            ui_ready,
+            splash_ready
         ])
         .build(tauri::generate_context!())
         .expect("error while running Dumplyzer");
@@ -938,6 +1063,12 @@ mod tests {
         );
         let frontend = root.join("app").join("frontend");
         assert!(frontend.join("splash.html").is_file(), "missing splash.html");
+        assert!(frontend.join("splash.js").is_file(), "missing splash.js");
+        let splash_html = std::fs::read_to_string(frontend.join("splash.html")).expect("splash.html");
+        assert!(
+            splash_html.contains("type=\"module\"") && splash_html.contains("splash.js"),
+            "splash.js must be type=module so Vite emits it into dist"
+        );
         assert!(
             frontend
                 .join("src")
@@ -945,6 +1076,21 @@ mod tests {
                 .join("dumplyzer-splash.jpg")
                 .is_file(),
             "missing dumplyzer-splash.jpg"
+        );
+        assert!(
+            conf.contains("\"url\": \"splash.html\"") && conf.contains("\"visible\": false"),
+            "splash window must stay hidden until the JPEG is ready to paint"
+        );
+        assert!(
+            (3500..=5000).contains(&SPLASH_MS),
+            "brand splash min time must stay in the 3.5–5s range, got {SPLASH_MS}"
+        );
+        let splash_src = include_str!("lib.rs");
+        assert!(
+            splash_src.contains("present_splash_window")
+                && splash_src.contains("splash.as_ref().show()")
+                && splash_src.contains("force_win32_splash_visible"),
+            "splash present path must show both the HWND and the WebView2 controller"
         );
     }
 

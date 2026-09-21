@@ -10,6 +10,7 @@
     "frontendDist": "../frontend/dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "splash",
@@ -27,7 +28,7 @@
         "center": true,
         "fullscreen": false,
         "focus": true,
-        "visible": true,
+        "visible": false,
         "skipTaskbar": true,
         "alwaysOnTop": true,
         "backgroundColor": "#071428"

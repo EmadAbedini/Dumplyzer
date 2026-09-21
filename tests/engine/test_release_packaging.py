@@ -38,6 +38,7 @@ def test_windows_icon_assets_exist() -> None:
     assert splash.is_file()
     assert splash.read_bytes()[:3] == b"\xff\xd8\xff"
     assert (splash.parents[2] / "splash.html").is_file()
+    assert (splash.parents[2] / "splash.js").is_file()
     assert (icons / "128x128.png").is_file()
     assert (icons / "128x128@2x.png").is_file()
     data = ico.read_bytes()
