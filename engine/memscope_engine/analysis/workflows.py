@@ -20,7 +20,12 @@ from memscope_engine.volatility.session import VolatilitySession
 
 log = logging.getLogger("memscope.analysis")
 
-CHUNK = 1024 * 1024
+# Sequential reads. Python's default 8 KiB buffer turns a 1 MiB f.read() into
+# thousands of tiny OS reads, which on an 8 GiB dump (and Windows Defender)
+# drops hashing to tens of MB/s. Unbuffered FileIO + 8 MiB readinto is one
+# syscall per chunk. Cancel/SQLite checks stay off the per-chunk path.
+HASH_CHUNK = 8 * 1024 * 1024
+_CANCEL_EVERY = 32 * 1024 * 1024
 
 # Child tables first so foreign keys stay satisfied. Jobs and evidence stay.
 _EVIDENCE_ANALYSIS_TABLES = (
@@ -87,24 +92,30 @@ def sha256_file(
     progress: Callable[..., None] | None = None,
     size: int | None = None,
 ) -> str:
-    """Stream SHA-256 in 1 MiB chunks. Never loads the whole file into memory."""
+    """Stream SHA-256. Never loads the whole file into memory."""
     total = size if size is not None else path.stat().st_size
     h = hashlib.sha256()
     done = 0
     last_report = -1
-    with path.open("rb") as f:
+    until_cancel = 0
+    buf = bytearray(HASH_CHUNK if total >= HASH_CHUNK else max(int(total), 1))
+    view = memoryview(buf)
+    with path.open("rb", buffering=0) as f:
         while True:
-            if cancelled and cancelled():
-                raise AppError(
-                    code="job_cancelled",
-                    message="Import was cancelled.",
-                    entity="evidence",
-                )
-            chunk = f.read(CHUNK)
-            if not chunk:
+            if cancelled and until_cancel <= 0:
+                if cancelled():
+                    raise AppError(
+                        code="job_cancelled",
+                        message="Import was cancelled.",
+                        entity="evidence",
+                    )
+                until_cancel = _CANCEL_EVERY
+            n = f.readinto(view)
+            if not n:
                 break
-            h.update(chunk)
-            done += len(chunk)
+            h.update(view[:n])
+            done += n
+            until_cancel -= n
             if progress and total > 0:
                 pct = min(100.0, (done / total) * 100.0)
                 bucket = int(pct)

@@ -65,6 +65,12 @@ def test_sha256_streams_large_file(tmp_path: Path) -> None:
     assert percents[-1] == 100 or percents[-1] >= 98
 
 
+def test_sha256_streams_unaligned_size(tmp_path: Path) -> None:
+    img = tmp_path / "odd.raw"
+    _write_image(img, (8 * 1024 * 1024) + 17)
+    assert sha256_file(img) == _sha256(img)
+
+
 def test_import_evidence_large_file_registers_once(tmp_path: Path) -> None:
     img = tmp_path / "dump.mem"
     _write_image(img, LARGE_BYTES)

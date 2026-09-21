@@ -54,12 +54,14 @@ def build_artifact_filename(
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
-    with path.open("rb") as f:
+    buf = bytearray(8 * 1024 * 1024)
+    view = memoryview(buf)
+    with path.open("rb", buffering=0) as f:
         while True:
-            chunk = f.read(1024 * 1024)
-            if not chunk:
+            n = f.readinto(view)
+            if not n:
                 break
-            h.update(chunk)
+            h.update(view[:n])
     return h.hexdigest()
 
 
