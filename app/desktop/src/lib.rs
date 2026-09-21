@@ -123,7 +123,7 @@ fn launch_plan_for_state(state: &EngineState) -> Result<EngineLaunchPlan, Engine
 
 /// Minimum time the splash stays visible after first paint.
 /// Long enough to read the brand mark; the main window still waits on `ui_ready`.
-const SPLASH_MS: u64 = 4000;
+const SPLASH_MS: u64 = 3000;
 /// If the UI never signals ready, still leave the splash so the app is usable.
 const SPLASH_FALLBACK_MS: u64 = 10000;
 /// Show a late splash if the page never reports the JPEG is decoded.
@@ -1082,8 +1082,8 @@ mod tests {
             "splash window must stay hidden until the JPEG is ready to paint"
         );
         assert!(
-            (3500..=5000).contains(&SPLASH_MS),
-            "brand splash min time must stay in the 3.5–5s range, got {SPLASH_MS}"
+            (2500..=4000).contains(&SPLASH_MS),
+            "brand splash min time must stay in the 2.5–4s range, got {SPLASH_MS}"
         );
         let splash_src = include_str!("lib.rs");
         assert!(
