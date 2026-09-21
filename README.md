@@ -1,22 +1,25 @@
 <p align="center">
-  <img src="docs/assets/dumplyzer-logo.png" alt="Dumplyzer" width="168">
+  <img src="docs/assets/dumplyzer-logo.png" alt="Dumplyzer" width="180">
 </p>
 
 <h1 align="center">Dumplyzer</h1>
-<p align="center">Advanced Memory Forensics Platform</p>
+<h3 align="center">Advanced Memory Forensics Platform</h3>
 
 <p align="center">
   <img src="https://img.shields.io/badge/release-v0.1.0-0B3D2E" alt="v0.1.0">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D6?logo=windows&logoColor=white" alt="Windows x64">
   <img src="https://img.shields.io/badge/runtime-offline-0B3D2E" alt="Offline">
-  <img src="https://img.shields.io/badge/Volatility-3%20·%202.28.0-6B4FBB" alt="Volatility 3">
+  <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/engine%20tests-passing-brightgreen" alt="Engine tests passing"></a>
+  <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/desktop%20tests-passing-brightgreen" alt="Desktop tests passing"></a>
+  <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/frontend%20build-passing-brightgreen" alt="Frontend build passing"></a>
+  <a href="docs/clean-machine-validation.md"><img src="https://img.shields.io/badge/install-Windows%2011%20x64-brightgreen" alt="Install tested on Windows 11 x64"></a>
   <a href="https://github.com/EmadAbedini/Dumplyzer"><img src="https://img.shields.io/badge/GitHub-EmadAbedini%2FDumplyzer-181717?logo=github&logoColor=white" alt="GitHub"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="Apache License 2.0"></a>
   <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-policy-informational" alt="Security policy"></a>
   <a href="https://www.linkedin.com/in/emad-abedini"><img src="https://img.shields.io/badge/LinkedIn-0077B5?logo=linkedin&logoColor=white" alt="LinkedIn"></a>
 </p>
 
-Do you want to investigate a Windows memory dump without assembling a forensic toolchain? Do you want processes, network activity, indicators, reconstructed binaries, and signatures in **one local workspace**?
+Do you want to investigate a memory dump without assembling a forensic toolchain? Do you want processes, network activity, indicators, reconstructed binaries, and signatures in **one local workspace**?
 
 You are in the right place.
 
@@ -41,6 +44,7 @@ Dumplyzer is a focused investigation UI, not a command-line wrapper and not a Sa
 - **One installer.** Python, the analysis engine, and supporting tools ship inside the Windows package. End users do not install a developer toolchain.
 - **Offline by design.** No network listener, no account system, no phone-home. The only optional network use is Microsoft's WebView2 bootstrapper when the runtime is missing during setup.
 - **Evidence stays put.** Dumplyzer records path, hash, and metadata. It does not copy the dump into Program Files or the user-data tree.
+- **Windows and Linux images.** Import Windows crash dumps, LiME images, ELF cores, QEMU/VMware snapshots, and raw physical memory. Quick Triage and Complete Analysis run the Windows Volatility pipeline (processes, modules, handles, VAD, and related views). Linux dumps can be imported and examined with Plugin Explorer (`linux.*` plugins).
 - **Two analysis modes, plus custom.** **Quick Triage** is a first look (OS/symbol status and the process list). **Complete Analysis** is the evidence-wide pass for processes, command lines, modules, network connections, handles, findings, IOCs, network artifacts, and timeline. **Custom Analysis** runs only the capabilities you select. Heavier jobs stay explicit so a triage run does not walk the whole dump or write reconstructed binaries.
 - **Process intelligence.** Process list, command lines, loaded modules/DLLs, open handles, and parent/child relationships (PPID, with a per-process Family view).
 - **Network.** Image-wide connections, harvested network indicators, and on-demand PCAP reconstruction (Ethernet/IP records carved from the dump; matching flows can be exported as `.pcap`). Connection metadata alone is not a packet capture.
@@ -133,11 +137,12 @@ The Microsoft Edge **WebView2** runtime is required. If it is already installed,
 
 | | |
 |---|---|
-| OS | Windows 11 x64 (install-tested on 10.0.26100) |
+| Desktop app | Windows 11 x64 (install-tested on 10.0.26100) |
 | Arch | x64 only |
+| Evidence | Windows and Linux memory images (crash dump, LiME, ELF core, raw / QEMU / VMware, …) |
 | App | **0.1.0** |
 | Engine runtime | Bundled CPython **3.12.10** |
-| Linux / macOS | Not a release target yet |
+| Linux / macOS hosts | Not a release target yet |
 
 ### 2. Build from source
 
@@ -224,7 +229,7 @@ This product was previously named MemScope. The engine import path remains `mems
 
 - Treat dumps and extracted artifacts as hostile.
 - Dumplyzer does not score malware and does not claim a verdict from signatures, capabilities, or strings.
-- Windows x64 only.
+- The desktop application is Windows x64. Linux and macOS hosts are not a release target yet. Evidence is not limited to Windows dumps.
 - Unsigned 0.1.0 artifacts may be blocked by SmartScreen until a signed build is published.
 - If WebView2 is absent, the installer bootstrapper needs Internet.
 
