@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Info } from "lucide-react";
+import { Info, Zap } from "lucide-react";
 import {
   ANALYSIS_PROFILE_COPY,
   ANALYSIS_PROFILE_ORDER,
@@ -135,6 +135,11 @@ export function AnalysisOptionsDialog({
                         {suggested ? (
                           <span className="analysis-profile-recommended-badge shrink-0 rounded-full px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide">
                             Recommended
+                          </span>
+                        ) : id === "recommended" ? (
+                          <span className="analysis-profile-fast-badge inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide">
+                            <Zap size={11} strokeWidth={2.5} aria-hidden />
+                            Fast
                           </span>
                         ) : null}
                       </div>
