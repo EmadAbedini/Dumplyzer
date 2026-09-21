@@ -90,7 +90,8 @@ cd app\desktop; cargo test; cargo build; cd ..\..
 | Path | Meaning |
 |------|---------|
 | `app/desktop/resources/runtime/` | Bundled engine runtime |
-| `app/desktop/target/release/dumplyzer.exe` | Unpackaged desktop binary |
+| `app/desktop/target/release/dumplyzer.exe` | Unpackaged cargo leftover. Tauri leaves this as `BUNDLE_TYPE_VAR_UNK`. **Not** the shipped hash. |
+| `app/desktop/target/release/bundle/nsis/payload/dumplyzer.exe` | Canonical shipped `dumplyzer.exe`, extracted from the NSIS payload (`BUNDLE_TYPE_VAR_NSS`). Use this hash for VirusTotal / signing of the app binary. |
 | `app/desktop/target/release/bundle/nsis/Dumplyzer_0.1.0_x64-setup.exe` | End-user NSIS installer (per-machine, WebView2 bootstrapper) |
 | `$env:CARGO_TARGET_DIR/release/bundle/` | Same artifact if `CARGO_TARGET_DIR` is overridden |
 | `packaging/cache/` | Downloaded zips |
@@ -136,6 +137,7 @@ User data (writable, not removed as part of a normal uninstall of binaries):
 - bundled `resources/rules/yara/bundled` memory and artifact rules are present
 - bundled `resources/tools/bulk_extractor/bulk_extractor64.exe` is present with matching SHA-256
 - exactly one NSIS `Dumplyzer_0.1.0_x64-setup.exe`; no MSI
+- NSIS payload `dumplyzer.exe` extracted to `bundle/nsis/payload/` (`BUNDLE_TYPE_VAR_NSS`); unpackaged leftover may differ by only the Tauri UNK/NSS stamp
 - `embedBootstrapper` WebView2 payload is staged and referenced
 
 It does not install the NSIS onto a clean VM.
@@ -170,7 +172,7 @@ Do not invent or commit a certificate. Do not mark artifacts as signed.
 
 Sign all of the following with the same Authenticode certificate, **after** a successful `tauri build`:
 
-1. `dumplyzer.exe` (the application binary inside the install tree / pre-bundle `target/release/dumplyzer.exe`)
+1. `bundle/nsis/payload/dumplyzer.exe` (the NSIS-stamped `BUNDLE_TYPE_VAR_NSS` binary that the installer actually ships). Do **not** treat `target/release/dumplyzer.exe` as the shipped app hash; Tauri restores that leftover to `BUNDLE_TYPE_VAR_UNK` after packaging.
 2. NSIS `Dumplyzer_0.1.0_x64-setup.exe`
 
 Signing only the installer and leaving `dumplyzer.exe` unsigned is incomplete. MSI is not an end-user artifact.

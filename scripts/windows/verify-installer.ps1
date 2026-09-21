@@ -152,6 +152,58 @@ foreach ($item in $nsis) {
     Write-Host ("installer {0} {1} MB sha256={2}" -f $item.Name, $sizeMb, $sha)
 }
 
+# Canonical shipped exe is the NSIS payload (Tauri stamps BUNDLE_TYPE_VAR_NSS).
+# target\release\dumplyzer.exe is the unpackaged leftover (BUNDLE_TYPE_VAR_UNK).
+$ExtractPy = Join-Path $PSScriptRoot "extract-nsis-main-exe.py"
+$PayloadDir = Join-Path $Bundle "nsis\payload"
+$PayloadExe = Join-Path $PayloadDir "dumplyzer.exe"
+New-Item -ItemType Directory -Force -Path $PayloadDir | Out-Null
+$packagedSha = (& py -3.12 $ExtractPy $nsis[0].FullName $PayloadExe).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $packagedSha) {
+    throw "failed to extract dumplyzer.exe from NSIS payload"
+}
+if (-not (Test-Path $PayloadExe)) { throw "extracted payload exe missing: $PayloadExe" }
+$payloadHash = (Get-FileHash $PayloadExe -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($payloadHash -ne $packagedSha) {
+    throw "extracted payload hash mismatch: python=$packagedSha file=$payloadHash"
+}
+$payloadBytes = [System.IO.File]::ReadAllBytes($PayloadExe)
+$payloadText = [System.Text.Encoding]::ASCII.GetString($payloadBytes)
+if ($payloadText -notmatch "BUNDLE_TYPE_VAR_NSS") {
+    throw "NSIS payload dumplyzer.exe is missing BUNDLE_TYPE_VAR_NSS"
+}
+if ($payloadText -match "BUNDLE_TYPE_VAR_UNK") {
+    throw "NSIS payload dumplyzer.exe still has BUNDLE_TYPE_VAR_UNK"
+}
+Write-Host ("packaged_dumplyzer {0} sha256={1}" -f $PayloadExe, $payloadHash)
+
+$releaseRoot = Split-Path $Bundle -Parent
+$leftoverExe = Join-Path $releaseRoot "dumplyzer.exe"
+if (-not (Test-Path $leftoverExe)) {
+    $leftoverExe = Join-Path $DesktopTarget "..\dumplyzer.exe"
+}
+if (Test-Path $leftoverExe) {
+    $leftoverHash = (Get-FileHash $leftoverExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    $leftoverBytes = [System.IO.File]::ReadAllBytes($leftoverExe)
+    Write-Host ("unpackaged_dumplyzer {0} sha256={1}" -f $leftoverExe, $leftoverHash)
+    if ($leftoverHash -eq $payloadHash) {
+        Write-Host "unpackaged_matches_payload (unexpected but acceptable)"
+    } else {
+        if ($leftoverBytes.Length -ne $payloadBytes.Length) {
+            throw "unpackaged dumplyzer.exe size $($leftoverBytes.Length) != payload $($payloadBytes.Length)"
+        }
+        $diff = 0
+        for ($i = 0; $i -lt $leftoverBytes.Length; $i++) {
+            if ($leftoverBytes[$i] -ne $payloadBytes[$i]) { $diff++ }
+        }
+        $leftoverAscii = [System.Text.Encoding]::ASCII.GetString($leftoverBytes)
+        if ($diff -ne 3 -or $leftoverAscii -notmatch "BUNDLE_TYPE_VAR_UNK" -or $leftoverAscii -match "BUNDLE_TYPE_VAR_NSS") {
+            throw "unpackaged vs NSIS payload differ by $diff bytes; expected only the 3-byte Tauri UNK/NSS stamp"
+        }
+        Write-Host "unpackaged_vs_payload only_tauri_bundle_type_stamp bytes=3"
+    }
+}
+
 $releaseRoot = Split-Path $Bundle -Parent
 $bePackaged = @(Get-ChildItem -Path $releaseRoot -Recurse -Filter "bulk_extractor64.exe" -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -match '[\\/]tools[\\/]bulk_extractor[\\/]' })
