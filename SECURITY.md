@@ -36,7 +36,7 @@ Dumplyzer is an offline, single-user forensic workstation. Memory images, extrac
 ## Packaging
 
 - Engine runtime zip is pinned by SHA-256 (see `packaging/windows/runtime-manifest.json`). WiX 3.14.1 remains in that manifest for optional MSI experiments; the shipped installer is NSIS.
-- NSIS/MSI default to `%ProgramFiles%\Dumplyzer` and require administrator rights. The engine is spawned by absolute path and does not add that directory to `PATH`.
+- NSIS defaults to `%ProgramFiles%\Dumplyzer` and requires administrator rights. The engine is spawned by absolute path and does not add that directory to `PATH`. WiX/MSI remains in the runtime manifest for optional experiments; it is not an end-user artifact.
 - DLL search for `python.exe` uses the runtime directory. Packaged engine `PATH` is reduced to `System32`.
 - Startup writes logs/tmp/database under `%LOCALAPPDATA%\Dumplyzer\`, not under Program Files or `%LOCALAPPDATA%\Programs\Dumplyzer`.
 

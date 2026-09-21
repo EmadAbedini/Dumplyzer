@@ -1,10 +1,10 @@
 # Contributing
 
+End users should install Dumplyzer from the Windows setup EXE ([README](README.md#install)). This document is for people changing the source.
+
 Prefer packaging, reliability, security, tests, and documentation unless a change is a clear bug fix or a discussed forensic feature. Architecture: [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Developer machine (source)
-
-Required:
+## Developer machine
 
 | Tool | Pinned / tested |
 |------|-----------------|
@@ -17,7 +17,9 @@ Required:
 
 Do not use a global Python 3.13 environment for the engine.
 
-First-time source setup (tests + optional venv):
+### First-time setup
+
+From the repository root:
 
 ```powershell
 py -3.12 -m venv engine\.venv
@@ -29,9 +31,9 @@ cd ..\desktop
 npm ci
 ```
 
-## UI/UX iteration (`tauri dev`)
+## Run from source (`tauri dev`)
 
-Work on the **development host** only. Do not install Node/Rust/Python on the clean-machine VM, and do not rebuild or copy the Windows installer for React/Tailwind tweaks.
+Work on the development host. Do not install Node, Rust, or Python on a clean-machine validation VM, and do not rebuild the Windows installer for React/Tailwind tweaks.
 
 ```powershell
 cd app\desktop
@@ -67,7 +69,9 @@ cargo test
 cargo build
 ```
 
-Release installer build (downloads official CPython embeddable and bundled tools with SHA-256 checks):
+## Windows installer
+
+This is a separate, heavier step than `tauri dev`. It downloads official CPython embeddable and bundled tools (SHA-256 pinned) and produces `Dumplyzer_0.1.0_x64-setup.exe`.
 
 ```powershell
 .\scripts\windows\build-release.ps1

@@ -11,13 +11,13 @@ This procedure produces the single NSIS installer. It does **not** perform a cle
 
 | Claim | Basis |
 |-------|--------|
-| Windows 11 x64 | Install-tested: Windows 11 Pro **10.0.26100** (offline NSIS, `docs/clean-machine-validation.md`) |
-| Windows 10 21H2+ x64 (build **19044**) | Documented support. Checked against dependencies; **not** install-tested. |
+| Windows 11 x64 | Install-tested: Windows 11 Pro **10.0.26100** (NSIS, `docs/clean-machine-validation.md`) |
+| Windows 10 21H2+ x64 (build **19044**) | Documented dependency floor for this packaging stack. |
 | WebView2 Evergreen technical floor | Windows 10 **1809** (build **17763**). Current Evergreen (Chromium 109+) dropped older Windows 10. |
 | Tauri 2.11 / NSIS `PerMonitorV2` | Windows 10 1607+; older builds ignore the extra manifest field |
 | Python 3.12.10 embeddable | Official CPython 3.12 Windows x64 |
 
-Do not treat Windows 10 as empirically validated until a 21H2+ guest has run this same installer.
+The executed clean-machine install is Windows 11 x64. See `docs/clean-machine-validation.md`.
 
 ## Why embeddable CPython (not PyInstaller)
 
@@ -196,7 +196,7 @@ Until that is done, SmartScreen and some enterprise policies will treat the inst
 
 ## Known limitations
 
-- Clean-machine NSIS install was executed on a Windows 11 x64 VM. See `docs/clean-machine-validation.md`. That run used an older offline WebView2 payload. Current packaging uses `embedBootstrapper`. Windows 10 was not install-tested.
+- Clean-machine NSIS install was executed on a Windows 11 x64 VM. See `docs/clean-machine-validation.md`. That run used an older offline WebView2 payload. Current packaging uses `embedBootstrapper`.
 - Default install directory is `%ProgramFiles%\Dumplyzer` (Windows system drive; elevation required). User data remains `%LOCALAPPDATA%\Dumplyzer`.
 - WebView2 Evergreen bootstrapper is packed into the NSIS installer (`embedBootstrapper`). If WebView2 is missing, setup downloads the runtime.
 - Volatility plugins that need capstone or pycryptodome may appear as import failures. That is intentional: those extras are not bundled. Failed imports must not be marked available. yara-python 4.5.4 **is** bundled, so Volatility YARA plugins may become available as a side effect.

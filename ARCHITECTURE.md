@@ -20,6 +20,18 @@ Memory image on disk (never copied into the install tree)
 
 The UI consumes normalized application data, not `vol.py` stdout.
 
+## Analysis profiles
+
+The UI offers three evidence-wide modes. Engine profile id `full` is labeled **Complete Analysis**; `recommended` is labeled **Quick Triage**.
+
+| Mode | What runs |
+|------|-----------|
+| Quick Triage | `windows.info` + `windows.pslist` (process list only) |
+| Complete Analysis | Processes, command lines, modules, network, handles, findings, IOCs, network artifacts, timeline |
+| Custom Analysis | The capabilities the analyst selected |
+
+PE reconstruction, YARA, CAPA, FLOSS, bulk_extractor, and PCAP reconstruction are separate jobs. They are not part of Complete Analysis.
+
 ## Repository
 
 ```
@@ -118,7 +130,7 @@ parameters, and schema version. Cache hits still create execution rows with `cac
 | FLOSS | Strings on extracted PE | Bundled official Windows EXE v3.1.1 |
 | bulk_extractor | Feature extraction on the dump | Bundled official Windows EXE v2.2.0 (GPLv3, separate process) |
 
-These jobs are explicit. Full Analysis does not auto-run Signature Detection, CAPA, FLOSS,
+These jobs are explicit. Complete Analysis does not auto-run Signature Detection, CAPA, FLOSS,
 bulk_extractor, or PE Extraction. Extracted PE files are labeled artifacts, not malware, and
 are never executed.
 

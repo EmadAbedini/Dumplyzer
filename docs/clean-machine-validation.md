@@ -33,7 +33,6 @@ Limitations of that run:
 - WebView2 Evergreen was already present, so first-time WebView2 install was not observed.
 - The installer under test packed the older offline WebView2 standalone payload. Current
   packaging uses `embedBootstrapper` instead.
-- Windows 10 was not install-tested.
 - The installer is unsigned.
 
 An earlier per-user NSIS (and a MemScope-branded build) was also installed on a Windows 11 guest.
@@ -41,7 +40,7 @@ Those results are superseded by the per-machine Dumplyzer installer.
 
 ## Procedure
 
-Use a Windows 10 21H2+ or Windows 11 x64 VM or spare host.
+Use a Windows 11 x64 VM or spare host.
 
 1. Copy only `Dumplyzer_*-setup.exe` onto the machine.
 2. Run the installer without extra flags (or `/S` when no GUI session is available).
@@ -55,7 +54,7 @@ Use a Windows 10 21H2+ or Windows 11 x64 VM or spare host.
 6. Empty Evidence: the UI should load without an imported image. A short splash should appear first.
 7. Memory-dump providers: Volatility 3 and PE Extraction should be available. bulk_extractor,
    CAPA, FLOSS, and Signature Detection should be available from the installer bundle.
-8. Export options should list HTML / JSON / CSV. Generating a report without evidence may fail
+8. Export options should list HTML / JSON / Excel. Generating a report without evidence may fail
    with an actionable error; that is acceptable.
 9. Confirm engine logs under `%LOCALAPPDATA%\Dumplyzer\logs\`.
 10. Exit. Confirm `dumplyzer.exe` and bundled `python.exe` are not left running.
@@ -67,7 +66,7 @@ When a memory dump is available:
 2. Run PE Extraction; confirm extracted files are labeled extracted PE artifacts.
 3. Run Signature Detection, CAPA, and FLOSS against an extracted PE, and a memory-dump
    Signature Detection scan from Overview.
-4. Generate an HTML/JSON export and confirm those sections appear when the jobs completed.
+4. Generate an HTML, JSON, or Excel export and confirm those sections appear when the jobs completed.
 
 Record OS build, installer filename, SHA-256, and each step as pass/fail. Do not mark a new
 run as passed unless it happened.
