@@ -101,13 +101,13 @@ def save_yara_settings(db: Database, provider: YaraProvider) -> dict[str, Any]:
 
 def yara_status(paths: AppPaths, db: Database) -> dict[str, Any]:
     provider = get_or_create_provider(paths, db)
-    return provider.availability()
+    return provider.availability(validate=False)
 
 
 def reload_yara_rules(paths: AppPaths, db: Database) -> dict[str, Any]:
     """Re-discover bundled and custom rules. Never modifies custom files."""
     paths.ensure()
-    return yara_status(paths, db)
+    return get_or_create_provider(paths, db).availability(validate=True)
 
 
 def configure_yara(paths: AppPaths, db: Database, settings: dict[str, Any]) -> dict[str, Any]:

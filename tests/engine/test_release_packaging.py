@@ -279,6 +279,15 @@ def test_optional_providers_unavailable_by_default(tmp_path: Path, monkeypatch: 
         assert "bundled" in (yara.get("status_summary") or "")
 
 
+def test_capabilities_status_rpc(tmp_path: Path) -> None:
+    handle_app_init({"data_dir": str(tmp_path / "ipc")})
+    caps = HANDLERS["capabilities.status"]({})
+    assert caps["volatility"]["ok"] is True
+    assert caps["volatility"].get("volatility3_version")
+    for key in ("pe_extraction", "capa", "floss", "yara", "bulk_extractor"):
+        assert "available" in caps[key]
+
+
 def test_plugin_explorer_discovers_without_evidence(tmp_path: Path) -> None:
     handle_app_init({"data_dir": str(tmp_path / "ipc")})
     listed = HANDLERS["plugins.list"]({})

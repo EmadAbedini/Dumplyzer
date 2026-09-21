@@ -225,9 +225,9 @@ class YaraProvider:
     timeout_secs: float = 60.0
     memory_timeout_secs: float = 300.0
 
-    def availability(self) -> dict[str, Any]:
+    def availability(self, *, validate: bool = True) -> dict[str, Any]:
         base = detect_yara()
-        inventory = self.compile_inventory()
+        inventory = self.compile_inventory(validate=validate)
         return {
             **base,
             "provider": self.name,
@@ -334,7 +334,7 @@ class YaraProvider:
                 out.append(path)
         return out
 
-    def compile_inventory(self, kind: str | None = None) -> dict[str, Any]:
+    def compile_inventory(self, kind: str | None = None, *, validate: bool = True) -> dict[str, Any]:
         files = self.list_rule_sources(kind)
         skipped: list[dict[str, str]] = []
         valid: list[Path] = []
@@ -350,20 +350,21 @@ class YaraProvider:
             except AppError as exc:
                 skipped.append({"path": str(path), "error": exc.message})
                 continue
-            try:
-                yara.compile(filepath=str(rf))
-            except Exception as exc:  # noqa: BLE001
-                skipped.append(
-                    {
-                        "path": str(rf),
-                        "error": str(exc).splitlines()[0] if str(exc) else "syntax error",
-                    }
-                )
-                log.info(
-                    "yara rule file skipped",
-                    extra={"channel": "tool", "path": str(rf), "error": str(exc)},
-                )
-                continue
+            if validate:
+                try:
+                    yara.compile(filepath=str(rf))
+                except Exception as exc:  # noqa: BLE001
+                    skipped.append(
+                        {
+                            "path": str(rf),
+                            "error": str(exc).splitlines()[0] if str(exc) else "syntax error",
+                        }
+                    )
+                    log.info(
+                        "yara rule file skipped",
+                        extra={"channel": "tool", "path": str(rf), "error": str(exc)},
+                    )
+                    continue
             valid.append(rf)
         memory_n = 0
         artifact_n = 0
@@ -425,7 +426,7 @@ class YaraProvider:
         import yara  # type: ignore
 
         if rule_files is None:
-            inventory = self.compile_inventory(kind)
+            inventory = self.compile_inventory(kind, validate=True)
             files = inventory["valid_files"]
             skipped = inventory["skipped"]
         else:

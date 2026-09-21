@@ -228,6 +228,30 @@ def test_bundled_root_preferred_over_user_tools(tmp_path: Path) -> None:
     assert Path(info["executable_path"]) != user.resolve()
 
 
+def test_availability_bundled_skips_version_spawn(tmp_path: Path) -> None:
+    bundled = tmp_path / "resources" / "tools" / "bulk_extractor"
+    exe = _write_dummy_exe(bundled / "bulk_extractor64.exe")
+    called: list[int] = []
+
+    def runner(*_a, **_k):
+        called.append(1)
+        return ProcessRun(returncode=0, stdout="bulk_extractor 2.2.0\n", stderr="")
+
+    p = BulkExtractorProvider(
+        tools_dir=tmp_path / "tools",
+        analysis_dir=tmp_path / "analysis",
+        artifacts_dir=tmp_path / "artifacts",
+        extra_tool_roots=[bundled],
+        runner=runner,
+    )
+    info = p.availability()
+    assert info["available"] is True
+    assert info["source"] == "bundled"
+    assert info["bulk_extractor_version"] == VERIFIED_RELEASE
+    assert Path(info["executable_path"]) == exe.resolve()
+    assert called == []
+
+
 def test_parse_version_output() -> None:
     assert parse_version_output("bulk_extractor 2.2.0\n") == "2.2.0"
     assert parse_version_output("bulk_extractor version 2.1.1") == "2.1.1"

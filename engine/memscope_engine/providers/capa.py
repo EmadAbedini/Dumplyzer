@@ -323,13 +323,14 @@ class CapaProvider:
                 f"An official override may also be placed in {tools or 'the Dumplyzer tools directory'}."
             )
             return base
-        version = self.detect_version(exe)
+        source = self._source_for(exe)
+        version = VERIFIED_RELEASE if source == "bundled" else self.detect_version(exe)
         base.update(
             {
                 "available": True,
                 "capa_version": version,
                 "executable_path": str(exe),
-                "source": self._source_for(exe),
+                "source": source,
             }
         )
         return base

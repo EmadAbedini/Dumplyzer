@@ -39,6 +39,15 @@ type VolInit = {
   volatility3_version?: string | null;
 };
 
+type CapabilitiesStatus = {
+  volatility?: VolInit;
+  pe_extraction?: PeExtractionStatus;
+  bulk_extractor?: BulkExtractorStatus;
+  capa?: CapaStatus;
+  floss?: FlossStatus;
+  yara?: YaraStatus;
+};
+
 const CHECKING_ROW: CapabilityRowState = {
   kind: "checking",
   detail: CHECKING_DETAIL,
@@ -113,11 +122,14 @@ function runOne(id: CapabilityId, work: () => Promise<void>): Promise<void> {
   return pending;
 }
 
-async function checkMemoryAnalysis(): Promise<void> {
-  const vol = await engineCall<VolInit>("volatility.init");
-  snapshot.volatilityVersion = vol.volatility3_version ?? snapshot.volatilityVersion;
-  const ok = vol.ok !== false && Boolean(vol.volatility3_version || vol.ok);
+function applyVolatility(vol: VolInit | undefined): void {
+  snapshot.volatilityVersion = vol?.volatility3_version ?? snapshot.volatilityVersion;
+  const ok = vol?.ok !== false && Boolean(vol?.volatility3_version || vol?.ok);
   markFromAvailable("memoryAnalysis", ok, "Available");
+}
+
+async function checkMemoryAnalysis(): Promise<void> {
+  applyVolatility(await engineCall<VolInit>("volatility.init"));
 }
 
 async function checkArtifactExtraction(): Promise<void> {
@@ -164,16 +176,40 @@ export function applySignatureDetection(status: YaraStatus): void {
   listeners.forEach((listener) => listener());
 }
 
+async function checkAllCombined(): Promise<void> {
+  const result = await engineCall<CapabilitiesStatus>("capabilities.status");
+  applyVolatility(result.volatility);
+  snapshot.peExtraction = result.pe_extraction ?? null;
+  markFromAvailable("peReconstruction", Boolean(result.pe_extraction?.available), "Available");
+  snapshot.bulkExtractor = result.bulk_extractor ?? null;
+  markFromAvailable("artifactExtraction", Boolean(result.bulk_extractor?.available), "Available");
+  snapshot.capa = result.capa ?? null;
+  markFromAvailable("capabilityAnalysis", Boolean(result.capa?.available), "Available");
+  snapshot.floss = result.floss ?? null;
+  markFromAvailable("stringAnalysis", Boolean(result.floss?.available), "Available");
+  if (result.yara) {
+    applySignatureDetection(result.yara);
+  } else {
+    setRow("signatureDetection", "unavailable", UNAVAILABLE_DETAIL);
+  }
+}
+
 /** Kick off background checks once. Safe to call from multiple views. */
 export function startCapabilityChecks(): void {
   if (started) return;
   started = true;
-  void runOne("memoryAnalysis", checkMemoryAnalysis);
-  void runOne("peReconstruction", checkPeReconstruction);
-  void runOne("artifactExtraction", checkArtifactExtraction);
-  void runOne("capabilityAnalysis", checkCapabilityAnalysis);
-  void runOne("stringAnalysis", checkStringAnalysis);
-  void runOne("signatureDetection", checkSignatureDetection);
+  void (async () => {
+    try {
+      await checkAllCombined();
+    } catch {
+      void runOne("memoryAnalysis", checkMemoryAnalysis);
+      void runOne("peReconstruction", checkPeReconstruction);
+      void runOne("artifactExtraction", checkArtifactExtraction);
+      void runOne("capabilityAnalysis", checkCapabilityAnalysis);
+      void runOne("stringAnalysis", checkStringAnalysis);
+      void runOne("signatureDetection", checkSignatureDetection);
+    }
+  })();
 }
 
 /** Re-run Signature Detection after Reload Rules. Does not restart other checks. */

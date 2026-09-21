@@ -75,6 +75,20 @@ def _vol_init() -> dict[str, Any]:
     }
 
 
+def handle_capabilities_status(_params: dict[str, Any]) -> dict[str, Any]:
+    """One-shot health payload for About / Settings. Avoids six serial RPCs."""
+    paths = _paths()
+    db = _db()
+    return {
+        "volatility": _vol_init(),
+        "pe_extraction": pe_extraction_workflows.pe_extraction_status(paths, db),
+        "bulk_extractor": bulk_extractor_workflows.bulk_extractor_status(paths, db),
+        "capa": capa_workflows.capa_status(paths, db),
+        "floss": floss_workflows.floss_status(paths, db),
+        "yara": yara_workflows.yara_status(paths, db),
+    }
+
+
 def _db() -> Database:
     db = _STATE.get("db")
     if db is None:
@@ -348,6 +362,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "app.paths": lambda _p: _paths().as_dict(),
     "app.shutdown": handle_app_shutdown,
     "volatility.init": lambda _p: _vol_init(),
+    "capabilities.status": handle_capabilities_status,
     "smoke.e2e": lambda _p: {
         "ok": True,
         "health": handle_health({}),

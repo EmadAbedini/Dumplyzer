@@ -15,6 +15,7 @@ from memscope_engine.errors import AppError
 from memscope_engine.paths import AppPaths
 from memscope_engine.providers.floss import (
     FlossProvider,
+    VERIFIED_RELEASE,
     build_scan_argv,
     build_version_argv,
     normalize_floss_json,
@@ -46,6 +47,29 @@ def test_availability_missing(tmp_path: Path) -> None:
     avail = p.availability()
     assert avail["available"] is False
     assert avail["license"]["bundled_in_memscope"] is True
+
+
+def test_availability_bundled_skips_version_spawn(tmp_path: Path) -> None:
+    bundled = tmp_path / "resources" / "tools" / "floss"
+    exe = _write_dummy_exe(bundled / "floss.exe")
+    called: list[int] = []
+
+    def runner(*_a, **_k):
+        called.append(1)
+        return ProcessRun(returncode=0, stdout="floss 3.1.1\n", stderr="")
+
+    p = FlossProvider(
+        tools_dir=tmp_path / "tools",
+        artifacts_dir=tmp_path / "artifacts",
+        extra_tool_roots=[bundled],
+        runner=runner,
+    )
+    info = p.availability()
+    assert info["available"] is True
+    assert info["source"] == "bundled"
+    assert info["floss_version"] == VERIFIED_RELEASE
+    assert Path(info["executable_path"]) == exe.resolve()
+    assert called == []
 
 
 def test_version_and_argv(tmp_path: Path) -> None:

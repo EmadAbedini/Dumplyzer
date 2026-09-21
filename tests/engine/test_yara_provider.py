@@ -435,6 +435,24 @@ def test_yara_unavailable_path(monkeypatch, tmp_path: Path) -> None:
     assert "yara-python" not in (ei.value.message or "").lower()
 
 
+def test_yara_status_counts_without_compiling_invalid_custom(tmp_path: Path) -> None:
+    _require_yara()
+    from memscope_engine.server import HANDLERS, handle_app_init
+
+    handle_app_init({"data_dir": str(tmp_path / "ipc")})
+    custom = AppPaths(tmp_path / "ipc").yara_rules_custom
+    (custom / "bad.yar").write_text(
+        "rule broken { condition: not_a_thing }\n",
+        encoding="utf-8",
+    )
+    status = HANDLERS["yara.status"]({})
+    assert status["available"] is True
+    assert int(status.get("custom_rule_count") or 0) == 1
+    assert int(status.get("skipped_rule_file_count") or 0) == 0
+    reloaded = HANDLERS["yara.reload"]({})
+    assert int(reloaded.get("skipped_rule_file_count") or 0) >= 1
+
+
 def test_yara_reload_rpc(tmp_path: Path) -> None:
     from memscope_engine.server import HANDLERS, handle_app_init
 
