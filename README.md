@@ -12,7 +12,7 @@
   <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/engine%20tests-passing-brightgreen" alt="Engine tests passing"></a>
   <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/desktop%20tests-passing-brightgreen" alt="Desktop tests passing"></a>
   <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/frontend%20build-passing-brightgreen" alt="Frontend build passing"></a>
-  <a href="docs/clean-machine-validation.md"><img src="https://img.shields.io/badge/install-Windows%2011%20x64-brightgreen" alt="Install tested on Windows 11 x64"></a>
+  <a href="docs/clean-machine-validation.md"><img src="https://img.shields.io/badge/install-Windows%2010%2F11%20x64-brightgreen" alt="Install tested on Windows 10 and 11 x64"></a>
   <a href="https://github.com/EmadAbedini/Dumplyzer"><img src="https://img.shields.io/badge/GitHub-EmadAbedini%2FDumplyzer-181717?logo=github&logoColor=white" alt="GitHub"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="Apache License 2.0"></a>
   <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-policy-informational" alt="Security policy"></a>
@@ -39,6 +39,7 @@ Analysis runs locally. The memory image stays where you imported it. There is no
 <p align="center">
   <a href="#install"><strong>Install</strong></a> ·
   <a href="#features"><strong>Features</strong></a> ·
+  <a href="#windows-kernel-symbols"><strong>Kernel symbols</strong></a> ·
   <a href="#analysis-components"><strong>Analysis components</strong></a> ·
   <a href="#architecture"><strong>Architecture</strong></a> ·
   <a href="#documentation"><strong>Docs</strong></a>
@@ -51,8 +52,9 @@ Analysis runs locally. The memory image stays where you imported it. There is no
 Dumplyzer is a focused investigation UI, not a command-line wrapper and not a SaaS console.
 
 - **One installer.** Python, the analysis engine, and supporting tools ship inside the Windows package. End users do not install a developer toolchain.
-- **Offline by design.** No network listener, no account system, no phone-home. The only optional network use is Microsoft's WebView2 bootstrapper when the runtime is missing during setup.
+- **Offline by design.** No network listener, no account system, no phone-home. The two optional Microsoft downloads are explicit: WebView2 during setup if it is missing, and a **single kernel PDB** when you start Windows analysis (see [Kernel symbols](#windows-kernel-symbols)).
 - **Evidence stays put.** Dumplyzer records path, hash, and metadata. It does not copy the dump into Program Files or the user-data tree.
+- **Windows kernel symbols on demand.** Windows memory analysis needs type information for the NT kernel that was running when the dump was taken — the PDB (or Volatility ISF) for **that OS build**, not a generic pack. **Download & Continue** is the recommended path; you can instead browse to a matching file.
 - **Windows and Linux images.** Import Windows crash dumps, LiME images, ELF cores, QEMU/VMware snapshots, and raw physical memory. Quick Triage and Complete Analysis run the Windows Volatility pipeline (processes, modules, handles, VAD, and related views). Linux dumps can be imported and examined with Plugin Explorer (`linux.*` plugins).
 - **Two analysis modes, plus custom.** **Quick Triage** is a first look (OS/symbol status and the process list). **Complete Analysis** is the evidence-wide pass for processes, command lines, modules, network connections, handles, findings, IOCs, network artifacts, and timeline. **Custom Analysis** runs only the capabilities you select. Heavier jobs stay explicit so a triage run does not walk the whole dump or write reconstructed binaries.
 - **Process intelligence.** Process list, command lines, loaded modules/DLLs, open handles, and parent/child relationships (PPID, with a per-process Family view).
@@ -89,7 +91,7 @@ A memory image is optional. Empty Evidence is a valid first-launch state.
 
 ## Analysis components
 
-Dumplyzer integrates established open-source engines. They are **bundled in the installer**, invoked locally, and never downloaded at runtime.
+Dumplyzer integrates established open-source engines. They are **bundled in the installer** and invoked locally. They are not downloaded when you run a job. The only optional analysis-time download is a Windows kernel PDB, and only after you agree ([Kernel symbols](#windows-kernel-symbols)).
 
 | Capability | Role | Bundled implementation |
 |------------|------|------------------------|
@@ -138,7 +140,9 @@ You do **not** need Python, Node, Rust, or a source checkout. This is the suppor
 2. Run the installer. It defaults to `%ProgramFiles%\Dumplyzer` and requires administrator rights.
 3. Launch **Dumplyzer** from the Start menu.
 
-The Microsoft Edge **WebView2** runtime is required. If it is already installed, setup skips it. If it is missing, the installer embeds a small Evergreen bootstrapper that downloads WebView2 from Microsoft (Internet needed for that case only).
+The Microsoft Edge **WebView2** runtime is required. If it is already installed, setup skips it. If it is missing, setup asks whether to download it now or whether you will install WebView2 yourself and run the installer again. Cancelling that download exits setup.
+
+Windows dumps also need a matching kernel PDB the first time you analyze a given OS build. That is handled in the app, not by the installer — see [Windows kernel symbols](#windows-kernel-symbols).
 
 0.1.0 installers are **unsigned**. SmartScreen or organization policy may warn on first run.
 
@@ -146,12 +150,22 @@ The Microsoft Edge **WebView2** runtime is required. If it is already installed,
 
 | | |
 |---|---|
-| Desktop app | Windows 11 x64 (install-tested on 10.0.26100) |
+| Desktop app | Windows 10 22H2+ / Windows 11, x64 |
 | Arch | x64 only |
 | Evidence | Windows and Linux memory images (crash dump, LiME, ELF core, raw / QEMU / VMware, …) |
 | App | **0.1.0** |
 | Engine runtime | Bundled CPython **3.12.10** |
 | Linux / macOS hosts | Not a release target yet |
+
+Additional hosts where the installed app was run:
+
+| Edition | Version | OS build | Experience |
+|---------|---------|----------|------------|
+| Windows 11 Pro | 24H2 | 26100.1742 | Windows Feature Experience Pack 1000.26100.18.0 |
+| Windows 10 Pro | 22H2 | 19045.2006 | Windows Feature Experience Pack 120.2212.4180.0 |
+| Windows 10 Education | 22H2 | 19045.6456 | |
+
+A separate clean-machine NSIS checklist (no developer toolchain on the guest) is recorded for Windows 11 Pro 10.0.26100 in [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
 
 ### 2. Build from source
 
@@ -204,6 +218,23 @@ The installer lands at `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.0_x
 
 Tests, engine notes, and packaging details: [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/windows-release.md](docs/windows-release.md).
 
+## Windows kernel symbols
+
+Volatility 3 cannot walk a Windows dump without type information for the kernel that produced it. That information is **build-specific**: a dump from Windows 11 24H2 (for example build 26100.1742) needs the PDB for that kernel, not a Windows 10 22H2 symbol file, and not a generic "Windows symbols" archive.
+
+The NSIS installer does **not** ship Microsoft PDBs or the large Volatility `windows.zip` pack. Dumplyzer asks the first time you start **Quick Triage**, **Complete Analysis**, or **Custom Analysis** on a Windows image whose symbols are not already cached. Linux images do not use this path.
+
+Two ways to continue. **Download is the recommended one.**
+
+| Path | When to use |
+|------|-------------|
+| **Download & Continue** (recommended) | The machine can reach Microsoft. Dumplyzer fetches **only that dump's kernel PDB**, verifies it, converts it to a Volatility ISF, and caches it. Later dumps from the same build reuse the cache. Faster, and you do not have to hunt for the right file. |
+| **Browse File** | Air-gapped or policy-blocked networks, or you already have the matching `.pdb` or ISF (`.json` / `.json.xz` / `.json.gz`). The file must match the captured kernel; a PDB from a different build will not analyze that dump. |
+
+Download never starts by itself. You confirm in the dialog. Closing the prompt keeps the imported dump; you can run analysis again when you are ready.
+
+Cached symbols live under `%LOCALAPPDATA%\Dumplyzer\symbols\`, not in Program Files. Uninstall does not remove them unless **Delete app data** is checked.
+
 ## Data locations
 
 Install binaries and user data are separate.
@@ -214,11 +245,13 @@ Install binaries and user data are separate.
 | User data | `%LOCALAPPDATA%\Dumplyzer\` |
 | Database | `%LOCALAPPDATA%\Dumplyzer\memscope.db` |
 | Logs / cache / artifacts / exports | under the user-data directory |
+| UI profile (WebView2) | `%LOCALAPPDATA%\Dumplyzer\webview\` |
+| Kernel symbols | `%LOCALAPPDATA%\Dumplyzer\symbols\` (per-build PDB/ISF after Download & Continue, or a file you browse to) |
 | Signature rules | `%LOCALAPPDATA%\Dumplyzer\rules\yara\` (`bundled\` refreshed on upgrade, `custom\` never overwritten) |
 
 Override the data directory with `DUMPLYZER_DATA_DIR` only for tests or support.
 
-Uninstall does not delete user data. SQLite migrations are additive; opening an older `memscope.db` upgrades the schema and keeps existing evidence.
+Uninstall keeps user data unless **Delete app data** is checked. That option removes `%LOCALAPPDATA%\Dumplyzer\` (database, logs, cache, WebView2 profile) and leftover identifier folders such as `%LOCALAPPDATA%\com.dumplyzer.workbench\`. SQLite migrations are additive; opening an older `memscope.db` upgrades the schema and keeps existing evidence.
 
 This product was previously named MemScope. The engine import path remains `memscope_engine`, and the database file remains `memscope.db`. If `%LOCALAPPDATA%\MemScope\memscope.db` exists and the Dumplyzer database does not, first launch copies the older data directory. The source is not deleted.
 
@@ -240,7 +273,8 @@ This product was previously named MemScope. The engine import path remains `mems
 - Dumplyzer does not score malware and does not claim a verdict from signatures, capabilities, or strings.
 - The desktop application is Windows x64. Linux and macOS hosts are not a release target yet. Evidence is not limited to Windows dumps.
 - Unsigned 0.1.0 artifacts may be blocked by SmartScreen until a signed build is published.
-- If WebView2 is absent, the installer bootstrapper needs Internet.
+- If WebView2 is absent, setup asks before downloading it. Cancelling that download exits the installer.
+- Windows analysis needs the kernel PDB for **that dump's OS build**. Dumplyzer asks before downloading it. **Download & Continue** is the recommended path; you can instead browse to a matching `.pdb` or ISF. See [Windows kernel symbols](#windows-kernel-symbols).
 
 See [SECURITY.md](SECURITY.md).
 
