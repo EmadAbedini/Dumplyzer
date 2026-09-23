@@ -4,6 +4,7 @@ import type {
   AppErrorPayload,
   Evidence,
   Job,
+  KernelSymbolNeed,
 } from "./types";
 
 export function selectAllIds(catalog: AnalysisProfileCatalog): string[] {
@@ -182,11 +183,53 @@ export function jobErrorPayload(job: Job, fallbackMessage: string): AppErrorPayl
       : typeof err?.app_code === "string"
         ? err.app_code
         : undefined;
+  const data =
+    err && typeof err.data === "object" && err.data && !Array.isArray(err.data)
+      ? (err.data as Record<string, unknown>)
+      : undefined;
   return {
     message: typeof err?.message === "string" ? err.message : fallbackMessage,
     app_code: appCode,
     suggestion: typeof err?.suggestion === "string" ? err.suggestion : undefined,
+    data,
   };
+}
+
+export function kernelSymbolNeedFromError(
+  err: AppErrorPayload | Record<string, unknown> | null | undefined,
+): KernelSymbolNeed | null {
+  if (!err) return null;
+  const rec = err as Record<string, unknown>;
+  const nested =
+    rec.data && typeof rec.data === "object" && !Array.isArray(rec.data)
+      ? (rec.data as Record<string, unknown>)
+      : rec;
+  const code = String(rec.app_code || rec.code || nested.app_code || "");
+  const guid = String(nested.guid || rec.guid || "");
+  const ageRaw = nested.age ?? rec.age;
+  const age = typeof ageRaw === "number" ? ageRaw : Number(ageRaw);
+  if (code !== "kernel_symbols_required" || !guid || !Number.isFinite(age)) {
+    return null;
+  }
+  const pdbName = String(nested.pdb_name || rec.pdb_name || "ntkrnlmp.pdb");
+  return {
+    pdb_name: pdbName,
+    guid,
+    age,
+    filename_pdb: String(nested.filename_pdb || pdbName),
+    filename_isf: String(nested.filename_isf || `${guid}-${age}.json.xz`),
+    download_url: String(nested.download_url || ""),
+    dest_dir: String(
+      nested.dest_dir || rDummyLocalAppdataSymbols(),
+    ),
+    accepted_extensions: Array.isArray(nested.accepted_extensions)
+      ? nested.accepted_extensions.map((x) => String(x))
+      : [".pdb", ".json", ".json.xz", ".json.gz"],
+  };
+}
+
+function rDummyLocalAppdataSymbols(): string {
+  return "%LOCALAPPDATA%\\Dumplyzer\\symbols\\windows";
 }
 
 const STRUCTURE_LEAK =

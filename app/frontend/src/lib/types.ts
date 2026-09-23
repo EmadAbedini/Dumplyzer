@@ -5,6 +5,18 @@ export type AppErrorPayload = {
   suggestion?: string;
   entity?: string;
   raw?: string;
+  data?: Record<string, unknown>;
+};
+
+export type KernelSymbolNeed = {
+  pdb_name: string;
+  guid: string;
+  age: number;
+  filename_pdb: string;
+  filename_isf: string;
+  download_url: string;
+  dest_dir: string;
+  accepted_extensions: string[];
 };
 
 export type Evidence = {
@@ -727,6 +739,7 @@ export type CapabilityCoverage = {
   state: AnalysisCoverageState;
   count: number | null;
   updating?: boolean;
+  waitingForPdb?: boolean;
 };
 
 export type AnalysisCoverage = {

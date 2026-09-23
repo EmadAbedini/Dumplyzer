@@ -50,11 +50,30 @@ pub fn memscope_data_dir() -> Result<PathBuf, String> {
     Ok(local.join("Dumplyzer"))
 }
 
+/// WebView2 profile directory. Program Files is read-only for a normal user;
+/// Chromium cache belongs next to other Dumplyzer user data, not a second
+/// `%LOCALAPPDATA%\com.dumplyzer.workbench` tree.
+pub fn apply_webview2_user_data_folder() -> Result<PathBuf, String> {
+    if let Ok(existing) = env::var("WEBVIEW2_USER_DATA_FOLDER") {
+        let trimmed = existing.trim();
+        if !trimmed.is_empty() {
+            let path = PathBuf::from(trimmed);
+            fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+            return Ok(path);
+        }
+    }
+    let dir = memscope_data_dir()?.join("webview");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    env::set_var("WEBVIEW2_USER_DATA_FOLDER", &dir);
+    Ok(dir)
+}
+
 pub fn user_data_subdir(kind: &str) -> Result<PathBuf, String> {
     let root = memscope_data_dir()?;
     let rel = match kind {
         "yara_rules" | "yara" => PathBuf::from("rules").join("yara"),
         "yara_rules_custom" | "yara_custom" => PathBuf::from("rules").join("yara").join("custom"),
+        "symbols" => PathBuf::from("symbols"),
         _ => return Err("Unknown folder.".into()),
     };
     Ok(root.join(rel))
@@ -612,6 +631,44 @@ mod tests {
     }
 
     #[test]
+    fn webview2_user_data_lives_under_dumplyzer() {
+        let previous_data = env::var_os("DUMPLYZER_DATA_DIR");
+        let previous_legacy = env::var_os("MEMSCOPE_DATA_DIR");
+        let previous_wv = env::var_os("WEBVIEW2_USER_DATA_FOLDER");
+        let tmp = env::temp_dir().join(format!(
+            "memscope-wv-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        env::set_var("DUMPLYZER_DATA_DIR", &tmp);
+        env::remove_var("MEMSCOPE_DATA_DIR");
+        env::remove_var("WEBVIEW2_USER_DATA_FOLDER");
+        let dir = apply_webview2_user_data_folder().expect("webview dir");
+        assert_eq!(dir, tmp.join("webview"));
+        assert!(dir.is_dir());
+        assert_eq!(
+            env::var("WEBVIEW2_USER_DATA_FOLDER").expect("env"),
+            dir.to_string_lossy().as_ref()
+        );
+        let _ = fs::remove_dir_all(&tmp);
+        match previous_data {
+            Some(v) => env::set_var("DUMPLYZER_DATA_DIR", v),
+            None => env::remove_var("DUMPLYZER_DATA_DIR"),
+        }
+        match previous_legacy {
+            Some(v) => env::set_var("MEMSCOPE_DATA_DIR", v),
+            None => env::remove_var("MEMSCOPE_DATA_DIR"),
+        }
+        match previous_wv {
+            Some(v) => env::set_var("WEBVIEW2_USER_DATA_FOLDER", v),
+            None => env::remove_var("WEBVIEW2_USER_DATA_FOLDER"),
+        }
+    }
+
+    #[test]
     fn bundled_bulk_extractor_dir_is_beside_runtime() {
         let tmp = env::temp_dir().join(format!(
             "memscope-be-{}-{}",
@@ -676,6 +733,8 @@ mod tests {
         let custom = user_data_subdir("yara_rules_custom").expect("custom yara dir");
         assert!(custom.ends_with(Path::new("rules").join("yara").join("custom")));
         assert!(custom.starts_with(&dir));
+        let symbols = user_data_subdir("symbols").expect("symbols dir");
+        assert!(symbols.ends_with("symbols"));
         match previous {
             Some(v) => env::set_var("MEMSCOPE_DATA_DIR", v),
             None => env::remove_var("MEMSCOPE_DATA_DIR"),

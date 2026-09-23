@@ -9,6 +9,7 @@ Extracted files are labeled as extracted PE artifacts, never as malware.
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -36,20 +37,6 @@ DEFAULT_METHODS = (
 )
 OPTIONAL_METHODS = (METHOD_CACHED_FILE,)
 EXTRACTION_METHODS = DEFAULT_METHODS + OPTIONAL_METHODS
-
-
-def _import_pedump() -> bool:
-    try:
-        from volatility3.plugins.windows.pedump import PEDump  # noqa: F401
-
-        return True
-    except ImportError:
-        try:
-            from volatility3.framework.plugins.windows.pedump import PEDump  # noqa: F401
-
-            return True
-        except ImportError:
-            return False
 
 
 def classify_pe_bytes(data: bytes) -> dict[str, Any]:
@@ -315,14 +302,13 @@ class PeExtractionProvider:
         reason = None
         suggestion = None
         try:
-            from volatility3.framework import constants
-
-            vol_ver = getattr(constants, "PACKAGE_VERSION", None)
-        except Exception as exc:  # noqa: BLE001
-            reason = f"Volatility 3 is not importable ({type(exc).__name__})."
+            vol_ver = version("volatility3")
+        except PackageNotFoundError as exc:
+            reason = f"Volatility 3 is not installed ({type(exc).__name__})."
             suggestion = "Reinstall Dumplyzer so the bundled Volatility 3 runtime is present."
             return self._base(False, vol_ver, pedump, reason, suggestion)
-        pedump = _import_pedump()
+        # Same Volatility 3 wheel. Do not import windows.pedump here.
+        pedump = True
         if not pedump:
             reason = "Volatility 3 windows.pedump is not available."
             suggestion = "PE reconstruction requires windows.pedump from Volatility 3."

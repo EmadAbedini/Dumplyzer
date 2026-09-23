@@ -257,6 +257,8 @@ def test_job_writes_pcap_outside_evidence(tmp_path: Path) -> None:
     assert image.stat().st_mtime_ns == mtime
     assert image.stat().st_size == size
     assert LIMITATIONS[0] in recon["limitations"]
+    assert recon["limitations"] == LIMITATIONS
+    assert len(LIMITATIONS) == 2
     db.close()
 
 

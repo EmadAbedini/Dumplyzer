@@ -26,6 +26,7 @@ import { ResultFilterBar } from "./ResultFilterBar";
 import { ConsoleOutput, ResultTable } from "./PluginOutputViews";
 import { RefreshButton, StatusToast, useStatusToast } from "./StatusToast";
 import { PLUGIN_JOB_BUSY_HINT } from "./Sidebar";
+import { CenteredLoading } from "./CoverageStatus";
 
 export function PluginExplorerView({
   evidence,
@@ -284,8 +285,9 @@ export function PluginExplorerView({
             <Badge>generic</Badge>
           </div>
           <div className="text-[11px] text-muted">
-            Volatility {catalog?.volatility_version ?? "…"} · {catalog?.plugin_count ?? 0}{" "}
-            plugins. Dedicated views (Processes, Memory) remain the guided workflow.
+            {catalog
+              ? `Volatility ${catalog.volatility_version} · ${catalog.plugin_count} plugins. Dedicated views (Processes, Memory) remain the guided workflow.`
+              : "Loading plugin catalog…"}
           </div>
           <ClearableInput
             placeholder="Search plugins"
@@ -317,7 +319,12 @@ export function PluginExplorerView({
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          {items.map((p) => (
+          {catalog == null ? (
+            <CenteredLoading label="Loading plugins…" />
+          ) : items.length === 0 ? (
+            <div className="p-3 text-muted">No plugins match the current filter.</div>
+          ) : (
+            items.map((p) => (
             <button
               key={p.id}
               type="button"
@@ -335,9 +342,7 @@ export function PluginExplorerView({
                 {p.available ? (p.runnable ? "runnable" : "unsupported for evidence") : "unavailable"}
               </div>
             </button>
-          ))}
-          {items.length === 0 && (
-            <div className="p-3 text-muted">No plugins match the current filter.</div>
+            ))
           )}
         </div>
       </div>

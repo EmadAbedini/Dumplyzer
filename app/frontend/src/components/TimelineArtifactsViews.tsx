@@ -289,7 +289,7 @@ export function TimelineView({
     "The timeline is built from process, network, module, and other records already stored — not by rescanning the dump.";
   const timelineNotAnalyzedHint = showLimitedNote
     ? "You can still rebuild from whatever is already stored."
-    : "Use Rebuild from stored results to build a timeline from stored records, or include Timeline in Complete or Custom Analysis.";
+    : "Use Rebuild From Extracted Records to build a timeline from stored records, or include Timeline in Complete or Custom Analysis.";
   const timelineAnalyzedZeroDetail = showLimitedNote
     ? "The timeline was built from stored records and found no dump-time events."
     : "No dump-time events were recovered from this image.";
@@ -309,7 +309,7 @@ export function TimelineView({
           {showRebuild ? (
             <span className="inline-flex" title={STORED_ACTION_TITLE}>
               <Button size="sm" onClick={() => void rebuild()} disabled={busy || updating}>
-                {busy ? "Building…" : "Rebuild from stored results"}
+                {busy ? "Building…" : "Rebuild From Extracted Records"}
               </Button>
             </span>
           ) : null}

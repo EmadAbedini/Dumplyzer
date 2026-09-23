@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
 import { activeJobOfKind, isActiveJobStatus } from "../lib/analysisOptions";
 import { jobProgressPercentText } from "../lib/jobDisplay";
@@ -128,6 +128,13 @@ export function NetworkView({
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
   const { toast, showToast } = useStatusToast();
+  const pcapJobActive = activeJobs.some(
+    (job) => job.kind === "pcap_reconstruction" && isActiveJobStatus(job.status),
+  );
+  const pcapJobActiveRef = useRef(pcapJobActive);
+  pcapJobActiveRef.current = pcapJobActive;
+  const sawPcapJob = useRef(false);
+  const [pcapPending, setPcapPending] = useState(false);
 
   const load = useCallback(async () => {
     if (!evidenceId) {
@@ -135,6 +142,7 @@ export function NetworkView({
       setArtifacts([]);
       setPcap(null);
       setLoadedEvidenceId(null);
+      setPcapPending(false);
       return;
     }
     try {
@@ -153,11 +161,13 @@ export function NetworkView({
       setTypeCounts(art.type_counts ?? {});
       setPcap(recon.latest);
       setLoadedEvidenceId(evidenceId);
+      if (!pcapJobActiveRef.current) setPcapPending(false);
     } catch (e) {
       setConnections([]);
       setArtifacts([]);
       setPcap(null);
       setLoadedEvidenceId(evidenceId);
+      if (!pcapJobActiveRef.current) setPcapPending(false);
       onError(e instanceof EngineClientError ? e.message : String(e));
     }
   }, [evidenceId, onError]);
@@ -165,6 +175,18 @@ export function NetworkView({
   useEffect(() => {
     void load();
   }, [load, refreshToken]);
+
+  useEffect(() => {
+    if (pcapJobActive) {
+      sawPcapJob.current = true;
+      setPcapPending(true);
+      return;
+    }
+    if (sawPcapJob.current) {
+      sawPcapJob.current = false;
+      void load();
+    }
+  }, [pcapJobActive, load]);
 
   const flowByConnection = useMemo(() => {
     const map = new Map<string, PcapFlowResult>();
@@ -197,10 +219,11 @@ export function NetworkView({
   const recon = pcap?.reconstruction;
   const pcapJob = activeJobOfKind(activeJobs, "pcap_reconstruction");
   const reconstructing =
+    pcapPending ||
     recon?.status === "running" ||
     recon?.ui_state === "reconstructing" ||
     recon?.status === "queued" ||
-    (pcapJob != null && isActiveJobStatus(pcapJob.status));
+    pcapJobActive;
   const pcapQueued = pcapJob?.status === "queued" || recon?.status === "queued";
   const pcapPercent = jobProgressPercentText(pcapJob, nowMs);
   const actionsLocked = busy || jobsRunning;

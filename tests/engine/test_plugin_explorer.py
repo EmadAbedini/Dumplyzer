@@ -22,6 +22,7 @@ from memscope_engine.volatility.discovery import (
     plugin_runnable_with_evidence,
     resolve_plugin_class,
     volatility_version,
+    warmup_plugin_catalog,
 )
 from memscope_engine.volatility.requirements import (
     normalize_requirement,
@@ -89,6 +90,15 @@ def test_plugin_enumeration_and_version() -> None:
             assert item["class_name"]
         else:
             assert item["discovery_errors"]
+
+
+def test_plugin_catalog_warmup_is_ready_after_discover() -> None:
+    catalog = discover_plugins()
+    warmed = warmup_plugin_catalog()
+    assert warmed["ok"] is True
+    assert warmed["ready"] is True
+    again = discover_plugins()
+    assert again["plugin_count"] == catalog["plugin_count"]
 
 
 def test_discovery_failures_are_not_marked_available() -> None:
@@ -579,6 +589,8 @@ def test_ipc_round_trip(tmp_path: Path, monkeypatch) -> None:
 
     init = handle_app_init({"data_dir": str(tmp_path / "ipcdata")})
     assert init["schema_version"] == SCHEMA_VERSION
+    warm = HANDLERS["plugins.warmup"]({})
+    assert warm["ok"] is True
     listed = HANDLERS["plugins.list"]({})
     assert listed["plugin_count"] >= 50
     assert listed["volatility_version"]

@@ -45,11 +45,8 @@ _PCAP_MAGIC_BE = b"\xa1\xb2\xc3\xd4"
 _PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
 
 LIMITATIONS = [
-    "A memory image is not a packet capture. Recovered records are packet-shaped bytes found in RAM, not a complete conversation.",
-    "Capture timestamps are not present on carved packets; PCAP timestamps are unset (0).",
-    "Missing bytes are never invented. Truncated records are stored with the recovered length only.",
-    "packets.pcap is Ethernet IPv4. Raw IP and IPv6-looking RAM bytes are not used as the capture.",
-    "Connection metadata from Network Connections is not a PCAP. Metadata-only flows have no packet file.",
+    "Packets recovered from RAM, not a complete capture. Truncated frames keep only the recovered bytes; timestamps are unset.",
+    "Ethernet IPv4 only. A Network Connections row is not a PCAP - metadata-only flows have no packet file.",
 ]
 
 
@@ -899,7 +896,7 @@ def _recon_dto(row: dict[str, Any]) -> dict[str, Any]:
         "output_path": row.get("output_path"),
         "output_dir": row.get("output_dir"),
         "files": _json_load(row.get("files_json"), []),
-        "limitations": _json_load(row.get("limitations_json"), LIMITATIONS),
+        "limitations": LIMITATIONS,
         "observed": _json_load(row.get("observed_json"), {}),
         "error": err,
         "started_at": row.get("started_at"),

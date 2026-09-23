@@ -22,6 +22,22 @@ from memscope_engine.version import (
 
 LEGACY_BUNDLE_ID = LEGACY_APP_IDENTIFIER
 
+_SYMBOLS_README = """Dumplyzer Volatility 3 symbol tables (ISF)
+
+Windows memory analysis needs kernel ISF/PDB files for the dump's exact
+Windows build. Dumplyzer does not download them until you choose to, and it
+never pulls the full 800 MB pack by itself.
+
+Place files here:
+
+  windows\\<pdb name>\\<GUID>-<age>.json.xz   Volatility ISF for one build
+  *.pdb                                      Microsoft PDB (imported via the app)
+  windows.zip                                Optional official ISF pack (not required)
+
+Linux and macOS dumps never auto-download; they require ISF files you provide
+in the linux or mac folder. Dumplyzer never overwrites files you put here.
+"""
+
 _TOOLS_README = """Dumplyzer optional tools (user-supplied overrides)
 
 Place official binaries here only as overrides. Dumplyzer never downloads these tools.
@@ -142,6 +158,8 @@ class AppPaths:
         self.tools = self.root / "tools"
         self.exports = self.root / "exports"
         self.analysis = self.root / "analysis"
+        self.symbols = self.root / "symbols"
+        self.volatility_cache = self.cache / "volatility3"
 
     def ensure(self) -> "AppPaths":
         if is_canonical_user_data_dir(self.root):
@@ -162,6 +180,8 @@ class AppPaths:
             self.tools,
             self.exports,
             self.analysis,
+            self.symbols,
+            self.volatility_cache,
         ):
             p.mkdir(parents=True, exist_ok=True)
         (self.tools / "bulk_extractor").mkdir(parents=True, exist_ok=True)
@@ -173,6 +193,13 @@ class AppPaths:
         (self.analysis / "capa").mkdir(parents=True, exist_ok=True)
         (self.analysis / "floss").mkdir(parents=True, exist_ok=True)
         (self.cache / "plugin_results").mkdir(parents=True, exist_ok=True)
+        (self.volatility_cache / "symbols").mkdir(parents=True, exist_ok=True)
+        for os_name in ("windows", "linux", "mac"):
+            (self.symbols / os_name).mkdir(parents=True, exist_ok=True)
+            (self.volatility_cache / "symbols" / os_name).mkdir(parents=True, exist_ok=True)
+        symbols_readme = self.symbols / "README.txt"
+        if not symbols_readme.exists():
+            symbols_readme.write_text(_SYMBOLS_README, encoding="utf-8")
         self._migrate_legacy_yara_rules()
         sync_bundled_yara_rules(self.yara_rules_bundled)
         custom_readme = self.yara_rules_custom / "README.txt"
@@ -226,6 +253,8 @@ class AppPaths:
             "tools": str(self.tools),
             "exports": str(self.exports),
             "analysis": str(self.analysis),
+            "symbols": str(self.symbols),
+            "volatility_cache": str(self.volatility_cache),
         }
 
 

@@ -211,19 +211,39 @@ def app_error_for_unsatisfied(
         )
 
     unsat = [str(x) for x in unsatisfied]
+    from memscope_engine.volatility.runtime import symbol_hint_dir, unsatisfied_looks_like_symbols
+
+    symbols_dir = symbol_hint_dir()
+    if unsatisfied_looks_like_symbols(unsat):
+        from memscope_engine.volatility.kernel_symbols import maybe_kernel_symbols_error
+
+        needed = maybe_kernel_symbols_error()
+        if needed is not None:
+            return needed
+        message = (
+            "Volatility could not resolve kernel symbol tables for this memory dump."
+        )
+        suggestion = (
+            "Windows dumps need the kernel PDB or ISF for that exact build "
+            f"(.pdb, .json, .json.xz, or .json.gz) under {symbols_dir}\\windows. "
+            "Linux/macOS dumps need an ISF you provide in the linux or mac folder."
+        )
+    else:
+        message = (
+            "Volatility analysis failed because plugin requirements "
+            "could not be satisfied."
+        )
+        suggestion = (
+            "Verify the image is a supported memory dump and matches the plugin OS "
+            f"(Windows vs Linux). Local symbol tables can be placed under {symbols_dir}."
+        )
     return AppError(
         code="volatility_unsatisfied",
-        message=(
-            "Volatility analysis failed because plugin requirements "
-            "could not be satisfied (often missing or unresolved symbols)."
-        ),
+        message=message,
         details="; ".join(unsat) if unsat else None,
-        suggestion=(
-            "Verify the image is a supported memory dump, check OS/architecture, "
-            "and ensure symbol tables can be resolved (online or local symbols)."
-        ),
+        suggestion=suggestion,
         entity="volatility",
-        data={"unsatisfied": unsat, "plugin": plugin_name},
+        data={"unsatisfied": unsat, "plugin": plugin_name, "symbols_dir": symbols_dir},
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import threading
 import time
 from pathlib import Path
@@ -48,6 +49,8 @@ def test_jobs_reset_on_new_evidence_import(tmp_path: Path) -> None:
     listed = HANDLERS["jobs.list"]({"limit": 50})
     item = next(j for j in listed["items"] if j["id"] == first["id"])
     assert item["evidence_filename"] == "a.raw"
+    assert HANDLERS["jobs.reset_visible"]({}) == {"ok": True}
+    assert HANDLERS["jobs.list"]({"limit": 50})["items"] == []
 
     img2 = tmp_path / "b.raw"
     img2.write_bytes(b"MEMSCOPE-SYNTHETIC-JOB-SESSION-2")
@@ -170,6 +173,75 @@ def test_list_jobs_omits_bulky_result_payload(tmp_path: Path) -> None:
     db.close()
 
 
+def test_list_jobs_hides_kernel_symbols_fetch(tmp_path: Path) -> None:
+    db = Database(tmp_path / "j.db")
+    jobs = JobManager(db)
+
+    def handler(_db, params, cancelled, progress):
+        progress("downloading", {"percent": 10, "phase": "kernel_symbols"})
+        return {"ok": True}
+
+    jobs.register("kernel_symbols_fetch", handler)
+    jobs.register("test_job", handler)
+    jobs.start()
+    hidden = jobs.submit("kernel_symbols_fetch", message="Downloading kernel symbols")
+    shown = jobs.submit("test_job", message="Quick Triage")
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        hidden_status = jobs.get(hidden["id"])["status"]
+        shown_status = jobs.get(shown["id"])["status"]
+        if hidden_status in ("completed", "failed", "cancelled") and shown_status in (
+            "completed",
+            "failed",
+            "cancelled",
+        ):
+            break
+        time.sleep(0.02)
+    listed_ids = {item["id"] for item in jobs.list_jobs()}
+    assert hidden["id"] not in listed_ids
+    assert shown["id"] in listed_ids
+    assert jobs.get(hidden["id"])["kind"] == "kernel_symbols_fetch"
+    db.close()
+
+
+def test_list_jobs_hides_kernel_symbols_required_failure(tmp_path: Path) -> None:
+    db = Database(tmp_path / "j.db")
+    jobs = JobManager(db)
+
+    def need_symbols(_db, params, cancelled, progress):
+        raise AppError(
+            code="kernel_symbols_required",
+            message="This Windows dump needs kernel symbol tables before analysis can continue.",
+            entity="volatility",
+        )
+
+    def ok(_db, params, cancelled, progress):
+        return {"ok": True}
+
+    jobs.register("analysis_profile", need_symbols)
+    jobs.register("test_job", ok)
+    jobs.start()
+    blocked = jobs.submit("analysis_profile", message="Quick Triage")
+    shown = jobs.submit("test_job", message="Importing memory image…")
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        blocked_status = jobs.get(blocked["id"])["status"]
+        shown_status = jobs.get(shown["id"])["status"]
+        if blocked_status in ("completed", "failed", "cancelled") and shown_status in (
+            "completed",
+            "failed",
+            "cancelled",
+        ):
+            break
+        time.sleep(0.02)
+    listed_ids = {item["id"] for item in jobs.list_jobs()}
+    assert blocked["id"] not in listed_ids
+    assert shown["id"] in listed_ids
+    assert jobs.get(blocked["id"])["status"] == "failed"
+    assert jobs.get(blocked["id"])["error"]["code"] == "kernel_symbols_required"
+    db.close()
+
+
 def test_cancel_marker_stops_running_job_without_rpc(tmp_path: Path) -> None:
     db = Database(tmp_path / "j.db")
     jobs = JobManager(db)
@@ -265,7 +337,129 @@ def test_progress_without_percent_keeps_last_percent(tmp_path: Path) -> None:
     db.close()
 
 
-def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
+def test_orphaned_running_jobs_do_not_block_new_work(tmp_path: Path) -> None:
+    db = Database(tmp_path / "j.db")
+    db.execute(
+        """
+        INSERT INTO jobs (
+          id, kind, status, evidence_id, process_id, pid, analysis_run_id,
+          created_at, started_at, finished_at, progress_kind, message,
+          error_json, result_json, params_json, cancel_requested
+        ) VALUES (?, 'analysis_profile', 'running', NULL, NULL, NULL, NULL,
+                  ?, ?, NULL, 'indeterminate', 'Cancel requested', NULL, NULL, '{}', 1)
+        """,
+        (
+            "orphan-running",
+            "2026-09-14T16:28:14+00:00",
+            "2026-09-14T16:28:15+00:00",
+        ),
+    )
+    jobs = JobManager(db)
+    ran = threading.Event()
+
+    def handler(_db, params, cancelled, progress):
+        ran.set()
+        return {"ok": True}
+
+    jobs.register("test_job", handler)
+    jobs.start()
+    orphan = db.fetchone("SELECT status, message FROM jobs WHERE id = ?", ("orphan-running",))
+    assert orphan["status"] == "cancelled"
+    assert "Abandoned" in orphan["message"]
+    job = jobs.submit("test_job")
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if jobs.get(job["id"])["status"] in ("completed", "failed", "cancelled"):
+            break
+        time.sleep(0.02)
+    assert jobs.get(job["id"])["status"] == "completed"
+    assert ran.is_set()
+    db.close()
+
+
+def test_vol_init_health_does_not_import_framework() -> None:
+    from memscope_engine.server import _vol_init, _vol_init_full
+
+    src = inspect.getsource(_vol_init)
+    assert "from volatility3.framework" not in src
+    assert "import volatility3" not in src
+    assert "find_spec" not in src
+    full = inspect.getsource(_vol_init_full)
+    assert "from volatility3.framework import automagic" in full
+    init_src = inspect.getsource(handle_app_init)
+    assert "discover_plugins" not in init_src
+    assert "warmup_plugin_catalog" not in init_src
+
+
+def test_capabilities_status_skips_heavy_work_during_live_job(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("MEMSCOPE_DATA_DIR", raising=False)
+    handle_app_init({"data_dir": str(tmp_path / "ipc")})
+    img = tmp_path / "slow.raw"
+    img.write_bytes(b"MEMSCOPE-MEMORY-IMAGE-BLOCK" * 64)
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_hash(path, *, cancelled=None, progress=None, size=None):
+        del path, cancelled, progress, size
+        started.set()
+        release.wait(timeout=8)
+        return "a" * 64
+
+    monkeypatch.setattr("memscope_engine.analysis.workflows.sha256_file", slow_hash)
+    vol_calls = {"n": 0}
+
+    def boom():
+        vol_calls["n"] += 1
+        time.sleep(20)
+        return {"ok": True}
+
+    monkeypatch.setattr("memscope_engine.server._vol_init", boom)
+    job = HANDLERS["evidence.import"]({"path": str(img)})
+    assert started.wait(timeout=3)
+    t0 = time.perf_counter()
+    caps = HANDLERS["capabilities.status"]({})
+    assert time.perf_counter() - t0 < 1.0
+    assert caps.get("checking") is True
+    assert vol_calls["n"] == 0
+    mid = HANDLERS["jobs.get"]({"job_id": job["id"]})
+    assert mid["status"] in ("queued", "running")
+    release.set()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if HANDLERS["jobs.get"]({"job_id": job["id"]})["status"] in (
+            "completed",
+            "failed",
+            "cancelled",
+        ):
+            break
+        time.sleep(0.02)
+
+
+def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
+    from memscope_engine.paths import AppPaths
+    from memscope_engine.server import _STATE
+
+    handle_app_init({"data_dir": str(tmp_path / "ipc")})
+    jobs = _STATE["jobs"]
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocker(_db, params, cancelled, progress):
+        started.set()
+        release.wait(timeout=5)
+        return {"ok": True}
+
+    jobs.register("block", blocker)
+    jobs.submit("block")
+    assert started.wait(timeout=2)
+    leftover = AppPaths(tmp_path / "ipc").tmp / "keep.bin"
+    leftover.write_bytes(b"keep")
+    handle_app_init({"data_dir": str(tmp_path / "ipc")})
+    assert leftover.is_file()
+    assert _STATE["jobs"] is jobs
+    release.set()
     root = Path(__file__).resolve().parents[2]
     view = (root / "app" / "frontend" / "src" / "components" / "JobsView.tsx").read_text(
         encoding="utf-8"
@@ -289,10 +483,19 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     coverage_lib = (root / "app" / "frontend" / "src" / "lib" / "analysisCoverage.ts").read_text(
         encoding="utf-8"
     )
+    memory_view = (
+        root / "app" / "frontend" / "src" / "components" / "MemoryExplorerView.tsx"
+    ).read_text(encoding="utf-8")
     scope = (root / "app" / "frontend" / "src" / "lib" / "analysisScope.ts").read_text(
         encoding="utf-8"
     )
     app = (root / "app" / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    dive = (
+        root / "app" / "frontend" / "src" / "components" / "ProcessDeepDiveView.tsx"
+    ).read_text(encoding="utf-8")
+    capability = (root / "app" / "frontend" / "src" / "lib" / "capabilityStatus.ts").read_text(
+        encoding="utf-8"
+    )
     assert "jobTableMessage" in view
     assert "jobFileName" in view
     assert "evidenceFilename" in view
@@ -300,6 +503,31 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     assert "Loading jobs…" in view
     assert "startTransition" in view
     assert "jobPollBusyRef" in app
+    assert "coverageFromJobResult" in app
+    assert "lastProcessCountRef" in app
+    assert "fast ? 500 : 1500" in app
+    assert "setInterval(() => void poll(), 500)" in app
+    assert "setInterval(() => void load(), 2000)" in view
+    assert "setInterval(() => void poll(), 500)" in dive
+    assert 'refreshToken={`${coverageTick}:${jobTick}`}' in app
+    assert "pcapPending" in (
+        root / "app" / "frontend" / "src" / "components" / "NetworkView.tsx"
+    ).read_text(encoding="utf-8")
+    network_view = (
+        root / "app" / "frontend" / "src" / "components" / "NetworkView.tsx"
+    ).read_text(encoding="utf-8")
+    assert 'recon.limitations.join(" ")' in network_view
+    assert 'jobs.list"' in view or "jobs.list" in view
+    assert "evidence_id: evidenceId" not in view
+    assert "startCapabilityChecks" not in app
+    assert "plugins.warmup" in app
+    explorer = (
+        root / "app" / "frontend" / "src" / "components" / "PluginExplorerView.tsx"
+    ).read_text(encoding="utf-8")
+    assert "Loading plugins…" in explorer
+    assert "Loading plugin catalog…" in explorer
+    assert "BUNDLED_TOOL" in capability
+    assert "result.checking" in capability
     assert "Refreshing…" in toast
     assert "app-toast" in toast
     assert "notMemoryImageToast" in helpers
@@ -341,6 +569,7 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     assert "This data was not collected in the analysis you ran." in coverage
     assert "Quick Triage only collects processes." in coverage
     assert "AnalysisScopeNote" in coverage
+    assert "items-center" in coverage
     assert "SortableTh" in view
     assert "jobFileName" in display
     assert "jobsRunning" in sidebar
@@ -360,18 +589,44 @@ def test_frontend_jobs_view_progress_and_cancel_copy() -> None:
     assert "onJobsRunningNav" not in sidebar
     assert "coverageLiveKind" in coverage_lib
     assert "has_results" in coverage_lib
+    assert "waiting_for_pdb" in coverage_lib
+    assert "coverageWaitingForPdb" in coverage_lib
+    assert "Waiting for PDB" in coverage
     assert "item.updating" in coverage_lib
+    assert "coverageFromJobResult" in coverage_lib
     assert "coverageRefreshKey" in coverage_lib
+    assert "coverageShownInView" in coverage_lib
+    assert "onShownCountChange" in memory_view
+    assert "sidebarCoverage" in app
     assert "coverageHasSearchableData" in coverage_lib
     assert "coverageProcessListReady" in coverage_lib
     assert "coverageCanExport" in coverage_lib
     assert "STORED_ACTION_TITLE" in scope
     assert "limitedResultsNote" in scope
+    assert "findingsScopeNote" in scope
+    assert "iocsScopeNote" in scope
+    assert "searchScopeNote" in scope
+    assert "jobProgressPercentText" in dive
+    assert 'Analysing ${analyzePercentText ?? "0%"}' in dive
+    assert "nowMs={nowMs}" in app
+    assert "activeJobs={activeJobs}" in app
+    assert "Rebuild From Extracted Records" in (
+        root / "app" / "frontend" / "src" / "components" / "TimelineArtifactsViews.tsx"
+    ).read_text(encoding="utf-8")
     assert "analysisCoverage={coverage}" in app
     assert "analysisBusy" in app
     assert "IMPORTING_NAV_HINT" in app
     assert "navLockedDuringImport(id)" in app
     assert "A job is running" not in sidebar
     assert "A job is running" not in app
+    dialog = (
+        root / "app" / "frontend" / "src" / "components" / "KernelSymbolsDialog.tsx"
+    ).read_text(encoding="utf-8")
+    assert "Downloading Symbol..." in dialog
+    assert "Downloading symbol..." not in dialog
+    assert "kernel_symbols_required" in view
+    assert "coverageWaitingForPdb" in app
+    assert "waitingForPdb={waitingForPdb}" in app
+    assert "setNav(\"overview\")" in app
     for label in ("cancelling", "cancelled", "completed", "failed", "running"):
         assert label in view or label in helpers or label in display

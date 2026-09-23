@@ -26,13 +26,16 @@ import { CoverageEmptyState, ImportEvidenceState } from "./components/CoverageSt
 import { ImportProgressBanner } from "./components/ImportProgressBanner";
 import { StatusToast, TOAST_FADE_MS, useStatusToast } from "./components/StatusToast";
 import { AnalysisOptionsDialog } from "./components/AnalysisOptionsDialog";
+import { KernelSymbolsDialog } from "./components/KernelSymbolsDialog";
 import { engineCall, ensureAppPaths, EngineClientError } from "./lib/api";
-import { startCapabilityChecks } from "./lib/capabilityStatus";
 import {
+  coverageShownInView,
+  coverageFromJobResult,
   coverageFromOverview,
   coverageItem,
   coverageProcessListReady,
   coverageRefreshKey,
+  coverageWaitingForPdb,
 } from "./lib/analysisCoverage";
 import { loadAppMeta } from "./lib/appMeta";
 import { firstDroppedFilePath, subscribeFileDrop } from "./lib/fileDrop";
@@ -42,6 +45,8 @@ import {
   isActiveJobStatus,
   isNotMemoryImageError,
   jobErrorPayload,
+  jobPercent,
+  kernelSymbolNeedFromError,
   notMemoryImageToast,
 } from "./lib/analysisOptions";
 import { averageJobProgressPercentText } from "./lib/jobDisplay";
@@ -59,6 +64,7 @@ import type {
   AppErrorPayload,
   Evidence,
   Job,
+  KernelSymbolNeed,
   NavId,
   Overview,
   ProcessRow,
@@ -67,6 +73,25 @@ import "./styles.css";
 
 const ERROR_TOAST_MS = 5000;
 
+function retryPayloadFromJob(job: Job): { method: string; params: Record<string, unknown> } {
+  if (job.kind === "analysis_profile") {
+    return { method: "analysis.run", params: { ...(job.params || {}) } };
+  }
+  if (job.kind === "process_recommended") {
+    return { method: "process.analyze_recommended", params: { ...(job.params || {}) } };
+  }
+  return {
+    method: "jobs.submit",
+    params: {
+      kind: job.kind,
+      evidence_id: job.evidence_id,
+      process_id: job.process_id,
+      pid: job.pid,
+      params: job.params || {},
+    },
+  };
+}
+
 export default function App() {
   const [nav, setNav] = useState<NavId>("overview");
   const [busy, setBusy] = useState(false);
@@ -74,6 +99,7 @@ export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [processes, setProcesses] = useState<ProcessRow[]>([]);
   const [processTotal, setProcessTotal] = useState(0);
+  const [memoryShownCount, setMemoryShownCount] = useState(0);
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
   const [jobTick, setJobTick] = useState(0);
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
@@ -84,6 +110,13 @@ export default function App() {
     null,
   );
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [kernelNeed, setKernelNeed] = useState<KernelSymbolNeed | null>(null);
+  const [kernelBusy, setKernelBusy] = useState(false);
+  const [kernelDownloadPercent, setKernelDownloadPercent] = useState<number | null>(
+    null,
+  );
+  const [kernelFetchJobId, setKernelFetchJobId] = useState<string | null>(null);
+  const kernelFetchLockRef = useRef(false);
   const [analysisCatalog, setAnalysisCatalog] =
     useState<AnalysisProfileCatalog | null>(null);
   const [prefs, setPrefs] = useState(readPreferences);
@@ -95,6 +128,10 @@ export default function App() {
   const importGenerationRef = useRef(0);
   const importJobIdRef = useRef<string | null>(null);
   const analysisPromptAfterImportRef = useRef(false);
+  const pendingRetryRef = useRef<{ method: string; params: Record<string, unknown> } | null>(
+    null,
+  );
+  const lastProcessCountRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     notifyMainWindowReady();
@@ -145,6 +182,116 @@ export default function App() {
     setJobTick((t) => t + 1);
   }, []);
 
+  const retryPendingAnalysis = useCallback(async () => {
+    const pending = pendingRetryRef.current;
+    if (!pending) return;
+    setKernelNeed(null);
+    setKernelDownloadPercent(null);
+    setKernelFetchJobId(null);
+    kernelFetchLockRef.current = false;
+    setBusy(true);
+    try {
+      const job = await engineCall<Job>(pending.method, pending.params);
+      trackJob(job);
+      setNav("jobs");
+    } catch (err) {
+      if (err instanceof EngineClientError) presentError(err.payload);
+      else presentError({ message: String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }, [presentError, trackJob]);
+
+  const handleFailedJob = useCallback(
+    (job: Job) => {
+      const payload = jobErrorPayload(job, "Job failed");
+      const need = kernelSymbolNeedFromError(payload);
+      if (need && job.kind !== "kernel_symbols_fetch") {
+        pendingRetryRef.current = retryPayloadFromJob(job);
+        setActiveJobIds([]);
+        setActiveJobs([]);
+        setAnalysisOpen(false);
+        setNav("overview");
+        setKernelNeed(need);
+        void engineCall("jobs.reset_visible")
+          .catch(() => undefined)
+          .finally(() => setJobTick((t) => t + 1));
+        return;
+      }
+      presentError(payload);
+    },
+    [presentError],
+  );
+
+  const returnToImportedReady = useCallback(() => {
+    analysisPromptAfterImportRef.current = false;
+    pendingRetryRef.current = null;
+    setKernelNeed(null);
+    setKernelBusy(false);
+    setKernelDownloadPercent(null);
+    setKernelFetchJobId(null);
+    kernelFetchLockRef.current = false;
+    setActiveJobIds([]);
+    setActiveJobs([]);
+    setAnalysisOpen(false);
+    setNav("overview");
+    void engineCall("jobs.reset_visible")
+      .catch(() => undefined)
+      .finally(() => setJobTick((t) => t + 1));
+  }, []);
+
+  useEffect(() => {
+    if (!kernelFetchJobId) return;
+    let stopped = false;
+    let finishing = false;
+    let inFlight = false;
+    let timer = 0;
+    const poll = async () => {
+      if (stopped || finishing || inFlight) return;
+      inFlight = true;
+      try {
+        const job = await engineCall<Job>("jobs.get", { job_id: kernelFetchJobId });
+        if (stopped || finishing) return;
+        if (job.status === "completed") {
+          finishing = true;
+          window.clearInterval(timer);
+          setKernelDownloadPercent(100);
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+          if (stopped) return;
+          await retryPendingAnalysis();
+          return;
+        }
+        const pct = jobPercent(job);
+        if (pct != null) {
+          const next = Math.max(0, Math.min(100, pct));
+          setKernelDownloadPercent((prev) =>
+            prev == null ? next : Math.max(prev, next),
+          );
+        }
+        if (isActiveJobStatus(job.status)) return;
+        const failedDownload = job.status !== "cancelled" && job.status !== "canceled";
+        const payload = failedDownload
+          ? jobErrorPayload(job, "Kernel symbols download failed")
+          : null;
+        returnToImportedReady();
+        if (payload) presentError(payload);
+      } catch (err) {
+        if (stopped || finishing) return;
+        returnToImportedReady();
+        if (err instanceof EngineClientError) presentError(err.payload);
+        else presentError({ message: String(err) });
+      } finally {
+        inFlight = false;
+      }
+    };
+    void poll();
+    timer = window.setInterval(() => void poll(), 500);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [kernelFetchJobId, presentError, retryPendingAnalysis, returnToImportedReady]);
+
   useEffect(() => {
     applyPreferences(prefs);
   }, [prefs]);
@@ -160,13 +307,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    startCapabilityChecks();
-  }, []);
-
-  useEffect(() => {
     void (async () => {
       try {
         await ensureAppPaths();
+        void engineCall("plugins.warmup", {}).catch(() => undefined);
         // Fresh launch: do not restore the previous case into the UI.
         // Evidence remains in the local database until the analyst imports again.
       } catch (err) {
@@ -192,6 +336,7 @@ export default function App() {
     );
     setProcesses(procs.items);
     setProcessTotal(procs.total);
+    lastProcessCountRef.current = procs.total;
   }, [refreshOverview]);
 
   useEffect(() => {
@@ -244,6 +389,8 @@ export default function App() {
       setSelectedProcessId(null);
       setProcesses([]);
       setProcessTotal(0);
+      lastProcessCountRef.current = null;
+      setMemoryShownCount(0);
       setOverview(null);
       setEvidence(imported);
       setNav("overview");
@@ -282,7 +429,8 @@ export default function App() {
   useEffect(() => {
     if (activeJobIds.length === 0 && !importJobId) return;
     const fast = !!importJobId;
-    const timer = window.setInterval(() => {
+    let cancelled = false;
+    const poll = () => {
       if (jobPollBusyRef.current) return;
       jobPollBusyRef.current = true;
       void (async () => {
@@ -298,6 +446,7 @@ export default function App() {
           for (const id of ids) {
             try {
               const j = await engineCall<Job>("jobs.get", { job_id: id });
+              if (cancelled) return;
               if (watchedImportId && j.id === watchedImportId) {
                 if (!importStillCurrent(tickGen, watchedImportId)) {
                   continue;
@@ -326,14 +475,18 @@ export default function App() {
                 found.push(j);
               } else {
                 finished = true;
+                if (j.kind === "kernel_symbols_fetch") {
+                  continue;
+                }
                 if (j.status === "failed" && j.error) {
-                  presentError(jobErrorPayload(j, "Job failed"));
+                  handleFailedJob(j);
                 }
               }
             } catch {
               /* ignore transient */
             }
           }
+          if (cancelled) return;
           setActiveJobIds((prev) => {
             const next = still.filter((id) => id !== watchedImportId);
             if (prev.length === next.length && prev.every((id, i) => id === next[i])) {
@@ -342,20 +495,47 @@ export default function App() {
             return next;
           });
           setActiveJobs(found);
-          if (evidence) {
-            try {
-              if (finished) await refreshEvidenceViews(evidence);
-              else if (still.length > 0) {
-                await refreshOverview(evidence);
-                if (nav === "processes" || nav === "process_dive") {
-                  const procs = await engineCall<{ items: ProcessRow[]; total: number }>(
-                    "processes.list",
-                    { evidence_id: evidence.id, limit: 10000, offset: 0 },
-                  );
+          const liveCoverage = found
+            .map((job) => coverageFromJobResult(job.result))
+            .find((item): item is NonNullable<typeof item> => Boolean(item));
+          if (liveCoverage) {
+            setOverview((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    coverage: liveCoverage,
+                    process_count:
+                      liveCoverage.items.processes?.count ?? prev.process_count,
+                  }
+                : prev,
+            );
+            const processCount = liveCoverage.items.processes?.count;
+            if (
+              evidence &&
+              processCount != null &&
+              processCount !== lastProcessCountRef.current
+            ) {
+              lastProcessCountRef.current = processCount;
+              try {
+                const procs = await engineCall<{ items: ProcessRow[]; total: number }>(
+                  "processes.list",
+                  { evidence_id: evidence.id, limit: 10000, offset: 0 },
+                );
+                if (!cancelled) {
                   setProcesses(procs.items);
                   setProcessTotal(procs.total);
                 }
+              } catch {
+                /* ignore transient */
               }
+            }
+          }
+          if (finished) {
+            setJobTick((t) => t + 1);
+          }
+          if (evidence && finished) {
+            try {
+              await refreshEvidenceViews(evidence);
             } catch {
               /* ignore */
             }
@@ -364,20 +544,24 @@ export default function App() {
           jobPollBusyRef.current = false;
         }
       })();
-    }, fast ? 400 : 800);
-    return () => window.clearInterval(timer);
+    };
+    poll();
+    const timer = window.setInterval(poll, fast ? 500 : 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [
     activeJobIds,
     applyCancelledImport,
     applyCompletedImport,
     applyFailedImport,
     evidence,
+    handleFailedJob,
     importJobId,
     importStillCurrent,
-    nav,
     presentError,
     refreshEvidenceViews,
-    refreshOverview,
   ]);
 
   const importFromPath = useCallback(async (path: string) => {
@@ -388,7 +572,6 @@ export default function App() {
     const generation = ++importGenerationRef.current;
     setActiveJobIds([]);
     setActiveJobs([]);
-    setJobTick((t) => t + 1);
     setNav("jobs");
     try {
       const job = await engineCall<Job>("evidence.import", { path });
@@ -403,6 +586,7 @@ export default function App() {
       setImportElapsedOriginMs(Date.now());
       setImportJob(job);
       setNowMs(Date.now());
+      setJobTick((t) => t + 1);
     } catch (err) {
       if (importStillCurrent(generation)) {
         importStartRef.current = false;
@@ -519,12 +703,25 @@ export default function App() {
 
   const discardUnanalyzedImport = useCallback(() => {
     analysisPromptAfterImportRef.current = false;
+    pendingRetryRef.current = null;
+    setKernelNeed(null);
+    setKernelBusy(false);
+    setKernelDownloadPercent(null);
+    setKernelFetchJobId(null);
+    kernelFetchLockRef.current = false;
+    setActiveJobIds([]);
+    setActiveJobs([]);
     setEvidence(null);
     setOverview(null);
     setProcesses([]);
     setProcessTotal(0);
+    lastProcessCountRef.current = null;
+    setMemoryShownCount(0);
     setSelectedProcessId(null);
     setNav("overview");
+    void engineCall("jobs.reset_visible")
+      .catch(() => undefined)
+      .finally(() => setJobTick((t) => t + 1));
   }, []);
 
   const onAnalyze = useCallback(async () => {
@@ -596,9 +793,24 @@ export default function App() {
     ],
     nowMs,
   );
-  const coverage = coverageFromOverview(overview);
+  const waitingForPdb = kernelNeed != null;
+  const coverage = coverageWaitingForPdb(coverageFromOverview(overview), waitingForPdb);
   const coverageTick = coverageRefreshKey(coverage);
+  const sidebarCoverage = coverage
+    ? {
+        ...coverage,
+        items: {
+          ...coverage.items,
+          memory_vad: coverageShownInView(coverageItem(coverage, "memory_vad"), memoryShownCount) ??
+            coverageItem(coverage, "memory_vad"),
+        },
+      }
+    : coverage;
   const analysisBusy = jobsRunning && !importing;
+  const overviewForView =
+    overview && waitingForPdb && coverage
+      ? { ...overview, coverage }
+      : overview;
 
   let body: ReactNode;
   if (importing && navLockedDuringImport(nav)) {
@@ -613,8 +825,9 @@ export default function App() {
     case "overview":
       body = (
         <OverviewView
-          data={overview}
+          data={overviewForView}
           importing={importing}
+          waitingForPdb={waitingForPdb}
           onImport={() => void onImport()}
         />
       );
@@ -651,6 +864,8 @@ export default function App() {
             onJobSubmitted={onPluginJobSubmitted}
             coverage={coverage}
             refreshToken={coverageTick}
+            nowMs={nowMs}
+            activeJobs={activeJobs}
           />
         );
       } else if (!evidence) {
@@ -684,7 +899,7 @@ export default function App() {
           coverage={coverageItem(coverage, "network")}
           artifactCoverage={coverageItem(coverage, "network_artifacts")}
           analysisCoverage={coverage}
-          refreshToken={coverageTick}
+          refreshToken={`${coverageTick}:${jobTick}`}
           onOpenProcess={(id) => {
             setSelectedProcessId(id);
             setNav("process_dive");
@@ -725,6 +940,7 @@ export default function App() {
           refreshToken={coverageTick}
           coverage={coverageItem(coverage, "memory_vad")}
           activeJobs={activeJobs}
+          onShownCountChange={setMemoryShownCount}
         />
       );
       break;
@@ -812,7 +1028,6 @@ export default function App() {
     case "jobs":
       body = (
         <JobsView
-          evidenceId={evidence?.id ?? null}
           evidenceFilename={evidence?.filename ?? null}
           refreshToken={jobTick}
           onError={setErr}
@@ -895,7 +1110,7 @@ export default function App() {
             setNav(id);
           }}
           evidenceLabel={evidence?.filename}
-          coverage={coverage}
+          coverage={sidebarCoverage}
           jobsRunning={jobsRunning}
           jobsPercent={jobsPercent}
           importing={importing}
@@ -917,6 +1132,56 @@ export default function App() {
         onRun={(profile, capabilities) => {
           updatePrefs({ timeZone: prefs.timeZone });
           void onRunAnalysis(profile, capabilities);
+        }}
+      />
+      <KernelSymbolsDialog
+        open={kernelNeed != null}
+        need={kernelNeed}
+        busy={kernelBusy || busy}
+        downloadPercent={kernelDownloadPercent}
+        onClose={() => {
+          if (kernelFetchJobId) {
+            void engineCall("jobs.cancel", { job_id: kernelFetchJobId }).catch(
+              () => undefined,
+            );
+          }
+          returnToImportedReady();
+        }}
+        onDownload={() => {
+          if (!kernelNeed || kernelBusy || kernelFetchLockRef.current) return;
+          kernelFetchLockRef.current = true;
+          setKernelBusy(true);
+          setKernelDownloadPercent(0);
+          void engineCall<Job>("symbols.fetch", {
+            evidence_id: evidence?.id ?? null,
+            pdb_name: kernelNeed.pdb_name,
+            guid: kernelNeed.guid,
+            age: kernelNeed.age,
+          })
+            .then((job) => {
+              setKernelFetchJobId(job.id);
+            })
+            .catch((err) => {
+              if (err instanceof EngineClientError) presentError(err.payload);
+              else presentError({ message: String(err) });
+              returnToImportedReady();
+            });
+        }}
+        onImported={(path) => {
+          if (!kernelNeed) return;
+          setKernelBusy(true);
+          void engineCall("symbols.import_file", {
+            path,
+            pdb_name: kernelNeed.pdb_name,
+            guid: kernelNeed.guid,
+            age: kernelNeed.age,
+          })
+            .then(() => retryPendingAnalysis())
+            .catch((err) => {
+              if (err instanceof EngineClientError) presentError(err.payload);
+              else presentError({ message: String(err) });
+            })
+            .finally(() => setKernelBusy(false));
         }}
       />
       <StatusToast message={toast} />

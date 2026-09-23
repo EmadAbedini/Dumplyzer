@@ -59,7 +59,20 @@ def test_cleanup_session_temp_removes_tmp_keeps_exports_and_evidence(tmp_path: P
     assert evidence.read_bytes() == b"ORIGINAL-EVIDENCE"
 
 
-def test_app_init_and_shutdown_clear_tmp(tmp_path: Path) -> None:
+def test_repeated_app_init_keeps_job_manager(tmp_path: Path) -> None:
+    from memscope_engine.server import _STATE
+
+    data = tmp_path / "ipc"
+    handle_app_init({"data_dir": str(data)})
+    jobs = _STATE["jobs"]
+    db = _STATE["db"]
+    leftover = AppPaths(data).tmp / "stale.bin"
+    leftover.write_bytes(b"stale")
+    handle_app_init({"data_dir": str(data)})
+    assert _STATE["jobs"] is jobs
+    assert _STATE["db"] is db
+    assert not leftover.exists()
+    HANDLERS["app.shutdown"]({})
     data = tmp_path / "ipc"
     handle_app_init({"data_dir": str(data)})
     paths = AppPaths(data)

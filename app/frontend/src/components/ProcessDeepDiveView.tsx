@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronLeft, Info } from "lucide-react";
 import { engineCall, EngineClientError } from "../lib/api";
 import { isActiveJobStatus } from "../lib/analysisOptions";
+import { jobProgressPercentText } from "../lib/jobDisplay";
 import { coverageItem, coverageWasExecuted, processScopedEmptyMessage } from "../lib/analysisCoverage";
 import { sortFindings } from "../lib/findings";
 import { TimestampText, formatResultCell } from "../lib/datetime";
@@ -24,6 +25,8 @@ type Props = {
   onJobSubmitted?: (job: Job) => void;
   coverage?: AnalysisCoverage;
   refreshToken?: number | string;
+  nowMs?: number;
+  activeJobs?: Job[];
 };
 
 type Tab =
@@ -84,6 +87,8 @@ export function ProcessDeepDiveView({
   onJobSubmitted,
   coverage,
   refreshToken,
+  nowMs = 0,
+  activeJobs = [],
 }: Props) {
   const [data, setData] = useState<ProcessDeepDive | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
@@ -142,7 +147,7 @@ export function ProcessDeepDiveView({
         /* ignore transient */
       }
     };
-    const timer = window.setInterval(() => void poll(), 1000);
+    const timer = window.setInterval(() => void poll(), 500);
     const onVisible = () => {
       if (document.visibilityState === "visible") void poll();
     };
@@ -217,6 +222,27 @@ export function ProcessDeepDiveView({
       isActiveJobStatus(r.status) && (r.kind === "process_recommended" || r.kind === "vad_scan"),
   );
   const analysing = busy || processRunActive || (job != null && isActiveJobStatus(job.status));
+  const analyzeJob =
+    job && isActiveJobStatus(job.status)
+      ? job
+      : activeJobs.find(
+          (j) =>
+            isActiveJobStatus(j.status) &&
+            (j.kind === "process_recommended" || j.kind === "vad_scan") &&
+            (j.process_id === processId || j.pid === p.pid),
+        ) ?? job;
+  const analyzePercentText = jobProgressPercentText(analyzeJob, nowMs);
+  const analyzeLabel =
+    job?.status === "queued" ||
+    processKinds.some(
+      (r) =>
+        r.status === "queued" &&
+        (r.kind === "process_recommended" || r.kind === "vad_scan"),
+    )
+      ? "Queued"
+      : analysing
+        ? `Analysing ${analyzePercentText ?? "0%"}`
+        : "Analyze Process";
   const showAnalyze = !processRecommendedCompleted || analysing;
 
   const tabAnalyzed = (id: string) => {
@@ -307,16 +333,7 @@ export function ProcessDeepDiveView({
           {showAnalyze ? (
             <span className="inline-flex" title={ANALYZE_HINT}>
               <Button size="sm" onClick={() => void runRecommended()} disabled={analysing}>
-                {job?.status === "queued" ||
-                processKinds.some(
-                  (r) =>
-                    r.status === "queued" &&
-                    (r.kind === "process_recommended" || r.kind === "vad_scan"),
-                )
-                  ? "Queued"
-                  : analysing
-                    ? "Analysing…"
-                    : "Analyze Process"}
+                {analyzeLabel}
               </Button>
             </span>
           ) : null}

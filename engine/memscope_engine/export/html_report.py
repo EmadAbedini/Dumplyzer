@@ -372,11 +372,11 @@ def render_html(doc: dict[str, Any]) -> str:
             ["Timeline events", summary.get("timeline_event_count")],
             ["Artifacts", summary.get("artifact_count")],
             ["IOCs", summary.get("ioc_count")],
-            ["YARA matches", summary.get("yara_match_count")],
-            ["PE extraction runs", summary.get("pe_extraction_run_count")],
-            ["CAPA scans", summary.get("capa_scan_count")],
-            ["FLOSS scans", summary.get("floss_scan_count")],
-            ["bulk_extractor scans", summary.get("bulk_extractor_scan_count")],
+            ["Signature matches", summary.get("yara_match_count")],
+            ["PE reconstruction runs", summary.get("pe_extraction_run_count")],
+            ["Capability analysis runs", summary.get("capa_scan_count")],
+            ["String analysis runs", summary.get("floss_scan_count")],
+            ["Artifact extraction runs", summary.get("bulk_extractor_scan_count")],
             ["PCAP reconstruction", summary.get("pcap_reconstruction_status") or "not run"],
             ["Advanced Volatility executions", summary.get("advanced_execution_count")],
         ]
@@ -670,13 +670,13 @@ def render_html(doc: dict[str, Any]) -> str:
 
     if "malware" in sections:
         mal = doc.get("malware") or {}
-        parts.append("<section id='malware'><h2>11. Malware-analysis results</h2>")
+        parts.append("<section id='malware'><h2>11. Signatures and reconstructed artifacts</h2>")
         parts.append(
-            "<p class='muted'>Tool-produced observations are stored separately from Dumplyzer interpretation. "
-            "No malware score is assigned. Optional providers may be absent.</p>"
+            "<p class='muted'>These observations are stored separately from Dumplyzer interpretation. "
+            "No malware score is assigned. Optional analysis may be absent.</p>"
         )
         ym = mal.get("yara_matches") or {}
-        parts.append("<h3>YARA matches</h3>")
+        parts.append("<h3>Signature Detection</h3>")
         parts.append(_trunc_note(ym, "match(es)"))
         yrows = []
         for m in (ym.get("items") or [])[:HTML_MAX_ROWS]:
@@ -689,11 +689,19 @@ def render_html(doc: dict[str, Any]) -> str:
                     m.get("rule_source"),
                 ]
             )
-        parts.append(_table(["Rule", "Namespace", "PID", "Artifact", "Source"], yrows, empty="No YARA matches."))
+        parts.append(
+            _table(
+                ["Rule", "Namespace", "PID", "Artifact", "Source"],
+                yrows,
+                empty="No signature matches.",
+            )
+        )
 
         pe = mal.get("pe_extraction") or {}
-        parts.append("<h3>PE Extraction</h3>")
-        parts.append(f"<p class='muted'>{esc(pe.get('note'))}</p>")
+        parts.append("<h3>PE Reconstruction</h3>")
+        parts.append(
+            f"<p class='muted'>{esc(pe.get('note') or 'Extracted PE artifacts reconstructed from the memory dump. Not a malware verdict.')}</p>"
+        )
         perows = []
         for item in (pe.get("items") or [])[:HTML_MAX_ROWS]:
             run = item.get("run") or {}
@@ -709,14 +717,14 @@ def render_html(doc: dict[str, Any]) -> str:
             )
         parts.append(
             _table(
-                ["Status", "Extracted", "EXE", "DLL", "Volatility", "Output"],
+                ["Status", "Extracted", "EXE", "DLL", "Engine", "Output"],
                 perows,
-                empty="No PE extraction runs.",
+                empty="No PE reconstruction runs.",
             )
         )
 
         capa = mal.get("capa") or {}
-        parts.append("<h3>CAPA</h3>")
+        parts.append("<h3>Capability Analysis</h3>")
         parts.append(f"<p class='muted'>{esc(capa.get('note'))}</p>")
         caparows = []
         for item in (capa.get("items") or [])[:HTML_MAX_ROWS]:
@@ -734,12 +742,12 @@ def render_html(doc: dict[str, Any]) -> str:
             _table(
                 ["Status", "PID", "Capabilities", "Version", "Artifact"],
                 caparows,
-                empty="No CAPA scans.",
+                empty="No capability analysis runs.",
             )
         )
 
         floss = mal.get("floss") or {}
-        parts.append("<h3>FLOSS</h3>")
+        parts.append("<h3>String Analysis</h3>")
         parts.append(f"<p class='muted'>{esc(floss.get('note'))}</p>")
         flossrows = []
         for item in (floss.get("items") or [])[:HTML_MAX_ROWS]:
@@ -757,12 +765,12 @@ def render_html(doc: dict[str, Any]) -> str:
             _table(
                 ["Status", "PID", "Strings", "Version", "Artifact"],
                 flossrows,
-                empty="No FLOSS scans.",
+                empty="No string analysis runs.",
             )
         )
 
         be = mal.get("bulk_extractor") or {}
-        parts.append("<h3>bulk_extractor</h3>")
+        parts.append("<h3>Artifact Extraction</h3>")
         parts.append(f"<p class='muted'>{esc(be.get('note'))}</p>")
         berows = []
         for item in (be.get("items") or [])[:HTML_MAX_ROWS]:
@@ -795,7 +803,7 @@ def render_html(doc: dict[str, Any]) -> str:
             _table(
                 ["Status", "Version", "Feature files", "Unique values", "By type", "Output directory"],
                 berows,
-                empty="No bulk_extractor scans.",
+                empty="No artifact extraction runs.",
             )
         )
         sample_priority = ("email", "telephone", "aes_keys", "ccn", "url", "domain", "winlnk")

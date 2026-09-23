@@ -48,6 +48,22 @@ def test_missing_image_raises_app_error(tmp_path: Path) -> None:
     assert not isinstance(exc.value, NameError)
 
 
+def test_session_init_applies_volatility_threading(tmp_path: Path) -> None:
+    from volatility3.framework import constants
+
+    image = tmp_path / "tiny.dmp"
+    image.write_bytes(b"MEMSCOPE-THREADING-SESSION")
+    old = constants.PARALLELISM
+    try:
+        constants.PARALLELISM = constants.Parallelism.Off
+        VolatilitySession(image)
+        assert constants.PARALLELISM == constants.Parallelism.Threading
+        assert constants.PARALLELISM is not constants.Parallelism.Off
+        assert constants.PARALLELISM is not constants.Parallelism.Multiprocessing
+    finally:
+        constants.PARALLELISM = old
+
+
 def test_treegrid_stops_when_cancelled() -> None:
     visited = []
 
@@ -95,6 +111,58 @@ def test_job_cancelled_bypasses_volatility_exception_handlers() -> None:
             pytest.fail("JobCancelled must not be swallowed as Exception")
     except JobCancelled:
         pass
+
+
+def test_raise_if_cancelled_does_not_call_checker_on_every_read() -> None:
+    from memscope_engine.volatility import cancel as cancel_mod
+
+    n = [0]
+
+    def checker() -> bool:
+        n[0] += 1
+        return False
+
+    cancel_mod._tls.cancelled = checker
+    cancel_mod._tls.fired = False
+    cancel_mod._tls.hits = 0
+    cancel_mod._tls.last_check = 0.0
+    try:
+        for _ in range(20_000):
+            raise_if_cancelled()
+    finally:
+        cancel_mod._tls.cancelled = None
+        cancel_mod._tls.fired = False
+        cancel_mod._tls.hits = 0
+        cancel_mod._tls.last_check = 0.0
+    # First two hits always check; after that at most ~10/s.
+    assert 1 <= n[0] <= 40
+
+
+def test_raise_if_cancelled_is_visible_to_scan_worker_threads() -> None:
+    import threading
+
+    from memscope_engine.errors import JobCancelled
+
+    flag = {"stop": False}
+    seen: list[str] = []
+
+    def cancelled() -> bool:
+        return flag["stop"]
+
+    def worker() -> None:
+        try:
+            raise_if_cancelled()
+            flag["stop"] = True
+            raise_if_cancelled()
+        except JobCancelled:
+            seen.append("yes")
+
+    with interrupt_on_cancel(cancelled):
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert seen == ["yes"]
 
 
 def test_interrupt_on_cancel_converts_to_app_error() -> None:

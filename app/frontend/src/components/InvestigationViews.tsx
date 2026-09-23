@@ -18,7 +18,7 @@ import {
 import {
   DERIVED_SOURCE_IDS,
   capabilityHasStoredData,
-  limitedResultsNote,
+  findingsScopeNote,
   settledMissingSourceIds,
 } from "../lib/analysisScope";
 import type { AnalysisCoverage, ModuleRow, Finding, CapabilityCoverage } from "../lib/types";
@@ -232,7 +232,7 @@ export function FindingsView({
   const commandLinesReady = capabilityHasStoredData(analysisCoverage, "command_lines");
   const findingsNotAnalyzedDetail = commandLinesReady
     ? "Command lines are stored, but Findings was not included in the last analysis."
-    : "Findings come from command-line heuristics already stored — they are not scanned from the dump itself.";
+    : "Findings come from collected command lines and Analyze Process, not a scan of the whole dump.";
   const findingsNotAnalyzedHint = commandLinesReady
     ? "Run Complete Analysis, or select Findings in Custom Analysis."
     : "Quick Triage does not collect command lines. Run Complete Analysis, or select Command Lines and Findings in Custom Analysis.";
@@ -248,11 +248,9 @@ export function FindingsView({
   if (coverageShowsEmptyPanel(coverage, items.length)) {
     return (
       <div className="flex h-full min-h-0 flex-1 flex-col">
-        {missingSources.length > 0 ? (
-          <div className="border-b border-border px-3 py-2">
-            <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
-          </div>
-        ) : null}
+        <div className="border-b border-border px-3 py-2">
+          <AnalysisScopeNote>{findingsScopeNote(missingSources)}</AnalysisScopeNote>
+        </div>
         <CoverageEmptyState
           item={coverage}
           title="Findings"
@@ -301,11 +299,9 @@ export function FindingsView({
           ]}
         />
       </div>
-      {missingSources.length > 0 ? (
-        <div className="border-b border-border px-3 py-2">
-          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
-        </div>
-      ) : null}
+      <div className="border-b border-border px-3 py-2">
+        <AnalysisScopeNote>{findingsScopeNote(missingSources)}</AnalysisScopeNote>
+      </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
         {filtered.map((f) => (
           <FindingCard key={f.id} finding={f} onOpenProcess={onOpenProcess} />

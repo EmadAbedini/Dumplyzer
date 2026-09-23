@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -65,7 +66,10 @@ SELECT
   json_extract(jobs.params_json, '$.path') AS param_path,
   json_extract(jobs.error_json, '$.message') AS error_message,
   json_extract(jobs.error_json, '$.suggestion') AS error_suggestion,
-  json_extract(jobs.error_json, '$.code') AS error_code
+  COALESCE(
+    json_extract(jobs.error_json, '$.code'),
+    json_extract(jobs.error_json, '$.app_code')
+  ) AS error_code
 FROM jobs
 """
 
@@ -83,6 +87,7 @@ class JobManager:
         self._cancel_flags: dict[str, threading.Event] = {}
         self._worker = threading.Thread(target=self._loop, name="memscope-jobs", daemon=True)
         self._started = False
+        self._current_job_id: str | None = None
         # Jobs UI is session/case scoped. Rows may remain in SQLite for job.get
         # during this process, but historical jobs are never listed after restart
         # or a new evidence import.
@@ -91,10 +96,62 @@ class JobManager:
     def register(self, kind: str, handler: JobHandler) -> None:
         self._handlers[kind] = handler
 
+    def has_live_work(self) -> bool:
+        """True when this process is actually running or about to run a job."""
+        if self._current_job_id:
+            return True
+        with self._cv:
+            return bool(self._queue)
+
+    def _live_job_ids(self) -> set[str]:
+        live: set[str] = set()
+        if self._current_job_id:
+            live.add(self._current_job_id)
+        with self._cv:
+            live.update(self._queue)
+        return live
+
+    def abandon_orphans(self) -> None:
+        """Close queued/running rows left by a previous engine process."""
+        live = self._live_job_ids()
+        rows = self._db.fetchall(
+            "SELECT id FROM jobs WHERE status IN ('queued', 'running')"
+        )
+        now = _utcnow()
+        for row in rows:
+            job_id = str(row["id"])
+            if job_id in live:
+                continue
+            self._db.execute(
+                """
+                UPDATE jobs SET status = 'cancelled', cancel_requested = 1,
+                  finished_at = ?, message = ?
+                WHERE id = ? AND status IN ('queued', 'running')
+                """,
+                (now, "Abandoned after restart", job_id),
+            )
+            self._clear_cancel_marker(job_id)
+
     def start(self) -> None:
-        if not self._started:
-            self._started = True
-            self._worker.start()
+        if self._started and self._worker.is_alive():
+            self.abandon_orphans()
+            return
+        if self._started and not self._worker.is_alive():
+            log.warning("job worker thread died; restarting", extra={"channel": "analysis"})
+            stuck = self._current_job_id
+            self._current_job_id = None
+            if stuck:
+                with self._cv:
+                    if stuck not in self._queue:
+                        self._queue.insert(0, stuck)
+                    self._cv.notify()
+            self._worker = threading.Thread(
+                target=self._loop, name="memscope-jobs", daemon=True
+            )
+        self.abandon_orphans()
+        self._started = True
+        self._worker.start()
+        log.info("job worker started", extra={"channel": "analysis"})
 
     def reset_visible_jobs(self) -> None:
         """Drop previous-case jobs from the active list without deleting analysis data."""
@@ -102,6 +159,7 @@ class JobManager:
 
     def cancel_active(self) -> None:
         """Request cancel for queued/running jobs so a new import can take the worker."""
+        self.abandon_orphans()
         rows = self._db.fetchall(
             "SELECT id FROM jobs WHERE status IN ('queued', 'running')"
         )
@@ -194,6 +252,17 @@ class JobManager:
             raise AppError(code="job_missing", message="Job not found.", entity="job")
         if row["status"] in ("completed", "failed", "cancelled"):
             return self._dto(row)
+        if job_id not in self._live_job_ids():
+            self._db.execute(
+                """
+                UPDATE jobs SET status = 'cancelled', cancel_requested = 1,
+                  finished_at = ?, message = ?
+                WHERE id = ? AND status IN ('queued', 'running')
+                """,
+                (_utcnow(), "Abandoned after restart", job_id),
+            )
+            self._clear_cancel_marker(job_id)
+            return self.get(job_id)
         self._write_cancel_marker(job_id)
         self._db.execute(
             "UPDATE jobs SET cancel_requested = 1, message = ? WHERE id = ?",
@@ -244,7 +313,12 @@ class JobManager:
                 """,
                 (since, limit),
             )
-        return [self._list_dto(r) for r in rows]
+        return [
+            self._list_dto(r)
+            for r in rows
+            if r.get("kind") != "kernel_symbols_fetch"
+            and r.get("error_code") != "kernel_symbols_required"
+        ]
 
     def _loop(self) -> None:
         while True:
@@ -258,6 +332,14 @@ class JobManager:
                 log.exception("job worker loop error")
 
     def _run_one(self, job_id: str) -> None:
+        self._current_job_id = job_id
+        try:
+            self._execute_job(job_id)
+        finally:
+            self._current_job_id = None
+            self._clear_cancel_marker(job_id)
+
+    def _execute_job(self, job_id: str) -> None:
         row = self._db.fetchone("SELECT * FROM jobs WHERE id = ?", (job_id,))
         if not row:
             return
@@ -273,14 +355,12 @@ class JobManager:
                 """,
                 (_utcnow(), "Cancelled before start", job_id),
             )
-            self._clear_cancel_marker(job_id)
             return
 
         kind = row["kind"]
         handler = self._handlers.get(kind)
         if not handler:
             self._fail(job_id, AppError(code="unknown_job_kind", message=f"No handler for {kind}"))
-            self._clear_cancel_marker(job_id)
             return
 
         try:
@@ -293,10 +373,19 @@ class JobManager:
         params["job_id"] = job_id
 
         cancel_event = self._cancel_flags.setdefault(job_id, threading.Event())
+        last_cancel_io = 0.0
+        last_progress_write = 0.0
+        last_progress_phase: Any = object()
+        last_progress_pct: float | None = None
 
         def cancelled() -> bool:
+            nonlocal last_cancel_io
             if cancel_event.is_set():
                 return True
+            now = time.monotonic()
+            if now - last_cancel_io < 0.2:
+                return False
+            last_cancel_io = now
             if self._cancel_marker_exists(job_id):
                 cancel_event.set()
                 self._db.execute(
@@ -311,11 +400,39 @@ class JobManager:
             r = self._db.fetchone(
                 "SELECT cancel_requested FROM jobs WHERE id = ?", (job_id,)
             )
-            return bool(r and r["cancel_requested"])
+            if r and r["cancel_requested"]:
+                cancel_event.set()
+                return True
+            return False
 
         def progress(msg: str, extra: dict[str, Any] | None = None) -> None:
+            nonlocal last_progress_write, last_progress_phase, last_progress_pct
             if cancelled():
                 return
+            extra = extra or {}
+            pct_raw = extra.get("percent")
+            try:
+                pct = float(pct_raw) if pct_raw is not None else None
+            except (TypeError, ValueError):
+                pct = None
+            phase = extra.get("phase")
+            now = time.monotonic()
+            same_phase = phase == last_progress_phase
+            small_pct = (
+                pct is not None
+                and last_progress_pct is not None
+                and abs(pct - last_progress_pct) < 1.0
+            )
+            has_coverage = extra.get("coverage") is not None
+            if last_progress_write > 0:
+                if has_coverage:
+                    if now - last_progress_write < 0.15:
+                        return
+                elif same_phase and (pct is None or small_pct) and now - last_progress_write < 0.25:
+                    return
+            last_progress_write = now
+            last_progress_phase = phase
+            last_progress_pct = pct
             current = self._db.fetchone(
                 "SELECT progress_kind, result_json FROM jobs WHERE id = ?",
                 (job_id,),
@@ -346,6 +463,7 @@ class JobManager:
                 (msg, progress_kind, json.dumps(payload, default=str), job_id),
             )
 
+        log.info("job starting", extra={"channel": "analysis", "job_id": job_id})
         self._db.execute(
             "UPDATE jobs SET status = 'running', started_at = ?, message = ? WHERE id = ?",
             (_utcnow(), f"Running {kind}", job_id),
@@ -418,8 +536,6 @@ class JobManager:
                         data={"traceback": traceback.format_exc()},
                     ),
                 )
-        finally:
-            self._clear_cancel_marker(job_id)
 
     def _fail(self, job_id: str, exc: AppError) -> None:
         self._db.execute(

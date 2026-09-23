@@ -26,6 +26,7 @@ export const SEARCHABLE_IDS = [
 
 export type CoverageLiveKind =
   | "failed"
+  | "waiting_for_pdb"
   | "analyzed"
   | "analyzed_zero"
   | "partial"
@@ -58,9 +59,37 @@ function notAnalyzed(id: string): CapabilityCoverage {
   return { id, state: "not_analyzed", count: null };
 }
 
+export function coverageFromJobResult(
+  result: Record<string, unknown> | null | undefined,
+): AnalysisCoverage | undefined {
+  const raw = result?.coverage;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const cov = raw as AnalysisCoverage;
+  if (!cov.items || typeof cov.items !== "object") return undefined;
+  return cov;
+}
+
 export function coverageFromOverview(overview: Overview | null | undefined): AnalysisCoverage | undefined {
   if (!overview) return undefined;
   return overview.coverage ?? EMPTY_COVERAGE;
+}
+
+export function coverageWaitingForPdb(
+  coverage: AnalysisCoverage | undefined,
+  waiting: boolean,
+): AnalysisCoverage | undefined {
+  if (!coverage || !waiting) return coverage;
+  let changed = false;
+  const items: Record<string, CapabilityCoverage> = {};
+  for (const [id, item] of Object.entries(coverage.items)) {
+    if (item.state === "failed" && !item.waitingForPdb) {
+      changed = true;
+      items[id] = { ...item, waitingForPdb: true };
+    } else {
+      items[id] = item;
+    }
+  }
+  return changed ? { ...coverage, items } : coverage;
 }
 
 export function coverageItem(
@@ -98,6 +127,7 @@ export function coverageEmptyMessage(
   notAnalyzedText: string,
   failed: string,
 ): string {
+  if (item?.waitingForPdb) return "Waiting for PDB";
   if (item?.state === "failed") return failed;
   if (item?.state === "analyzed_zero" || item?.state === "analyzed") return analyzedZero;
   return notAnalyzedText;
@@ -109,6 +139,7 @@ export function coverageWasExecuted(item: CapabilityCoverage | undefined): boole
 
 export function coverageLiveKind(item: CapabilityCoverage | undefined): CoverageLiveKind {
   if (!item) return "not_analyzed";
+  if (item.waitingForPdb) return "waiting_for_pdb";
   if (item.state === "failed") return "failed";
   if (item.state === "analyzed") return "analyzed";
   if (item.state === "analyzed_zero") return "analyzed_zero";
@@ -152,13 +183,29 @@ export function coverageProcessListReady(
   return coverageWasExecuted(item) || coverageHasRows(item) || processCount > 0;
 }
 
+export function coverageShownInView(
+  item: CapabilityCoverage | undefined,
+  shownCount: number,
+): CapabilityCoverage | undefined {
+  if (!item) return item;
+  if (shownCount <= 0) {
+    return { ...item, count: null, state: "not_analyzed", updating: false };
+  }
+  const analyzed = item.state === "analyzed" || item.state === "analyzed_zero";
+  return {
+    ...item,
+    count: shownCount,
+    state: analyzed ? "analyzed" : item.state,
+  };
+}
+
 export function coverageRefreshKey(coverage?: AnalysisCoverage): string {
   if (!coverage) return "";
   return Object.keys(coverage.items)
     .sort()
     .map((id) => {
       const item = coverage.items[id];
-      return `${id}:${item.state}:${item.count ?? ""}:${item.updating ? "1" : ""}`;
+      return `${id}:${item.state}:${item.count ?? ""}:${item.updating ? "1" : ""}:${item.waitingForPdb ? "w" : ""}`;
     })
     .join("|");
 }
@@ -188,6 +235,7 @@ export function coverageResultCaption(
     return countText;
   }
   if (kind === "in_progress") return "Updating…";
+  if (kind === "waiting_for_pdb") return "Waiting for PDB";
   if (kind === "failed") return "Failed";
   if (n > 0) {
     return countText;
@@ -204,6 +252,7 @@ export function processScopedEmptyMessage(
   processFailed = false,
 ): string {
   if (processTargetedCompleted) return analyzedZero;
+  if (evidenceItem?.waitingForPdb) return "Waiting for PDB";
   if (processFailed) return failed;
   return coverageEmptyMessage(evidenceItem, analyzedZero, notAnalyzedText, failed);
 }

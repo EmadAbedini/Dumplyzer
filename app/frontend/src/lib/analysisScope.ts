@@ -148,9 +148,30 @@ export function storedActionNote(missingIds: readonly string[]): string {
 
 export function limitedResultsNote(missingIds: readonly string[]): string {
   if (missingIds.length >= 4) {
-    return "This view is less complete than Complete Analysis. Quick Triage and Custom Analysis only include the capabilities you selected, so you will see fewer results here.";
+    return "Run Complete Analysis for the full dataset. Quick Triage and Custom Analysis only store the capabilities you selected.";
   }
   const list = formatCapabilityList(missingIds);
   const verb = missingIds.length === 1 ? "was" : "were";
-  return `This view is less complete than Complete Analysis. ${list} ${verb} not collected in the last run, so you will see fewer results than after a full pass.`;
+  return `Run Complete Analysis for the full dataset. ${list} ${verb} not collected in the last run.`;
+}
+
+export function findingsScopeNote(missingIds: readonly string[]): string {
+  const base =
+    "Findings come from collected command lines and Analyze Process, not a scan of the whole dump.";
+  if (missingIds.length === 0) return base;
+  return `${base} Run Complete Analysis to collect command lines for every process.`;
+}
+
+export function iocsScopeNote(missingIds: readonly string[]): string {
+  if (missingIds.length === 0) {
+    return "IOCs are extracted from stored process, module, network, and handle records. This does not rescan the dump.";
+  }
+  return "IOCs are extracted from records already stored, not from a rescan of the dump. Run Complete Analysis first so those records are available to extract from.";
+}
+
+export function searchScopeNote(missingIds: readonly string[]): string {
+  if (missingIds.length === 0) {
+    return "Search looks only at records already extracted. It does not search the raw memory image.";
+  }
+  return "Search looks only at records already extracted, not the raw memory image. Run Complete Analysis to extract the rest of the data you want to search.";
 }

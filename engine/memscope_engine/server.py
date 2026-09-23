@@ -29,6 +29,13 @@ from memscope_engine.export import workflows as export_workflows
 from memscope_engine.jobs.manager import JobManager
 from memscope_engine.logging_setup import get_logger, setup_logging
 from memscope_engine.paths import AppPaths
+from memscope_engine.volatility.kernel_symbols import (
+    import_user_symbol_file,
+    run_kernel_symbols_fetch_job,
+    save_microsoft_pdb,
+)
+from memscope_engine.volatility.runtime import set_active_paths
+from memscope_engine.volatility.discovery import warmup_plugin_catalog
 from memscope_engine.providers.yara_provider import detect_yara
 from memscope_engine.session_temp import cleanup_session_temp
 from memscope_engine.storage import Database
@@ -54,6 +61,22 @@ def _runtime_info() -> dict[str, Any]:
 
 
 def _vol_init() -> dict[str, Any]:
+    """Installed package version only. Do not import Volatility plugins."""
+    try:
+        vol_ver = version("volatility3")
+    except PackageNotFoundError:
+        vol_ver = None
+    return {
+        "ok": bool(vol_ver),
+        **_runtime_info(),
+        "volatility3_version": vol_ver,
+        "volatility3_path": None,
+        "framework_package_version": vol_ver,
+    }
+
+
+def _vol_init_full() -> dict[str, Any]:
+    """Import Volatility 3 framework. Used by smoke.e2e, not Settings health."""
     import volatility3
     from volatility3.framework import automagic, constants, contexts, plugins
 
@@ -75,11 +98,26 @@ def _vol_init() -> dict[str, Any]:
     }
 
 
-def handle_capabilities_status(_params: dict[str, Any]) -> dict[str, Any]:
-    """One-shot health payload for About / Settings. Avoids six serial RPCs."""
+def _capabilities_checking_payload() -> dict[str, Any]:
+    """Placeholder so the RPC loop stays free while an import/analysis job runs."""
+    return {
+        "ok": True,
+        "checking": True,
+        "volatility": {"checking": True, **_runtime_info()},
+        "pe_extraction": {"provider": "pe_extraction", "checking": True},
+        "bulk_extractor": {"provider": "bulk_extractor", "checking": True},
+        "capa": {"provider": "capa", "checking": True},
+        "floss": {"provider": "floss", "checking": True},
+        "yara": {"provider": "yara", "checking": True},
+    }
+
+
+def _probe_capabilities() -> dict[str, Any]:
     paths = _paths()
     db = _db()
-    return {
+    payload = {
+        "ok": True,
+        "checking": False,
         "volatility": _vol_init(),
         "pe_extraction": pe_extraction_workflows.pe_extraction_status(paths, db),
         "bulk_extractor": bulk_extractor_workflows.bulk_extractor_status(paths, db),
@@ -87,6 +125,19 @@ def handle_capabilities_status(_params: dict[str, Any]) -> dict[str, Any]:
         "floss": floss_workflows.floss_status(paths, db),
         "yara": yara_workflows.yara_status(paths, db),
     }
+    _STATE["capabilities"] = payload
+    return payload
+
+
+def handle_capabilities_status(_params: dict[str, Any]) -> dict[str, Any]:
+    """About / Settings health. Never block an in-flight import on Volatility import."""
+    jobs = _STATE.get("jobs")
+    if jobs is not None and jobs.has_live_work():
+        cached = _STATE.get("capabilities")
+        if isinstance(cached, dict) and not cached.get("checking"):
+            return cached
+        return _capabilities_checking_payload()
+    return _probe_capabilities()
 
 
 def _db() -> Database:
@@ -148,9 +199,26 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
     data_dir = _resolve_init_root(params)
     paths = AppPaths(data_dir).ensure() if data_dir else AppPaths().ensure()
     setup_logging(paths.logs)
-    if _STATE.get("db") is not None:
+    set_active_paths(paths)
+    existing_paths = _STATE.get("paths")
+    existing_db = _STATE.get("db")
+    existing_jobs = _STATE.get("jobs")
+    if (
+        existing_paths is not None
+        and existing_db is not None
+        and existing_jobs is not None
+        and existing_paths.root == paths.root
+    ):
+        # Do not wipe %TEMP% while an import/analysis job is hashing or running.
+        if not existing_jobs.has_live_work():
+            cleanup_session_temp(existing_paths)
+        existing_jobs.start()
+        log.info("engine already initialized", extra={"channel": "app"})
+        return _init_payload(existing_paths, existing_db)
+
+    if existing_db is not None:
         try:
-            _STATE["db"].close()
+            existing_db.close()
         except Exception:  # noqa: BLE001
             pass
     db = Database(paths.db_path)
@@ -234,11 +302,16 @@ def handle_app_init(params: dict[str, Any]) -> dict[str, Any]:
     jobs.register("pcap_reconstruction", _pcap_recon)
     jobs.register("plugin_advanced", _plugin_advanced)
     jobs.register("export_report", _export_report)
+    jobs.register("kernel_symbols_fetch", run_kernel_symbols_fetch_job)
     jobs.start()
     _STATE["paths"] = paths
     _STATE["db"] = db
     _STATE["jobs"] = jobs
     log.info("engine initialized", extra={"channel": "app"})
+    return _init_payload(paths, db)
+
+
+def _init_payload(paths: AppPaths, db: Database) -> dict[str, Any]:
     # Do not probe Volatility/CAPA/FLOSS/YARA rules/bulk_extractor here.
     # Those checks are expensive (imports, subprocess --version, rule compile)
     # and would block every subsequent RPC, including the UI's per-capability
@@ -279,6 +352,11 @@ def handle_app_shutdown(_params: dict[str, Any]) -> dict[str, Any]:
     if paths is not None:
         result["cleaned"] = cleanup_session_temp(paths)
     return result
+
+
+def handle_jobs_reset_visible(_params: dict[str, Any]) -> dict[str, Any]:
+    _jobs().reset_visible_jobs()
+    return {"ok": True}
 
 
 def handle_evidence_import(params: dict[str, Any]) -> dict[str, Any]:
@@ -366,7 +444,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "smoke.e2e": lambda _p: {
         "ok": True,
         "health": handle_health({}),
-        "volatility": _vol_init(),
+        "volatility": _vol_init_full(),
         "providers": {
             "yara": yara_workflows.yara_status(_paths(), _db()),
             "pe_extraction": pe_extraction_workflows.pe_extraction_status(_paths(), _db()),
@@ -643,6 +721,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         limit=int(p.get("limit", 500)),
         offset=int(p.get("offset", 0)),
     ),
+    "plugins.warmup": lambda _p: warmup_plugin_catalog(),
     "plugins.list": lambda p: plugin_explorer.list_plugins_for_ui(
         _db(), p.get("evidence_id")
     ),
@@ -714,12 +793,41 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         )
     },
     "jobs.cancel": lambda p: _jobs().cancel(p["job_id"]),
+    "jobs.reset_visible": handle_jobs_reset_visible,
+    "symbols.import_file": lambda p: import_user_symbol_file(
+        p["path"],
+        pdb_name=str(p.get("pdb_name") or "ntkrnlmp.pdb"),
+        guid=str(p.get("guid") or ""),
+        age=int(p.get("age") or 0),
+        paths=_paths(),
+    ),
+    "symbols.save_pdb": lambda p: save_microsoft_pdb(
+        p["path"],
+        pdb_name=str(p.get("pdb_name") or "ntkrnlmp.pdb"),
+        guid=str(p.get("guid") or ""),
+        age=int(p.get("age") or 0),
+    ),
+    "symbols.fetch": lambda p: _jobs().submit(
+        "kernel_symbols_fetch",
+        evidence_id=p.get("evidence_id"),
+        params={
+            "pdb_name": p.get("pdb_name") or "ntkrnlmp.pdb",
+            "guid": p.get("guid"),
+            "age": p.get("age"),
+            "evidence_id": p.get("evidence_id"),
+        },
+        message="Downloading kernel symbols for this Windows build",
+    ),
 }
 
 
 def _write(msg: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(msg, separators=(",", ":"), default=str) + "\n")
-    sys.stdout.flush()
+    line = json.dumps(msg, separators=(",", ":"), default=str) + "\n"
+    try:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    except OSError:
+        log.warning("engine stdout write failed", extra={"channel": "app"})
 
 
 def _error(req_id: Any, payload: dict[str, Any]) -> None:

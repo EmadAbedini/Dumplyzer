@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from typing import Any, Type
 
 from memscope_engine.errors import AppError
@@ -18,6 +19,9 @@ log = logging.getLogger("memscope.tool")
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
 
 _CATALOG: dict[str, Any] | None = None
+_LOCK = threading.Lock()
+_WARM_LOCK = threading.Lock()
+_WARM_STARTED = False
 
 
 def volatility_version() -> str:
@@ -33,39 +37,73 @@ def _import_plugin_modules() -> list[str]:
     return [str(x) for x in failures]
 
 
+def catalog_ready() -> bool:
+    return _CATALOG is not None
+
+
+def warmup_plugin_catalog() -> dict[str, Any]:
+    """Import Volatility plugins on a daemon thread. Does not block the RPC loop."""
+    global _WARM_STARTED
+    if _CATALOG is not None:
+        return {"ok": True, "ready": True}
+    with _WARM_LOCK:
+        if _CATALOG is not None:
+            return {"ok": True, "ready": True}
+        if _WARM_STARTED:
+            return {"ok": True, "ready": False}
+        _WARM_STARTED = True
+
+        def _run() -> None:
+            global _WARM_STARTED
+            try:
+                discover_plugins()
+            except Exception:
+                log.exception("plugin catalog warmup failed")
+                with _WARM_LOCK:
+                    _WARM_STARTED = False
+
+        threading.Thread(
+            target=_run, name="plugin-catalog-warmup", daemon=True
+        ).start()
+    return {"ok": True, "ready": False}
+
+
 def discover_plugins(*, force_refresh: bool = False) -> dict[str, Any]:
     """Enumerate Volatility 3 plugins from the installed package registry."""
     global _CATALOG
     if _CATALOG is not None and not force_refresh:
         return _CATALOG
+    with _LOCK:
+        if _CATALOG is not None and not force_refresh:
+            return _CATALOG
 
-    from volatility3 import framework
-    from volatility3.framework import constants, interfaces
+        from volatility3 import framework
+        from volatility3.framework import constants
 
-    import_failures = _import_plugin_modules()
-    vol_ver = getattr(constants, "PACKAGE_VERSION", "unknown")
-    fw_ver = framework.interface_version()
-    raw = framework.list_plugins()
+        import_failures = _import_plugin_modules()
+        vol_ver = getattr(constants, "PACKAGE_VERSION", "unknown")
+        fw_ver = framework.interface_version()
+        raw = framework.list_plugins()
 
-    items: list[dict[str, Any]] = []
-    for plugin_id, cls in sorted(raw.items(), key=lambda kv: kv[0].lower()):
-        items.append(_normalize_plugin(plugin_id, cls, fw_ver))
+        items: list[dict[str, Any]] = []
+        for plugin_id, cls in sorted(raw.items(), key=lambda kv: kv[0].lower()):
+            items.append(_normalize_plugin(plugin_id, cls, fw_ver))
 
-    catalog = {
-        "model_version": META_MODEL_VERSION,
-        "volatility_version": str(vol_ver),
-        "framework_interface_version": list(fw_ver),
-        "plugin_count": len(items),
-        "import_failures": import_failures,
-        "items": items,
-        "categories": _categories(items),
-    }
-    _CATALOG = catalog
-    log.info(
-        "plugin catalog ready",
-        extra={"channel": "tool", "count": len(items), "failures": len(import_failures)},
-    )
-    return catalog
+        catalog = {
+            "model_version": META_MODEL_VERSION,
+            "volatility_version": str(vol_ver),
+            "framework_interface_version": list(fw_ver),
+            "plugin_count": len(items),
+            "import_failures": import_failures,
+            "items": items,
+            "categories": _categories(items),
+        }
+        _CATALOG = catalog
+        log.info(
+            "plugin catalog ready",
+            extra={"channel": "tool", "count": len(items), "failures": len(import_failures)},
+        )
+        return catalog
 
 
 def _categories(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

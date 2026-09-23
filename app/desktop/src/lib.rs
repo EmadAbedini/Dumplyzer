@@ -15,8 +15,9 @@ mod engine;
 mod drag_drop;
 
 use engine::{
-    cleanup_session_temp, configure_engine_command, memscope_data_dir, resolve_engine,
-    resolve_inputs_from_env, user_data_subdir, EngineLaunchPlan,
+    apply_webview2_user_data_folder, cleanup_session_temp, configure_engine_command,
+    memscope_data_dir, resolve_engine, resolve_inputs_from_env, user_data_subdir,
+    EngineLaunchPlan,
 };
 
 #[derive(Debug, Error)]
@@ -217,6 +218,76 @@ fn force_win32_splash_visible(splash: &tauri::WebviewWindow) {
     });
 }
 
+/// Drop TOPMOST so the workbench can cover the splash instead of appearing under it.
+fn release_splash_topmost(splash: &tauri::WebviewWindow) {
+    let _ = splash.set_always_on_top(false);
+    #[cfg(windows)]
+    force_win32_splash_not_topmost(splash);
+}
+
+fn dismiss_splash_window(splash: &tauri::WebviewWindow) {
+    let _ = splash.set_always_on_top(false);
+    #[cfg(windows)]
+    force_win32_splash_hidden(splash);
+    let _ = splash.hide();
+    let _ = splash.close();
+}
+
+#[cfg(windows)]
+fn force_win32_splash_not_topmost(splash: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_NOTOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
+
+    let Ok(raw) = splash.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as *mut c_void);
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_NOTOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+    }
+}
+
+#[cfg(windows)]
+fn force_win32_splash_hidden(splash: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, ShowWindow, HWND_NOTOPMOST, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SW_HIDE,
+    };
+
+    let Ok(raw) = splash.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as *mut c_void);
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_HIDE);
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_NOTOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_HIDEWINDOW | SWP_NOACTIVATE,
+        );
+    }
+    let _ = splash.with_webview(|webview| unsafe {
+        let _ = webview.controller().SetIsVisible(false);
+    });
+}
+
 /// Show the splash only after the JPEG can paint, so a solid color frame is not seen first.
 /// The 4s minimum starts here — after the window/webview have been presented — not merely
 /// after a hidden HWND exists.
@@ -253,6 +324,11 @@ fn reveal_main_window(app: &tauri::AppHandle) {
         return;
     }
     SPLASH_PHASE.store(false, Ordering::SeqCst);
+    // Splash is TOPMOST and smaller than the workbench. If it stays on top while
+    // main.show() runs, the maximized window appears around it for a frame.
+    if let Some(splash) = app.get_webview_window("splash") {
+        release_splash_topmost(&splash);
+    }
     if let Some(main) = app.get_webview_window("main") {
         prepare_main_window(&main);
         let _ = main.unminimize();
@@ -261,11 +337,14 @@ fn reveal_main_window(app: &tauri::AppHandle) {
         let _ = main.show();
         let _ = main.maximize();
         let _ = main.set_focus();
+        if let Some(splash) = app.get_webview_window("splash") {
+            dismiss_splash_window(&splash);
+        }
         drag_drop::attach_after_show(app, &main);
+        return;
     }
     if let Some(splash) = app.get_webview_window("splash") {
-        let _ = splash.hide();
-        let _ = splash.close();
+        dismiss_splash_window(&splash);
     }
 }
 
@@ -613,7 +692,10 @@ const ALLOWED_EXTERNAL_URLS: &[&str] = &[
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), EngineError> {
-    if !ALLOWED_EXTERNAL_URLS.contains(&url.as_str()) {
+    let allowed = ALLOWED_EXTERNAL_URLS.contains(&url.as_str())
+        || url == "https://msdl.microsoft.com/download/symbols"
+        || url.starts_with("https://msdl.microsoft.com/download/symbols/");
+    if !allowed {
         return Err(EngineError::Message("URL is not allowed.".into()));
     }
     #[cfg(windows)]
@@ -818,6 +900,7 @@ async fn engine_call(
     let params = params.unwrap_or_else(|| json!({}));
     let timeout = timeout_secs.unwrap_or(match method.as_str() {
         "smoke.e2e" => 90,
+        "symbols.save_pdb" => 180,
         _ => 120,
     });
     // Marker is visible to the Python worker without waiting for the GIL-bound RPC loop.
@@ -847,6 +930,7 @@ async fn smoke_e2e(state: State<'_, EngineState>) -> Result<Value, EngineError> 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = apply_webview2_user_data_folder();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(EngineState::new())
@@ -1091,6 +1175,17 @@ mod tests {
                 && splash_src.contains("splash.as_ref().show()")
                 && splash_src.contains("force_win32_splash_visible"),
             "splash present path must show both the HWND and the WebView2 controller"
+        );
+        let reveal = splash_src
+            .split("fn reveal_main_window")
+            .nth(1)
+            .expect("reveal_main_window");
+        let topmost = reveal.find("release_splash_topmost").expect("drop TOPMOST");
+        let show = reveal.find("let _ = main.show();").expect("show main");
+        let dismiss = reveal.find("dismiss_splash_window").expect("dismiss splash");
+        assert!(
+            topmost < show && show < dismiss,
+            "splash must leave TOPMOST before main.show, then hide after the workbench HWND exists"
         );
     }
 

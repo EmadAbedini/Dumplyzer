@@ -40,6 +40,7 @@ from memscope_engine.providers.bulk_extractor_features import (
 )
 from memscope_engine.providers.process_run import (
     ProcessRun,
+    analysis_worker_count,
     default_subprocess_runner,
 )
 
@@ -269,6 +270,8 @@ def build_scan_argv(exe: Path, image: Path, output_dir: Path) -> list[str]:
     """Construct argv from the verified v2.x interface. No user extra args."""
     return [
         str(exe),
+        "-j",
+        str(analysis_worker_count()),
         "-o",
         str(output_dir),
         str(image),

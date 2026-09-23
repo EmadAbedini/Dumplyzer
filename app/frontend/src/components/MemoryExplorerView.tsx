@@ -35,6 +35,7 @@ export function MemoryExplorerView({
   refreshToken,
   coverage,
   activeJobs = [],
+  onShownCountChange,
 }: {
   evidenceId: string | null;
   processes: ProcessRow[];
@@ -45,6 +46,7 @@ export function MemoryExplorerView({
   refreshToken?: number | string;
   coverage?: CapabilityCoverage;
   activeJobs?: Job[];
+  onShownCountChange?: (count: number) => void;
 }) {
   const [pidFilter, setPidFilter] = useState(() => {
     const tracked = activeJobOfKind(activeJobs, "vad_scan", "vad_extract");
@@ -252,6 +254,15 @@ export function MemoryExplorerView({
     memorySortValue,
   );
   const loading = Boolean(listKey) && loadedKey !== listKey;
+  const shownCount = activePid == null ? 0 : visibleRegions.length;
+
+  useEffect(() => {
+    onShownCountChange?.(shownCount);
+  }, [shownCount, onShownCountChange]);
+
+  useEffect(() => {
+    return () => onShownCountChange?.(0);
+  }, [onShownCountChange]);
 
   if (!evidenceId) {
     return <ImportEvidenceState title="Memory / VAD" />;
@@ -262,7 +273,9 @@ export function MemoryExplorerView({
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <div className="text-sm font-semibold">Memory / VAD</div>
         <div className="text-xs text-muted">
-          {coverageResultCaption(coverage, items.length)}
+          {activePid == null
+            ? null
+            : coverageResultCaption(coverage, visibleRegions.length)}
         </div>
         <ClearableInput
           wrapperClassName="w-28 flex-none"

@@ -314,12 +314,39 @@ def test_configuration_rejects_extra_args(tmp_path: Path) -> None:
     assert p.timeout_secs == 60
 
 
-def test_command_construction(tmp_path: Path) -> None:
+def test_analysis_worker_count_cpu_aware(monkeypatch) -> None:
+    from memscope_engine.providers.process_run import analysis_worker_count
+
+    monkeypatch.setattr("memscope_engine.providers.process_run.os.cpu_count", lambda: None)
+    assert analysis_worker_count() == 2
+    monkeypatch.setattr("memscope_engine.providers.process_run.os.cpu_count", lambda: 0)
+    assert analysis_worker_count() == 2
+    monkeypatch.setattr("memscope_engine.providers.process_run.os.cpu_count", lambda: 1)
+    assert analysis_worker_count() == 1
+    monkeypatch.setattr("memscope_engine.providers.process_run.os.cpu_count", lambda: 4)
+    assert analysis_worker_count() == 2
+    monkeypatch.setattr("memscope_engine.providers.process_run.os.cpu_count", lambda: 10)
+    assert analysis_worker_count() == 8
+    monkeypatch.setattr("memscope_engine.providers.process_run.os.cpu_count", lambda: 16)
+    assert analysis_worker_count() == 8
+    monkeypatch.setattr("memscope_engine.providers.process_run.os.cpu_count", lambda: -1)
+    assert analysis_worker_count() == 2
+    monkeypatch.setattr(
+        "memscope_engine.providers.process_run.os.cpu_count", lambda: "bogus"
+    )
+    assert analysis_worker_count() == 2
+
+
+def test_command_construction(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "memscope_engine.providers.bulk_extractor.analysis_worker_count", lambda: 5
+    )
     exe = tmp_path / "bulk_extractor64.exe"
     image = tmp_path / "img.raw"
     out = tmp_path / "analysis" / "run1"
     argv = build_scan_argv(exe, image, out)
-    assert argv == [str(exe), "-o", str(out), str(image)]
+    assert argv == [str(exe), "-j", "5", "-o", str(out), str(image)]
+    assert argv[argv.index("-j") + 1] == "5"
     assert build_version_argv(exe) == [str(exe), "-V"]
     assert "-e" not in argv
     assert "/pid" not in argv
@@ -397,6 +424,40 @@ def test_parse_representative_feature_files(tmp_path: Path) -> None:
     scanners = set(normalized["scanners"])
     assert "email" in scanners
     assert "url" in scanners
+
+
+def test_scan_image_invokes_calculated_j_workers(tmp_path: Path, monkeypatch) -> None:
+    paths, db, ev, img = _seed_evidence(tmp_path)
+    exe = _write_dummy_exe(paths.tools / "bulk_extractor64.exe")
+    seen: list[list[str]] = []
+
+    def runner(argv, *, cwd=None, timeout_secs=30, cancelled=None):
+        if "-V" in argv:
+            return ProcessRun(
+                returncode=0, stdout=f"bulk_extractor {VERIFIED_RELEASE}\n", stderr=""
+            )
+        seen.append(list(argv))
+        out = Path(argv[argv.index("-o") + 1])
+        _write_feature_fixture(out)
+        return ProcessRun(returncode=0, stdout="scan ok\n", stderr="")
+
+    monkeypatch.setattr(
+        "memscope_engine.providers.bulk_extractor.analysis_worker_count", lambda: 7
+    )
+    p = BulkExtractorProvider(
+        tools_dir=paths.tools,
+        analysis_dir=paths.analysis,
+        artifacts_dir=paths.artifacts,
+        runner=runner,
+        executable_path=exe,
+    )
+    out = paths.analysis / "bulk_extractor" / str(uuid4())
+    p.scan_image(img, output_dir=out)
+    assert seen, "bulk_extractor scan was not invoked"
+    argv = seen[0]
+    assert argv[1:3] == ["-j", "7"]
+    assert "-o" in argv
+    db.close()
 
 
 def test_scan_normalizes_iocs_and_preserves_raw_output(tmp_path: Path) -> None:

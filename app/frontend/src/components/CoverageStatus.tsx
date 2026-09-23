@@ -32,10 +32,13 @@ export function CoverageStatus({
   const count = item?.count;
 
   if (kind === "in_progress") {
-    const label = "Analysis in progress";
+    const n = count ?? 0;
+    const label = n > 0 ? `${n.toLocaleString()} so far · Updating…` : "Analysis in progress";
     return (
       <span className="inline-flex items-center gap-1 text-accent" title={label} aria-label={label}>
+        <span className="tabular-nums">{n.toLocaleString()}</span>
         <LiveSpinner label={label} />
+        {compact ? null : <span className="text-muted">Updating…</span>}
       </span>
     );
   }
@@ -79,6 +82,17 @@ export function CoverageStatus({
     );
   }
 
+  if (kind === "waiting_for_pdb") {
+    return (
+      <span
+        className={cn("text-accent", compact ? "whitespace-nowrap text-[0.7rem] font-medium" : "")}
+        title="Waiting for PDB"
+      >
+        Waiting for PDB
+      </span>
+    );
+  }
+
   if (kind === "failed") {
     return (
       <span
@@ -114,8 +128,8 @@ export function CoverageStatus({
 
 export function AnalysisScopeNote({ children }: { children: ReactNode }) {
   return (
-    <div className="analysis-profile-note flex min-w-0 items-start gap-2 overflow-hidden rounded-md px-2.5 py-2 text-xs leading-snug">
-      <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+    <div className="analysis-profile-note flex min-w-0 items-center gap-2 overflow-hidden rounded-md px-2.5 py-2 text-xs leading-snug">
+      <Info size={14} className="shrink-0" aria-hidden />
       <p className="min-w-0 flex-1 wrap-anywhere">{children}</p>
     </div>
   );
@@ -148,7 +162,12 @@ export function CoverageEmptyState({
   let detail = notAnalyzedDetail;
   let hint: string | null = notAnalyzedHint ?? null;
   let live = false;
-  if (kind === "failed") {
+  if (kind === "waiting_for_pdb") {
+    heading = "Waiting for PDB";
+    headingClass = "text-accent";
+    detail = "Windows kernel symbols are required before this analysis can continue.";
+    hint = "Download & Continue, or browse to a PDB / ISF file.";
+  } else if (kind === "failed") {
     heading = "Failed";
     headingClass = "text-danger";
     detail = failedDetail;
@@ -186,6 +205,8 @@ export function CoverageEmptyState({
             <span className="h-6 w-6 animate-spin rounded-full border-[2.5px] border-border border-t-accent" />
           ) : kind === "failed" ? (
             <CircleAlert className="h-5 w-5 text-danger" strokeWidth={1.75} />
+          ) : kind === "waiting_for_pdb" ? (
+            <CircleDashed className="h-5 w-5 text-accent" strokeWidth={1.75} />
           ) : kind === "analyzed" || kind === "analyzed_zero" ? (
             <span className="text-sm font-medium text-foreground">0</span>
           ) : (
@@ -253,6 +274,12 @@ export function ListLoadingState({ title }: { title: string }) {
 
 export function coverageShowsEmptyPanel(item: CapabilityCoverage | undefined, rowCount: number): boolean {
   if (rowCount > 0) return false;
-  const state = item?.state ?? "not_analyzed";
-  return state === "not_analyzed" || state === "failed" || state === "analyzed_zero" || state === "analyzed";
+  const kind = coverageLiveKind(item);
+  return (
+    kind === "not_analyzed" ||
+    kind === "failed" ||
+    kind === "waiting_for_pdb" ||
+    kind === "analyzed_zero" ||
+    kind === "analyzed"
+  );
 }

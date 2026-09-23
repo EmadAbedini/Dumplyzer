@@ -65,6 +65,15 @@
     "sha256": "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31",
     "tauri_cache": "%LOCALAPPDATA%\\tauri\\WixTools314"
   },
+  "windows_symbols": {
+    "pack": "windows.zip",
+    "url": "https://downloads.volatilityfoundation.org/volatility3/symbols/windows.zip",
+    "sha256": "231d69735b9a5482b16bdbf1ec356e0a95574c44079e68dfb02ebddb34d55f3e",
+    "bytes": 839727133,
+    "bundled": false,
+    "destination": "%LOCALAPPDATA%\\Dumplyzer\\symbols\\windows.zip",
+    "note": "Not shipped. Optional local windows.zip. Default path is in-app Download & Continue for one build, or a file the user browses to under %LOCALAPPDATA%\\Dumplyzer\\symbols."
+  },
   "application": {
     "version": "0.1.0",
     "identifier": "com.dumplyzer.workbench",

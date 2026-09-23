@@ -42,9 +42,13 @@ Dumplyzer is an offline, single-user forensic workstation. Memory images, extrac
 
 ## WebView2
 
-The desktop UI requires the Microsoft Edge WebView2 Runtime. The Windows bundle uses Tauri `webviewInstallMode.embedBootstrapper` (silent). The small Evergreen bootstrapper is packed into `Dumplyzer_0.1.0_x64-setup.exe`. If WebView2 is missing, that bootstrapper downloads the runtime from Microsoft during setup. If WebView2 is already present, the bootstrapper is skipped.
+The desktop UI requires the Microsoft Edge WebView2 Runtime. The Windows bundle uses Tauri `webviewInstallMode.embedBootstrapper`. The small Evergreen bootstrapper is packed into `Dumplyzer_0.1.0_x64-setup.exe`. If WebView2 is missing, setup asks before downloading. Agreeing runs Microsoft's installer UI. Declining or cancelling that download exits Dumplyzer setup. If WebView2 is already present, the bootstrapper is skipped.
 
 Dumplyzer itself does not phone home. The WebView2 bootstrapper is Microsoft's installer, not Dumplyzer telemetry.
+
+## Kernel symbols
+
+Windows analysis may download **one** kernel PDB from `https://msdl.microsoft.com/download/symbols` after the user agrees in the app (Download & Continue). The 800 MB Volatility `windows.zip` pack is not in the NSIS installer and is not fetched automatically. The Microsoft response may redirect to Azure Blob Storage; Dumplyzer follows that only over HTTPS to `msdl.microsoft.com` or `*.blob.core.windows.net`, then accepts the bytes only if they verify as a PDB (or expand to one). User-provided `.pdb` / ISF files stay under `%LOCALAPPDATA%\Dumplyzer\symbols`.
 
 ## Authenticode
 

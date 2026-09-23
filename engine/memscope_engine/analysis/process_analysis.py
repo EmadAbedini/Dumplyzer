@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+from memscope_engine.analysis.progress import emit_live, persist_live
 from memscope_engine.errors import AppError
 from memscope_engine.storage import Database
 from memscope_engine.volatility.normalize import (
@@ -160,7 +161,6 @@ def run_basic_triage_job(
     vol_version = None
     try:
         _cancelled(cancelled)
-        db.execute("DELETE FROM processes WHERE evidence_id = ?", (evidence_id,))
         _emit_progress(
             progress,
             "Opening memory image (Volatility session)",
@@ -216,8 +216,22 @@ def run_basic_triage_job(
             source_plugin=ps_result.plugin,
         )
         db.execute("DELETE FROM processes WHERE evidence_id = ?", (evidence_id,))
-        for p in processes:
-            _insert_process(db, p)
+        emit_live(
+            progress,
+            db,
+            evidence_id,
+            "Running windows.pslist",
+            {"phase": "processes"},
+        )
+        persist_live(
+            db,
+            evidence_id,
+            processes,
+            lambda p: _insert_process(db, p),
+            progress=progress,
+            message="Running windows.pslist",
+            extra={"phase": "processes"},
+        )
         _record_plugin_done(
             db,
             ps_exec,
@@ -276,7 +290,7 @@ def run_process_recommended_job(
     db: Database,
     params: dict[str, Any],
     cancelled: Callable[[], bool],
-    progress: Callable[[str], None],
+    progress: Callable[..., None],
 ) -> dict[str, Any]:
     evidence_id = params["evidence_id"]
     process_id = params.get("process_id")
@@ -365,7 +379,11 @@ def run_process_recommended_job(
 
     try:
         _cancelled(cancelled)
-        progress(f"Opening image for PID {pid}")
+        _emit_progress(
+            progress,
+            f"Opening image for PID {pid}",
+            {"phase": "session", "percent": 8},
+        )
         session = VolatilitySession(path)
         vol_version = session.volatility_version
 
@@ -373,7 +391,11 @@ def run_process_recommended_job(
         from volatility3.plugins.windows.cmdline import CmdLine
 
         _cancelled(cancelled)
-        progress(f"windows.cmdline (pid={pid})")
+        _emit_progress(
+            progress,
+            f"windows.cmdline (pid={pid})",
+            {"phase": "command_lines", "percent": 20},
+        )
         pe = _record_plugin_start(
             db,
             run_id=run_id,
@@ -408,7 +430,11 @@ def run_process_recommended_job(
         from volatility3.plugins.windows.dlllist import DllList
 
         _cancelled(cancelled)
-        progress(f"windows.dlllist (pid={pid})")
+        _emit_progress(
+            progress,
+            f"windows.dlllist (pid={pid})",
+            {"phase": "modules", "percent": 27},
+        )
         pe = _record_plugin_start(
             db,
             run_id=run_id,
@@ -454,7 +480,11 @@ def run_process_recommended_job(
         from volatility3.plugins.windows.netscan import NetScan
 
         _cancelled(cancelled)
-        progress("windows.netscan (filter to PID)")
+        _emit_progress(
+            progress,
+            "windows.netscan (filter to PID)",
+            {"phase": "network", "percent": 37},
+        )
         pe = _record_plugin_start(
             db,
             run_id=run_id,
@@ -492,7 +522,11 @@ def run_process_recommended_job(
         from volatility3.plugins.windows.handles import Handles
 
         _cancelled(cancelled)
-        progress(f"windows.handles (pid={pid})")
+        _emit_progress(
+            progress,
+            f"windows.handles (pid={pid})",
+            {"phase": "handles", "percent": 47},
+        )
         pe = _record_plugin_start(
             db,
             run_id=run_id,
@@ -534,7 +568,11 @@ def run_process_recommended_job(
         from volatility3.plugins.windows.vadinfo import VadInfo
 
         _cancelled(cancelled)
-        progress(f"windows.vadinfo (pid={pid})")
+        _emit_progress(
+            progress,
+            f"windows.vadinfo (pid={pid})",
+            {"phase": "memory_vad", "percent": 85},
+        )
         pe = _record_plugin_start(
             db,
             run_id=run_id,

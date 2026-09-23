@@ -32,6 +32,56 @@ STEP_WEIGHTS: dict[str, float] = {
 ProgressFn = Callable[..., None]
 
 
+def live_extra(db: Any, evidence_id: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Attach a coverage snapshot so the UI can update counts without a second RPC."""
+    from memscope_engine.analysis.coverage import coverage_for_evidence
+
+    payload = dict(extra or {})
+    payload["coverage"] = coverage_for_evidence(db, evidence_id)
+    return payload
+
+
+def emit_live(
+    progress: ProgressFn | None,
+    db: Any,
+    evidence_id: str,
+    message: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    if progress is None:
+        return
+    payload = live_extra(db, evidence_id, extra)
+    try:
+        progress(message, payload)
+    except TypeError:
+        progress(message)
+
+
+def persist_live(
+    db: Any,
+    evidence_id: str,
+    items: list[Any],
+    persist_one: Callable[[Any], None],
+    *,
+    progress: ProgressFn | None = None,
+    message: str = "",
+    extra: dict[str, Any] | None = None,
+    min_interval: float = 0.4,
+) -> int:
+    """Persist rows and publish coverage as the count grows."""
+    total = len(items)
+    last = 0.0
+    for i, item in enumerate(items, 1):
+        persist_one(item)
+        if progress is None:
+            continue
+        now = time.monotonic()
+        if i == 1 or i == total or now - last >= min_interval:
+            last = now
+            emit_live(progress, db, evidence_id, message, extra)
+    return total
+
+
 def step_ranges(step_ids: list[str]) -> dict[str, tuple[float, float]]:
     weights = [STEP_WEIGHTS.get(sid, 6.0) for sid in step_ids]
     total = sum(weights) or 1.0

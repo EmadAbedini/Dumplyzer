@@ -54,6 +54,13 @@ class VolatilitySession:
         from volatility3.framework.configuration import requirements
         from volatility3.framework import exceptions
 
+        from memscope_engine.volatility.runtime import configure_volatility_runtime
+
+        try:
+            configure_volatility_runtime()
+        except Exception:
+            vollog.warning("volatility runtime configuration failed", exc_info=True)
+
         self._automagic = automagic
         self._constants = constants
         self._contexts = contexts
@@ -104,6 +111,10 @@ class VolatilitySession:
 
         if cancelled and cancelled():
             raise job_cancelled_error()
+
+        from memscope_engine.volatility.runtime import clear_needed_kernel
+
+        clear_needed_kernel()
 
         def _progress(progress: float, description: str | None = None) -> None:
             if cancelled and cancelled():
@@ -173,6 +184,11 @@ class VolatilitySession:
             if cancelled and cancelled():
                 raise job_cancelled_error() from exc
             unsat = [str(x) for x in exc.unsatisfied]
+            from memscope_engine.volatility.kernel_symbols import maybe_kernel_symbols_error
+
+            needed = maybe_kernel_symbols_error()
+            if needed is not None:
+                raise needed from exc
             vollog.error(
                 "plugin requirements unsatisfied plugin=%s unsatisfied=%s",
                 plugin_name,

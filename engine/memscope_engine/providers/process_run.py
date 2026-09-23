@@ -17,6 +17,21 @@ from memscope_engine.errors import AppError
 log = logging.getLogger("memscope.tool")
 
 
+def analysis_worker_count() -> int:
+    """Worker threads for bulk_extractor ``-j`` (not CAPA/FLOSS JSON ``-j``).
+
+    Leave two logical CPUs for the workbench when possible, and never exceed 8.
+    """
+    try:
+        raw = os.cpu_count()
+        n = int(raw) if raw else 4
+    except (TypeError, ValueError):
+        n = 4
+    if n < 1:
+        n = 4
+    return min(max(1, n - 2), 8)
+
+
 @dataclass
 class ProcessRun:
     returncode: int

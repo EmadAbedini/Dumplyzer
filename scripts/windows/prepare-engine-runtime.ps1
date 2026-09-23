@@ -159,6 +159,8 @@ for needed in (
     'memscope_engine.providers.capa',
     'memscope_engine.providers.floss',
     'memscope_engine.volatility.pe_dump',
+    'memscope_engine.volatility.kernel_symbols',
+    'memscope_engine.volatility.symbol_pack',
 ):
     importlib.import_module(needed)
 from memscope_engine.version import APP_VERSION

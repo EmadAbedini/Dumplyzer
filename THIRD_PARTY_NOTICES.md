@@ -18,6 +18,12 @@ not from assumed licenses.
 
 Volatility 3’s VSL is **not** Apache-2.0. Redistribution of Volatility 3 must keep that license text (the runtime payload includes `LICENSE.txt`). Dumplyzer does not relicense Volatility.
 
+## Downloaded once at first Windows analysis (not shipped)
+
+| Component | Notes |
+|-----------|--------|
+| Volatility Foundation Windows ISF pack (`windows.zip`) | Official zip from `https://downloads.volatilityfoundation.org/volatility3/symbols/windows.zip` (SHA-256 `231d69735b9a5482b16bdbf1ec356e0a95574c44079e68dfb02ebddb34d55f3e`, 839727133 bytes). Dumplyzer does **not** put this in the NSIS installer and does **not** download it automatically. You may copy it under `%LOCALAPPDATA%\Dumplyzer\symbols` if you want the full pack locally. The default path is in-app Download & Continue for one Microsoft kernel build, or a `.pdb` / ISF file you browse to. |
+
 ## Not redistributed
 
 | Component | Notes |

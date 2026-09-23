@@ -20,10 +20,14 @@ _patch_lock = threading.Lock()
 _patch_depth = 0
 _orig_file_read: Callable[..., Any] | None = None
 _orig_buffer_read: Callable[..., Any] | None = None
+# Volatility Threading scan workers do not inherit thread-local cancel state.
+_shared_cancelled: Callable[[], bool] | None = None
 
 
 def raise_if_cancelled() -> None:
-    checker = getattr(_tls, "cancelled", None)
+    checker = _shared_cancelled
+    if checker is None:
+        checker = getattr(_tls, "cancelled", None)
     if checker is None:
         return
     if getattr(_tls, "fired", False):
@@ -32,7 +36,10 @@ def raise_if_cancelled() -> None:
     _tls.hits = hits
     now = time.monotonic()
     last = float(getattr(_tls, "last_check", 0.0))
-    if hits > 1 and hits % 8 != 0 and now - last < 0.05:
+    # Time-based only after the first two hits. Checking every N dump reads
+    # used to call cancelled() (and Path.exists) hundreds of thousands of times
+    # per plugin and stretched Quick Triage / Analyze Process by ~3x.
+    if hits > 2 and last > 0 and now - last < 0.1:
         return
     _tls.last_check = now
     try:
@@ -91,14 +98,17 @@ def interrupt_on_cancel(cancelled: Callable[[], bool] | None) -> Iterator[None]:
     if cancelled is None:
         yield
         return
+    global _shared_cancelled
     prev = getattr(_tls, "cancelled", None)
     prev_fired = getattr(_tls, "fired", False)
     prev_hits = getattr(_tls, "hits", 0)
     prev_last = getattr(_tls, "last_check", 0.0)
+    prev_shared = _shared_cancelled
     _tls.cancelled = cancelled
     _tls.fired = False
     _tls.hits = 0
     _tls.last_check = 0.0
+    _shared_cancelled = cancelled
     _install_patches()
     try:
         yield
@@ -106,6 +116,7 @@ def interrupt_on_cancel(cancelled: Callable[[], bool] | None) -> Iterator[None]:
         raise job_cancelled_error() from exc
     finally:
         _uninstall_patches()
+        _shared_cancelled = prev_shared
         _tls.cancelled = prev
         _tls.fired = prev_fired
         _tls.hits = prev_hits

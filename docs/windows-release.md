@@ -55,6 +55,8 @@ Only these remote zips/binaries are fetched, and only after SHA-256 verification
 
 YARA rules and `yara-python` are never downloaded. bulk_extractor64.exe, capa.exe, and floss.exe are fetched at **build time** from official GitHub releases with pinned SHA-256.
 
+The Volatility Foundation `windows.zip` ISF pack (~800 MB, SHA-256 `231d69735b9a5482b16bdbf1ec356e0a95574c44079e68dfb02ebddb34d55f3e`) is **not** fetched at build time and is **not** packed into NSIS. The installed app asks before downloading the Microsoft PDB for **one kernel build** via Download & Continue. The user can also provide a `.pdb` / ISF file under `%LOCALAPPDATA%\Dumplyzer\symbols`.
+
 The Tauri CLI may also cache NSIS into `%LOCALAPPDATA%\tauri\` on first `tauri build`. That is the official Tauri 2.11 bundler toolchain, not a Dumplyzer malware-tool fetch.
 
 ## Commands
@@ -123,6 +125,7 @@ User data (writable, not removed as part of a normal uninstall of binaries):
   rules\yara\        # bundled\ refreshed on launch; custom\ never overwritten
   tools\            # optional overrides for bundled CAPA / FLOSS / bulk_extractor
   analysis\          # bulk_extractor raw output (and similar analysis trees)
+  symbols\           # per-build PDB/ISF after Download & Continue, or a file the user browses to
   tmp\
 ```
 
@@ -139,6 +142,7 @@ User data (writable, not removed as part of a normal uninstall of binaries):
 - exactly one NSIS `Dumplyzer_0.1.0_x64-setup.exe`; no MSI
 - NSIS payload `dumplyzer.exe` extracted to `bundle/nsis/payload/` (`BUNDLE_TYPE_VAR_NSS`); unpackaged leftover may differ by only the Tauri UNK/NSS stamp
 - `embedBootstrapper` WebView2 payload is staged and referenced
+- `windows.zip` is absent from `app/desktop/resources` and is not `File`d into INSTDIR; kernel PDBs stay under `%LOCALAPPDATA%\Dumplyzer\symbols`
 
 It does not install the NSIS onto a clean VM.
 
@@ -151,13 +155,14 @@ It does not install the NSIS onto a clean VM.
 Configured in `tauri.conf.json` as:
 
 ```json
-"webviewInstallMode": { "type": "embedBootstrapper", "silent": true }
+"webviewInstallMode": { "type": "embedBootstrapper", "silent": false }
 ```
 
 | Environment | Expected behavior |
 |-------------|-------------------|
 | Windows 10 1803+ / 11 x64 with WebView2 already installed | Application can launch. The bundled bootstrapper is skipped. |
-| WebView2 missing, network available | Bundled Evergreen bootstrapper (~1–2 MB) runs and downloads the runtime from Microsoft. |
+| WebView2 missing, network available | Setup asks. If you agree, the bundled Evergreen bootstrapper (~1–2 MB) shows Microsoft's installer UI and downloads the runtime. Cancelling that download exits Dumplyzer setup. |
+| WebView2 missing, you decline | Setup exits. Install WebView2 yourself, then run Dumplyzer setup again. |
 | WebView2 missing, no network | Setup cannot install WebView2. The UI will not launch until the runtime is present. |
 
 Dumplyzer ships **one** NSIS EXE. MSI is not an end-user artifact.
@@ -199,6 +204,7 @@ Until that is done, SmartScreen and some enterprise policies will treat the inst
 - Clean-machine NSIS install was executed on a Windows 11 x64 VM. See `docs/clean-machine-validation.md`. That run used an older offline WebView2 payload. Current packaging uses `embedBootstrapper`.
 - Default install directory is `%ProgramFiles%\Dumplyzer` (Windows system drive; elevation required). User data remains `%LOCALAPPDATA%\Dumplyzer`.
 - WebView2 Evergreen bootstrapper is packed into the NSIS installer (`embedBootstrapper`). If WebView2 is missing, setup downloads the runtime.
+- Windows analysis asks before downloading kernel symbols for that dump's build. Use Download & Continue in the app. You can instead provide a `.pdb` or ISF file.
 - Volatility plugins that need capstone or pycryptodome may appear as import failures. That is intentional: those extras are not bundled. Failed imports must not be marked available. yara-python 4.5.4 **is** bundled, so Volatility YARA plugins may become available as a side effect.
 - Code signing / Authenticode is not configured. Artifacts are unsigned.
 - Linux packaging is out of scope.

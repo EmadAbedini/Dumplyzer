@@ -155,6 +155,45 @@ def test_analysis_run_persists_full_profile(tmp_path: Path, monkeypatch: pytest.
     db.close()
 
 
+def test_full_profile_progress_includes_live_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db, ev = _import(tmp_path)
+    monkeypatch.setattr(process_analysis, "run_basic_triage_job", _fake_triage)
+    monkeypatch.setattr(profiles, "VolatilitySession", _FakeSession)
+    monkeypatch.setattr(
+        profiles,
+        "_run_cmdline",
+        lambda *a, **k: {"id": "command_lines", "status": "completed", "rows": 0},
+    )
+    monkeypatch.setattr(
+        profiles, "_run_dlllist", lambda *a, **k: {"id": "modules", "status": "completed", "rows": 0}
+    )
+    monkeypatch.setattr(
+        profiles, "_run_netscan", lambda *a, **k: {"id": "network", "status": "completed", "rows": 0}
+    )
+    monkeypatch.setattr(
+        profiles, "_run_handles", lambda *a, **k: {"id": "handles", "status": "completed", "rows": 0}
+    )
+    extras: list[dict] = []
+
+    def progress(_msg: str, extra=None) -> None:
+        extras.append(dict(extra or {}))
+
+    run_analysis_profile_job(
+        db,
+        {"evidence_id": ev["id"], "profile": "full", "job_id": None},
+        lambda: False,
+        progress,
+    )
+    covered = [e["coverage"] for e in extras if e.get("coverage")]
+    assert covered
+    last = covered[-1]
+    assert "processes" in last["items"]
+    assert last["items"]["processes"]["state"] in ("analyzed", "analyzed_zero")
+    db.close()
+
+
 def test_dlllist_cancel_does_not_persist_or_swallow(tmp_path: Path) -> None:
     db, ev = _import(tmp_path)
     run_id = str(uuid4())

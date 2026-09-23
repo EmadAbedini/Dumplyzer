@@ -60,6 +60,10 @@ def test_provider_discovery() -> None:
     assert METHOD_PROCESS_IMAGE in avail["methods"]
     assert avail.get("dumpfiles_default") is False
     assert "volatility3.windows.dumpfiles.pe" in (avail.get("optional_methods") or [])
+    src = inspect.getsource(PeExtractionProvider.availability)
+    assert "from volatility3" not in src
+    assert "PEDump" not in src
+    assert "find_spec" not in src
 
 
 def test_identify_exe_and_dll_and_mapped() -> None:

@@ -12,6 +12,16 @@ export const CAPABILITY = {
 export const CHECKING_DETAIL = "Checking…";
 export const UNAVAILABLE_DETAIL = "Unavailable";
 
+/** Versions shipped in the NSIS payload. About/Settings do not probe tools at launch. */
+export const BUNDLED_TOOL = {
+  volatility: "2.28.0",
+  bulkExtractor: "2.2.0",
+  capa: "9.4.0",
+  floss: "3.1.1",
+  yara: "4.5.4",
+  yaraRuleCount: 42,
+} as const;
+
 export function availableDetail(available: boolean): string {
   return available ? "Available" : UNAVAILABLE_DETAIL;
 }

@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import traceback
 from typing import Any, Callable
 from uuid import uuid4
 
 from memscope_engine.analysis import memory_artifacts, process_analysis, search_iocs
 from memscope_engine.analysis import network_artifacts as network_artifact_wf
-from memscope_engine.analysis.progress import AnalysisProgress
+from memscope_engine.analysis.progress import AnalysisProgress, emit_live, persist_live
 from memscope_engine.errors import AppError
 from memscope_engine.storage import Database
 from memscope_engine.storage.schema import SCHEMA_VERSION
@@ -454,11 +455,26 @@ def run_analysis_profile_job(
 
     try:
         _cancelled(cancelled)
-        _reset_capability_results(db, evidence_id, list(resolved["evidence_capabilities"]))
+        reset_caps = [c for c in resolved["evidence_capabilities"] if c != "processes"]
+        _reset_capability_results(db, evidence_id, reset_caps)
+        emit_live(
+            progress,
+            db,
+            evidence_id,
+            "Starting analysis",
+            {"phase": "start", "percent": 0},
+        )
 
         def add_step(step: dict[str, Any]) -> None:
             steps.extend([step])
             _persist_profile_steps(db, run_id, strategy, steps, skipped, vol_version)
+            emit_live(
+                progress,
+                db,
+                evidence_id,
+                f"{step.get('id') or 'step'} complete",
+                {"phase": str(step.get("id") or "step")},
+            )
 
         evidence_caps = resolved["evidence_capabilities"]
         procs = db.fetchone(
@@ -688,7 +704,13 @@ def run_analysis_profile_job(
                 run_id,
             ),
         )
-        progress("Analysis complete", {"phase": "done", "percent": 100})
+        emit_live(
+            progress,
+            db,
+            evidence_id,
+            "Analysis complete",
+            {"phase": "done", "percent": 100},
+        )
         return {
             "analysis_run_id": run_id,
             "profile": resolved["profile"],
@@ -787,7 +809,9 @@ def _run_cmdline(
         _cancelled(cancelled)
         rows = normalize_cmdline(res.columns, res.rows, pid_filter=None)
         updated = 0
-        for row in rows:
+        last = 0.0
+        total = len(rows)
+        for i, row in enumerate(rows, 1):
             pid = row.get("pid")
             proc_id = pid_by.get(int(pid)) if pid is not None else None
             if proc_id and row.get("command_line") is not None:
@@ -804,6 +828,16 @@ def _run_cmdline(
                     command_line=row["command_line"],
                 ):
                     process_analysis._insert_finding(db, f)
+            now = time.monotonic()
+            if i == 1 or i == total or now - last >= 0.4:
+                last = now
+                emit_live(
+                    progress,
+                    db,
+                    evidence_id,
+                    "Command lines (windows.cmdline)",
+                    {"phase": "command_lines"},
+                )
         process_analysis._record_plugin_done(
             db, pe, status="completed", row_count=len(rows), transparency=res.transparency
         )
@@ -846,8 +880,22 @@ def _run_dlllist(
             if pid is not None:
                 m["process_id"] = pid_by.get(int(pid))
         db.execute("DELETE FROM modules WHERE evidence_id = ?", (evidence_id,))
-        for m in mods:
-            process_analysis._insert_module(db, m)
+        emit_live(
+            progress,
+            db,
+            evidence_id,
+            "Modules / DLLs (windows.dlllist)",
+            {"phase": "modules"},
+        )
+        persist_live(
+            db,
+            evidence_id,
+            mods,
+            lambda m: process_analysis._insert_module(db, m),
+            progress=progress,
+            message="Modules / DLLs (windows.dlllist)",
+            extra={"phase": "modules"},
+        )
         process_analysis._record_plugin_done(
             db, pe, status="completed", row_count=len(mods), transparency=res.transparency
         )
@@ -886,8 +934,22 @@ def _run_netscan(
             source_plugin=res.plugin,
         )
         db.execute("DELETE FROM network_connections WHERE evidence_id = ?", (evidence_id,))
-        for c in conns:
-            process_analysis._insert_net(db, c)
+        emit_live(
+            progress,
+            db,
+            evidence_id,
+            "Network connections (windows.netscan)",
+            {"phase": "network"},
+        )
+        persist_live(
+            db,
+            evidence_id,
+            conns,
+            lambda c: process_analysis._insert_net(db, c),
+            progress=progress,
+            message="Network connections (windows.netscan)",
+            extra={"phase": "network"},
+        )
         process_analysis._record_plugin_done(
             db, pe, status="completed", row_count=len(conns), transparency=res.transparency
         )
@@ -930,8 +992,22 @@ def _run_handles(
             if pid is not None:
                 h["process_id"] = pid_by.get(int(pid))
         db.execute("DELETE FROM handle_entries WHERE evidence_id = ?", (evidence_id,))
-        for h in rows:
-            process_analysis._insert_handle(db, h)
+        emit_live(
+            progress,
+            db,
+            evidence_id,
+            "Handles (windows.handles)",
+            {"phase": "handles"},
+        )
+        persist_live(
+            db,
+            evidence_id,
+            rows,
+            lambda h: process_analysis._insert_handle(db, h),
+            progress=progress,
+            message="Handles (windows.handles)",
+            extra={"phase": "handles"},
+        )
         process_analysis._record_plugin_done(
             db, pe, status="completed", row_count=len(rows), transparency=res.transparency
         )

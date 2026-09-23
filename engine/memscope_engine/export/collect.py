@@ -398,14 +398,14 @@ def _collect_malware(db: Database, evidence_id: str, limit: int) -> dict[str, An
             "shown": len(capa_items),
             "truncated": False,
             "items": capa_items,
-            "note": "CAPA capabilities are static analysis results, not confirmed malware.",
+            "note": "Capability analysis results are static observations, not confirmed malware.",
         },
         "floss": {
             "total": len(floss_items),
             "shown": len(floss_items),
             "truncated": False,
             "items": floss_items,
-            "note": "FLOSS strings are extracted/deobfuscated strings, not malicious findings.",
+            "note": "Extracted and deobfuscated strings are not malicious findings.",
         },
         "bulk_extractor": {
             "total": len(be_items),
@@ -413,7 +413,7 @@ def _collect_malware(db: Database, evidence_id: str, limit: int) -> dict[str, An
             "truncated": False,
             "items": be_items,
             "note": (
-                "Source: bulk_extractor. Type: Extracted Artifact / IOC Candidate. "
+                "Source: carved memory features. Type: Extracted Artifact / IOC Candidate. "
                 "Raw feature files are preserved. Strings are not confirmed malicious indicators."
             ),
         },

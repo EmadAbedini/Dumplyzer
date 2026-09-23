@@ -21,7 +21,8 @@ import {
   DERIVED_SOURCE_IDS,
   STORED_ACTION_TITLE,
   formatCapabilityList,
-  limitedResultsNote,
+  iocsScopeNote,
+  searchScopeNote,
   searchFieldHasData,
   settledMissingSourceIds,
   uncoveredSourceIds,
@@ -65,7 +66,7 @@ const SEARCH_SCOPE =
   "Search process names, PIDs, command lines, usernames, modules, IP addresses, ports, file paths, handles, findings, and IOCs.";
 
 const SEARCH_SOURCE_HINT =
-  "Search looks through analysis results already stored for this dump. It does not rescan the memory image.";
+  "Search looks only at records already extracted. It does not search the raw memory image.";
 
 const ENTITY_LABEL: Record<string, string> = {
   process: "Process",
@@ -201,7 +202,7 @@ export function SearchView({
         <div className="border-b border-border px-3 py-2 text-sm font-semibold">Search</div>
         <SearchEmptyPanel
           heading="Nothing to search yet"
-          detail="Search looks through analysis results already stored for this dump. It does not rescan the memory image."
+          detail="Search looks only at records already extracted. It does not search the raw memory image."
           hint="Quick Triage only collects processes. Run Complete Analysis, or select the capabilities you want to search in Custom Analysis."
         />
       </div>
@@ -268,11 +269,9 @@ export function SearchView({
         </form>
         {resultCaption ? <div className="text-xs text-muted">{resultCaption}</div> : null}
       </div>
-      {limitedSearch ? (
-        <div className="border-b border-border px-3 py-2">
-          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
-        </div>
-      ) : null}
+      <div className="border-b border-border px-3 py-2">
+        <AnalysisScopeNote>{searchScopeNote(missingSources)}</AnalysisScopeNote>
+      </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {busy && items.length === 0 ? (
           <CenteredLoading label="Searching…" />
@@ -566,7 +565,7 @@ export function IocsView({
       ? { id: "iocs", state: "analyzed_zero" as const, count: 0 }
       : coverage;
   const iocNotAnalyzedDetail =
-    "IOCs are pulled from process, module, network, and handle data already stored — not by rescanning the dump.";
+    "IOCs are extracted from stored process, module, network, and handle records. This does not rescan the dump.";
   const iocNotAnalyzedHint = showLimitedNote
     ? "You can still extract from whatever is already stored."
     : "Use Extract IOCs to collect indicators from the data already stored, or include IOC Extraction in Complete or Custom Analysis.";
@@ -657,11 +656,9 @@ export function IocsView({
           ) : null}
         </div>
       ) : null}
-      {showLimitedNote ? (
-        <div className="border-b border-border px-3 py-2">
-          <AnalysisScopeNote>{limitedResultsNote(missingSources)}</AnalysisScopeNote>
-        </div>
-      ) : null}
+      <div className="border-b border-border px-3 py-2">
+        <AnalysisScopeNote>{iocsScopeNote(missingSources)}</AnalysisScopeNote>
+      </div>
       {loading && items.length === 0 && coverageLiveKind(coverage) !== "in_progress" ? (
         <CenteredLoading />
       ) : items.length === 0 ? (

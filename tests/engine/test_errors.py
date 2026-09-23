@@ -5,7 +5,7 @@ def test_rpc_error_payload_keeps_app_message() -> None:
     err = AppError(
         code="region_missing",
         message="Memory region not found.",
-        details="C:\\Users\\Rootman\\engine\\memory_artifacts.py:171",
+        details="C:\\Users\\Public\\engine\\memory_artifacts.py:171",
         suggestion="Re-run VAD scan for this process, then retry extraction.",
         entity="memory",
     )
@@ -15,6 +15,9 @@ def test_rpc_error_payload_keeps_app_message() -> None:
     assert payload["data"]["suggestion"]
     assert "details" not in payload["data"]
     assert "traceback" not in payload["data"]
+    blob = str(payload)
+    assert "C:\\Users\\" not in blob
+    assert "Public" not in blob
 
 
 def test_rpc_error_payload_hides_unexpected_exceptions() -> None:

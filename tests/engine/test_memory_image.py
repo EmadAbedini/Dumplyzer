@@ -153,3 +153,17 @@ def test_unsatisfied_helper_uses_contents_not_name(tmp_path: Path) -> None:
     err = app_error_for_unsatisfied(pe, ["plugins.Info.kernel"], "windows.info.Info")
     assert err.code == NOT_MEMORY_IMAGE_CODE
     assert err.message == NOT_MEMORY_IMAGE_MESSAGE
+
+
+def test_unsatisfied_crashdump_points_at_local_symbols(tmp_path: Path) -> None:
+    from memscope_engine.memory_image import app_error_for_unsatisfied
+
+    dump = tmp_path / "memory.dmp"
+    dump.write_bytes(b"PAGEDU64" + b"\x00" * 32)
+    err = app_error_for_unsatisfied(dump, ["plugins.Info.kernel"], "windows.info.Info")
+    assert err.code == "volatility_unsatisfied"
+    assert "kernel symbol" in err.message.lower()
+    assert r"%LOCALAPPDATA%\Dumplyzer\symbols" in (err.suggestion or "")
+    assert ".pdb" in (err.suggestion or "") or "ISF" in (err.suggestion or "")
+    assert err.data.get("symbols_dir") == r"%LOCALAPPDATA%\Dumplyzer\symbols"
+    assert "C:\\Users\\" not in (err.suggestion or "")

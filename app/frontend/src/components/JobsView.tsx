@@ -22,7 +22,6 @@ import { SortableTh } from "./SortableTh";
 import { RefreshButton, StatusToast, useStatusToast } from "./StatusToast";
 
 type Props = {
-  evidenceId: string | null;
   evidenceFilename?: string | null;
   refreshToken?: number;
   onError: (msg: string) => void;
@@ -36,7 +35,7 @@ function statusBadgeClass(label: string): string {
   return "";
 }
 
-export function JobsView({ evidenceId, evidenceFilename, refreshToken, onError }: Props) {
+export function JobsView({ evidenceFilename, refreshToken, onError }: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [ready, setReady] = useState(false);
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(() => new Set());
@@ -56,15 +55,19 @@ export function JobsView({ evidenceId, evidenceFilename, refreshToken, onError }
         loadAgain.current = false;
         try {
           const res = await engineCall<{ items: Job[] }>("jobs.list", {
-            evidence_id: evidenceId ?? undefined,
             limit: 100,
           });
+          const items = res.items.filter(
+            (job) =>
+              job.kind !== "kernel_symbols_fetch" &&
+              job.error?.code !== "kernel_symbols_required",
+          );
           startTransition(() => {
-            setJobs(res.items);
+            setJobs(items);
             setReady(true);
             setCancellingIds((prev) => {
               if (prev.size === 0) return prev;
-              const byId = new Map(res.items.map((job) => [job.id, job]));
+              const byId = new Map(items.map((job) => [job.id, job]));
               const next = new Set<string>();
               for (const id of prev) {
                 const job = byId.get(id);
@@ -84,13 +87,16 @@ export function JobsView({ evidenceId, evidenceFilename, refreshToken, onError }
         void load();
       }
     }
-  }, [evidenceId, onError]);
+  }, [onError]);
 
   useEffect(() => {
     void load();
+  }, [load, refreshToken]);
+
+  useEffect(() => {
     const t = window.setInterval(() => void load(), 2000);
     return () => window.clearInterval(t);
-  }, [load, refreshToken]);
+  }, [load]);
 
   const sortValue = useCallback(
     (job: Job, key: string) => {

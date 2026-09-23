@@ -1,7 +1,11 @@
-/** Shared Analysis Capabilities health checks. UI renders Checking… first. */
+/** Bundled tools are assumed present. Live counts refresh in the background. */
 
 import { useSyncExternalStore } from "react";
-import { CHECKING_DETAIL, UNAVAILABLE_DETAIL } from "./analysisCapabilities";
+import {
+  BUNDLED_TOOL,
+  CHECKING_DETAIL,
+  UNAVAILABLE_DETAIL,
+} from "./analysisCapabilities";
 import { engineCall } from "./api";
 import type {
   BulkExtractorStatus,
@@ -40,6 +44,7 @@ type VolInit = {
 };
 
 type CapabilitiesStatus = {
+  checking?: boolean;
   volatility?: VolInit;
   pe_extraction?: PeExtractionStatus;
   bulk_extractor?: BulkExtractorStatus;
@@ -48,35 +53,53 @@ type CapabilitiesStatus = {
   yara?: YaraStatus;
 };
 
+const AVAILABLE_ROW: CapabilityRowState = {
+  kind: "available",
+  detail: "Available",
+};
+
 const CHECKING_ROW: CapabilityRowState = {
   kind: "checking",
   detail: CHECKING_DETAIL,
 };
 
-function checkingRows(): Record<CapabilityId, CapabilityRowState> {
+function bundledRows(): Record<CapabilityId, CapabilityRowState> {
   return {
-    memoryAnalysis: { ...CHECKING_ROW },
-    artifactExtraction: { ...CHECKING_ROW },
-    peReconstruction: { ...CHECKING_ROW },
-    signatureDetection: { ...CHECKING_ROW },
-    capabilityAnalysis: { ...CHECKING_ROW },
-    stringAnalysis: { ...CHECKING_ROW },
+    memoryAnalysis: { ...AVAILABLE_ROW },
+    artifactExtraction: { ...AVAILABLE_ROW },
+    peReconstruction: { ...AVAILABLE_ROW },
+    signatureDetection: { ...AVAILABLE_ROW },
+    capabilityAnalysis: { ...AVAILABLE_ROW },
+    stringAnalysis: { ...AVAILABLE_ROW },
   };
 }
 
-function emptySnapshot(): CapabilitySnapshot {
+function bundledSnapshot(): CapabilitySnapshot {
   return {
-    rows: checkingRows(),
-    yara: null,
-    peExtraction: null,
-    capa: null,
-    floss: null,
-    bulkExtractor: null,
-    volatilityVersion: null,
+    rows: bundledRows(),
+    yara: {
+      available: true,
+      yara_version: BUNDLED_TOOL.yara,
+      bundled_rule_count: BUNDLED_TOOL.yaraRuleCount,
+      custom_rule_count: 0,
+      loaded_rule_count: BUNDLED_TOOL.yaraRuleCount,
+    },
+    peExtraction: {
+      available: true,
+      volatility_version: BUNDLED_TOOL.volatility,
+      pedump_available: true,
+    },
+    capa: { available: true, capa_version: BUNDLED_TOOL.capa },
+    floss: { available: true, floss_version: BUNDLED_TOOL.floss },
+    bulkExtractor: {
+      available: true,
+      bulk_extractor_version: BUNDLED_TOOL.bulkExtractor,
+    },
+    volatilityVersion: BUNDLED_TOOL.volatility,
   };
 }
 
-let snapshot: CapabilitySnapshot = emptySnapshot();
+let snapshot: CapabilitySnapshot = bundledSnapshot();
 let started = false;
 const inflight = new Map<CapabilityId, Promise<void>>();
 const listeners = new Set<() => void>();
@@ -176,8 +199,24 @@ export function applySignatureDetection(status: YaraStatus): void {
   listeners.forEach((listener) => listener());
 }
 
+const CHECK_RETRY_MS = 2000;
+let checkRetry: number | null = null;
+
+function scheduleCapabilityRetry(): void {
+  if (checkRetry != null) return;
+  checkRetry = window.setTimeout(() => {
+    checkRetry = null;
+    started = false;
+    startCapabilityChecks();
+  }, CHECK_RETRY_MS);
+}
+
 async function checkAllCombined(): Promise<void> {
   const result = await engineCall<CapabilitiesStatus>("capabilities.status");
+  if (result.checking) {
+    scheduleCapabilityRetry();
+    return;
+  }
   applyVolatility(result.volatility);
   snapshot.peExtraction = result.pe_extraction ?? null;
   markFromAvailable("peReconstruction", Boolean(result.pe_extraction?.available), "Available");

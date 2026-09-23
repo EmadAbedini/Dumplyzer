@@ -306,6 +306,31 @@ def test_empty_investigation_all_formats(tmp_path: Path) -> None:
     xlsx_rec = generate_export(db, paths, evidence_id=ev["id"], fmt="xlsx")
     html = Path(html_rec["primary_path"]).read_text(encoding="utf-8")
     assert "No malware or risk score" in html
+    assert "Signatures and reconstructed artifacts" in html
+    assert "Signature Detection" in html
+    assert "PE Reconstruction" in html
+    assert "Capability Analysis" in html
+    assert "String Analysis" in html
+    assert "Artifact Extraction" in html
+    assert "No signature matches." in html
+    assert "No PE reconstruction runs." in html
+    assert "No capability analysis runs." in html
+    assert "No string analysis runs." in html
+    assert "No artifact extraction runs." in html
+    assert "<h3>YARA matches</h3>" not in html
+    assert "<h3>PE Extraction</h3>" not in html
+    assert "<h3>CAPA</h3>" not in html
+    assert "<h3>FLOSS</h3>" not in html
+    assert "<h3>bulk_extractor</h3>" not in html
+    assert "No YARA matches." not in html
+    assert "No CAPA scans." not in html
+    assert "No FLOSS scans." not in html
+    assert "No bulk_extractor scans." not in html
+    assert "Source: bulk_extractor" not in html
+    assert "CAPA capabilities" not in html
+    assert "FLOSS strings" not in html
+    assert "Malware-analysis results" not in html
+    assert "Optional providers may be absent" not in html
     data = _read_zip_json(Path(json_rec["primary_path"]))
     assert data["summary"]["process_count"] == 0
     assert data["summary"]["no_risk_score"] is True

@@ -14,7 +14,9 @@ function analysisHasNotRun(importStatus: string | null | undefined): boolean {
 function displaySymbolStatus(
   symbolStatus: string | null | undefined,
   importStatus: string | null | undefined,
+  waitingForPdb = false,
 ): string {
+  if (waitingForPdb) return "Waiting for PDB";
   if (analysisHasNotRun(importStatus)) return "Not analyzed";
   if (!symbolStatus || symbolStatus === "unknown") return "—";
   return symbolStatus;
@@ -62,10 +64,12 @@ export function OverviewView({
   data,
   onImport,
   importing = false,
+  waitingForPdb = false,
 }: {
   data: Overview | null;
   onImport?: () => void;
   importing?: boolean;
+  waitingForPdb?: boolean;
 }) {
   if (!data) {
     return (
@@ -92,13 +96,15 @@ export function OverviewView({
   }
   const e = data.evidence;
   const notAnalyzed = analysisHasNotRun(e.import_status);
-  const symbolLabel = displaySymbolStatus(e.symbol_status, e.import_status);
+  const symbolLabel = displaySymbolStatus(e.symbol_status, e.import_status, waitingForPdb);
   return (
     <div className="p-5">
       <div className="mb-4 flex items-center gap-2">
         <h2 className="text-base font-semibold tracking-tight">Overview</h2>
-        <Badge>{e.import_status ?? "imported"}</Badge>
-        {notAnalyzed ? (
+        <Badge>{waitingForPdb ? "imported" : (e.import_status ?? "imported")}</Badge>
+        {waitingForPdb ? (
+          <Badge>Waiting for PDB</Badge>
+        ) : notAnalyzed ? (
           <Badge>Not analyzed</Badge>
         ) : e.symbol_status && e.symbol_status !== "unknown" ? (
           <Badge>{e.symbol_status}</Badge>

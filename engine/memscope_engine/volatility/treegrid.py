@@ -17,7 +17,7 @@ def _cancel_requested(cancelled: Callable[[], bool] | None, *, seen: list[int], 
         return False
     seen[0] += 1
     now = time.monotonic()
-    if seen[0] > 1 and seen[0] % 8 != 0 and now - last[0] < 0.1:
+    if seen[0] > 2 and last[0] > 0 and now - last[0] < 0.1:
         return False
     last[0] = now
     try:
