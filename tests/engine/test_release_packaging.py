@@ -79,13 +79,44 @@ def test_nsis_installer_uses_dumplyzer_icon() -> None:
     nsis = conf["bundle"]["windows"]["nsis"]
     assert conf["bundle"]["targets"] == ["nsis"]
     assert conf["bundle"]["windows"]["webviewInstallMode"]["type"] == "embedBootstrapper"
-    assert conf["bundle"]["windows"]["webviewInstallMode"]["silent"] is True
+    assert conf["bundle"]["windows"]["webviewInstallMode"]["silent"] is False
     assert nsis["installMode"] == "perMachine"
     assert nsis["installerIcon"] == "icons/icon.ico"
     assert nsis["uninstallerIcon"] == "icons/icon.ico"
     ico = Path(__file__).resolve().parents[2] / "app" / "desktop" / nsis["installerIcon"]
     assert ico.is_file()
     assert ico.read_bytes()[:4] == b"\x00\x00\x01\x00"
+
+
+def test_nsis_template_stops_runtime_without_powershell_command_braces() -> None:
+    nsi = (
+        Path(__file__).resolve().parents[2]
+        / "packaging"
+        / "windows"
+        / "nsis"
+        / "installer.nsi"
+    )
+    text = nsi.read_text(encoding="utf-8")
+    assert "StopDumplyzerRuntime" in text
+    assert "stop-dumplyzer-runtime.ps1" in text
+    assert "-File" in text
+    assert '-Command "& {' not in text
+    assert r"$LOCALAPPDATA\Dumplyzer" in text
+    assert r'RMDir /r /REBOOTOK "$INSTDIR"' in text
+    uninstall = text.split("Section Uninstall", 1)[-1]
+    assert "{{#each resources}}" not in uninstall
+    assert 'rmdir /S /Q "$INSTDIR"' in uninstall
+    assert """ExecWait '"$6" ${WEBVIEW2INSTALLERARGS} /install'""" in text
+    assert 'ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install"' not in text
+    assert "MB_YESNO" in text
+    assert "WebView2 is required" in text
+    assert "SetErrorLevel" in text
+    assert r"%LOCALAPPDATA%\Dumplyzer\symbols" in text
+    assert "Download & Continue" in text
+    assert not any(
+        line.strip().lower().startswith("file ") and "windows.zip" in line.lower()
+        for line in text.splitlines()
+    )
 
 
 def test_app_version_is_release_coherent() -> None:
@@ -106,6 +137,8 @@ def test_first_launch_creates_directories(tmp_path: Path) -> None:
         "tools",
         "exports",
         "analysis",
+        "symbols",
+        "volatility_cache",
     ):
         assert getattr(paths, attr).is_dir()
     assert paths.yara_rules_bundled.is_dir()
@@ -122,6 +155,13 @@ def test_first_launch_creates_directories(tmp_path: Path) -> None:
     assert (paths.analysis / "pe_extraction").is_dir()
     assert (paths.analysis / "pcap").is_dir()
     assert (paths.cache / "plugin_results").is_dir()
+    assert (paths.symbols / "windows").is_dir()
+    assert (paths.symbols / "linux").is_dir()
+    assert (paths.symbols / "README.txt").is_file()
+    readme = (paths.symbols / "README.txt").read_text(encoding="utf-8")
+    assert "windows.zip" in readme
+    assert "800" in readme
+    assert (paths.volatility_cache / "symbols" / "windows").is_dir()
     assert (paths.tools / "README.txt").is_file()
     assert not paths.db_path.exists()
 
@@ -493,7 +533,17 @@ def test_release_scripts_pin_cargo_target_dir() -> None:
     assert "4.5.4" in verify
     assert "pe_sieve" in verify
     assert "mal_unpack" in verify
+    assert "windows.zip ISF pack must not be shipped" in verify
+    assert "231d69735b9a5482b16bdbf1ec356e0a95574c44079e68dfb02ebddb34d55f3e" in verify
+    assert "save_microsoft_pdb" in verify
+    assert "msdl.microsoft.com/download/symbols" in verify
+    assert r"%LOCALAPPDATA%\Dumplyzer\symbols" in verify
+    assert "WebView2 is required" in (
+        Path(__file__).resolve().parents[2] / "packaging" / "windows" / "nsis" / "installer.nsi"
+    ).read_text(encoding="utf-8")
     assert "4.5.4" in prepare
     assert "yara-python" in prepare
+    assert "memscope_engine.volatility.kernel_symbols" in prepare
+    assert "memscope_engine.volatility.symbol_pack" in prepare
     assert "resources\\rules" in prepare or "resources/rules" in prepare or "bundled_yara_rules" in prepare
 

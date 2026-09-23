@@ -2,6 +2,9 @@
 ; Default INSTDIR for perMachine is $PROGRAMFILES64\${PRODUCTNAME}
 ; (Program Files on the Windows system drive). User data stays in
 ; %LOCALAPPDATA%\Dumplyzer and is never mixed with the install tree.
+; Kernel PDBs/ISF are not copied into INSTDIR. After install, the app
+; stores a per-build file under %LOCALAPPDATA%\Dumplyzer\symbols when
+; the user agrees (Download & Continue) or browses to a local file.
 Unicode true
 ManifestDPIAware true
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
@@ -557,10 +560,18 @@ Section WebView2
  ${EndIf}
 
  ${If} $4 == ""
- ; Webview2 installation
- ;
- ; Skip if updating
+ ; WebView2 is required. Ask before downloading so cancel/close does not
+ ; leave this installer sitting on InstFiles as if it were frozen.
  ${If} $UpdateMode <> 1
+ ${IfNot} ${Silent}
+ ${AndIf} $PassiveMode <> 1
+ MessageBox MB_YESNO|MB_ICONQUESTION "Microsoft Edge WebView2 Runtime is required to run Dumplyzer.$\r$\n$\r$\nYes = download and install it now (Internet required).$\r$\nNo = install WebView2 yourself, then run this installer again.$\r$\n$\r$\nIf you cancel or close the WebView2 download, this installer will exit." IDYES prepare_webview2
+ MessageBox MB_OK|MB_ICONINFORMATION "Install the Microsoft Edge WebView2 Runtime, then run Dumplyzer setup again."
+ SetErrorLevel 1602
+ Quit
+ ${EndIf}
+
+ prepare_webview2:
  !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
  Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
  DetailPrint "$(webview2Downloading)"
@@ -570,7 +581,7 @@ Section WebView2
  DetailPrint "$(webview2DownloadSuccess)"
  ${Else}
  DetailPrint "$(webview2DownloadError)"
- Abort "$(webview2AbortError)"
+ Goto webview2_cancelled
  ${EndIf}
  StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
  Goto install_webview2
@@ -596,14 +607,27 @@ Section WebView2
 
  install_webview2:
  DetailPrint "$(installingWebview2)"
- ; $6 holds the path to the webview2 installer
- ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1
+ ; Quote $6. Unquoted ExecWait lets CreateProcess split the Temp path, so the
+ ; bootstrapper can hang on `/silent /` instead of installing.
+ ; Do not pass /silent: the Evergreen bootstrapper must show its own UI while
+ ; it downloads the runtime (~150 MB). Silent mode looks frozen on machines
+ ; that do not already have WebView2.
+ ExecWait '"$6" ${WEBVIEW2INSTALLERARGS} /install' $1
+ ; 0 = success. 3010 = success, reboot required.
  ${If} $1 = 0
+ ${OrIf} $1 = 3010
  DetailPrint "$(webview2InstallSuccess)"
- ${Else}
- DetailPrint "$(webview2InstallError)"
- Abort "$(webview2AbortError)"
+ Goto webview2_done
  ${EndIf}
+ webview2_cancelled:
+ DetailPrint "$(webview2InstallError)"
+ ${IfNot} ${Silent}
+ MessageBox MB_OK|MB_ICONEXCLAMATION "WebView2 is required. The download was cancelled or failed, so Dumplyzer setup will exit.$\r$\n$\r$\nInstall WebView2, then run this installer again."
+ ${EndIf}
+ StrCmp $1 "" 0 +2
+ StrCpy $1 1602
+ SetErrorLevel $1
+ Quit
  webview2_done:
  ${EndIf}
  ${Else}
@@ -637,6 +661,34 @@ Section WebView2
  ${EndIf}
 SectionEnd
 
+; Upgrade/reinstall cannot overwrite runtime DLLs while Dumplyzer or its
+; bundled python.exe still has them mapped (e.g. _bz2.pyd). Only touch
+; dumplyzer.exe and this install's runtime python, never a system Python.
+; Inline PowerShell -Command with { } is truncated by NSIS and raises
+; ParserError MissingEndCurlyBrace. Write a .ps1 then invoke it with -File.
+; Only dumplyzer.exe and this install's runtime python.exe, never system Python.
+!macro StopDumplyzerRuntime
+ nsExec::Exec 'taskkill /F /IM dumplyzer.exe /T'
+ InitPluginsDir
+ FileOpen $0 "$PLUGINSDIR\stop-dumplyzer-runtime.ps1" w
+ FileWrite $0 "param([string]$$InstallRoot)$\r$\n"
+ FileWrite $0 "if ([string]::IsNullOrWhiteSpace($$InstallRoot)) { exit 0 }$\r$\n"
+ FileWrite $0 "$$exe = [System.IO.Path]::GetFullPath((Join-Path $$InstallRoot 'dumplyzer.exe'))$\r$\n"
+ FileWrite $0 "$$py = [System.IO.Path]::GetFullPath((Join-Path $$InstallRoot 'resources\runtime\python.exe'))$\r$\n"
+ FileWrite $0 "Get-Process -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and (($$_.Path -ieq $$exe) -or ($$_.Path -ieq $$py)) } | Stop-Process -Force -ErrorAction SilentlyContinue$\r$\n"
+ FileClose $0
+ nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-dumplyzer-runtime.ps1" "$INSTDIR"'
+ Sleep 200
+!macroend
+
+Function StopDumplyzerRuntime
+ !insertmacro StopDumplyzerRuntime
+FunctionEnd
+
+Function un.StopDumplyzerRuntime
+ !insertmacro StopDumplyzerRuntime
+FunctionEnd
+
 Section Install
  SetOutPath $INSTDIR
 
@@ -645,6 +697,7 @@ Section Install
  !endif
 
  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+ Call StopDumplyzerRuntime
 
  ; Copy main executable
  File "${MAINBINARYSRCPATH}"
@@ -782,20 +835,7 @@ Section Uninstall
  !endif
 
  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
-
- ; Delete the app directory and its content from disk
- ; Copy main executable
- Delete "$INSTDIR\${MAINBINARYNAME}.exe"
-
- ; Delete resources
- {{#each resources}}
- Delete "$INSTDIR\\{{this.[1]}}"
- {{/each}}
-
- ; Delete external binaries
- {{#each binaries}}
- Delete "$INSTDIR\\{{this}}"
- {{/each}}
+ Call un.StopDumplyzerRuntime
 
  ; Delete app associations
  {{#each file_associations as |association| ~}}
@@ -812,13 +852,13 @@ Section Uninstall
  ${EndIf}
  {{/each}}
 
- ; Delete uninstaller
- Delete "$INSTDIR\uninstall.exe"
-
- {{#each resources_ancestors}}
- RMDir /REBOOTOK "$INSTDIR\\{{this}}"
- {{/each}}
- RMDir "$INSTDIR"
+ ; Bundled CPython + Volatility is thousands of files. Per-file Delete
+ ; (Tauri's default) spends minutes redrawing "Delete file:" in the UI.
+ SetDetailsPrint textonly
+ DetailPrint "Removing application files..."
+ nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$INSTDIR" rmdir /S /Q "$INSTDIR"'
+ RMDir /r /REBOOTOK "$INSTDIR"
+ SetDetailsPrint both
 
  ; Remove shortcuts if not updating
  ${If} $UpdateMode <> 1
@@ -880,8 +920,15 @@ Section Uninstall
  DeleteRegKey /ifempty HKCU "${MANUKEY}"
 
  SetShellVarContext current
+ SetDetailsPrint textonly
+ DetailPrint "Removing application data..."
+ nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$LOCALAPPDATA\Dumplyzer" rmdir /S /Q "$LOCALAPPDATA\Dumplyzer"'
+ RmDir /r "$LOCALAPPDATA\Dumplyzer"
+ nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$APPDATA\${BUNDLEID}" rmdir /S /Q "$APPDATA\${BUNDLEID}"'
+ nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$LOCALAPPDATA\${BUNDLEID}" rmdir /S /Q "$LOCALAPPDATA\${BUNDLEID}"'
  RmDir /r "$APPDATA\${BUNDLEID}"
  RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+ SetDetailsPrint both
  ${EndIf}
 
  !ifmacrodef NSIS_HOOK_POSTUNINSTALL

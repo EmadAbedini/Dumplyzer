@@ -76,7 +76,7 @@
       "digestAlgorithm": "sha256",
       "webviewInstallMode": {
         "type": "embedBootstrapper",
-        "silent": true
+        "silent": false
       },
       "nsis": {
         "installMode": "perMachine",

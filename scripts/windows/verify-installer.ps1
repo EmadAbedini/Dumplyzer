@@ -47,12 +47,21 @@ import importlib, sys
 from importlib.metadata import version
 from memscope_engine.version import APP_VERSION
 from memscope_engine.providers.pe_extraction import PeExtractionProvider
+from memscope_engine.volatility.kernel_symbols import microsoft_pdb_url, save_microsoft_pdb
+from memscope_engine.volatility.symbol_pack import WINDOWS_ZIP_BYTES, WINDOWS_ZIP_SHA256
 pyver = sys.version.split()[0]
 vol = version('volatility3')
 if pyver != '3.12.10':
     raise SystemExit('python version must be 3.12.10, got ' + pyver)
 if vol != '2.28.0':
     raise SystemExit('volatility3 must be 2.28.0, got ' + vol)
+if WINDOWS_ZIP_BYTES != 839727133 or WINDOWS_ZIP_SHA256 != '231d69735b9a5482b16bdbf1ec356e0a95574c44079e68dfb02ebddb34d55f3e':
+    raise SystemExit('windows ISF pack pin mismatch')
+pdb_url = microsoft_pdb_url('ntkrnlmp.pdb', 'AABBCCDD', 1)
+if 'msdl.microsoft.com/download/symbols' not in pdb_url:
+    raise SystemExit('kernel PDB URL must use Microsoft symbol server')
+if not callable(save_microsoft_pdb):
+    raise SystemExit('save_microsoft_pdb must be packaged')
 for gone in ('memscope_engine.providers.pe_sieve', 'memscope_engine.providers.mal_unpack'):
     try:
         importlib.import_module(gone)
@@ -260,6 +269,21 @@ if ($nsiText -match '!define INSTALLWEBVIEW2MODE "offlineInstaller"') {
 if ($nsiText -match '!define INSTALLWEBVIEW2MODE "downloadBootstrapper"') {
     throw "generated NSIS script downloads the WebView2 bootstrapper instead of embedding it"
 }
+if ($nsiText -notmatch [regex]::Escape('ExecWait ''"$6" ${WEBVIEW2INSTALLERARGS} /install''')) {
+    throw "generated NSIS script does not quote the WebView2 bootstrapper ExecWait"
+}
+if ($nsiText -match [regex]::Escape('ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install"')) {
+    throw "generated NSIS script still uses unquoted WebView2 ExecWait"
+}
+if ($nsiText -notmatch 'MB_YESNO') {
+    throw "generated NSIS script does not ask before downloading WebView2"
+}
+if ($nsiText -notmatch 'WebView2 is required') {
+    throw "generated NSIS script does not warn that cancelling WebView2 exits setup"
+}
+if ($nsiText -notmatch 'SetErrorLevel') {
+    throw "generated NSIS script does not exit with SetErrorLevel when WebView2 is cancelled"
+}
 Write-Host "nsis_script_embeds_webview2_bootstrapper"
 if ($nsiText -notmatch "bulk_extractor64\.exe") {
     throw "generated NSIS script does not install bulk_extractor64.exe"
@@ -272,6 +296,28 @@ if ($nsiText -notmatch "capa\.exe") {
 }
 if ($nsiText -notmatch "floss\.exe") {
     throw "generated NSIS script does not install floss.exe"
+}
+if ($nsiText -notmatch "StopDumplyzerRuntime") {
+    throw "generated NSIS script does not stop Dumplyzer/runtime python before overwrite"
+}
+if ($nsiText -notmatch "resources\\runtime\\python\.exe") {
+    throw "generated NSIS script must only stop Dumplyzer bundled python.exe, not a system Python"
+}
+if ($nsiText -match '-Command\s+"& \{') {
+    throw "StopDumplyzerRuntime must not pass PowerShell -Command with braces (NSIS ParserError)"
+}
+if ($nsiText -notmatch "stop-dumplyzer-runtime\.ps1") {
+    throw "generated NSIS script must write stop-dumplyzer-runtime.ps1 and invoke it with -File"
+}
+if ($nsiText -notmatch 'RmDir /r "\$LOCALAPPDATA\\Dumplyzer"') {
+    throw "uninstall Delete app data must remove %LOCALAPPDATA%\Dumplyzer"
+}
+if ($nsiText -notmatch 'RMDir /r /REBOOTOK "\$INSTDIR"') {
+    throw "uninstall must remove the install tree in one rmdir, not per-file Delete"
+}
+$resourceDeletes = ([regex]::Matches($nsiText, 'Delete "\$INSTDIR\\resources')).Count
+if ($resourceDeletes -gt 0) {
+    throw "uninstall must not Delete bundled resources file-by-file ($resourceDeletes Delete lines)"
 }
 Write-Host "nsis_script_includes_bulk_extractor_capa_floss $($nsi.FullName)"
 
@@ -347,5 +393,17 @@ if ($removed.Count -gt 0) {
     throw "removed PE-sieve/mal_unpack payload still present: $($removed[0].FullName)"
 }
 Write-Host "removed_providers_absent pe_sieve mal_unpack"
+
+$packedIsf = @(Get-ChildItem -Path (Join-Path $Root "app\desktop\resources") -Recurse -Filter "windows.zip" -ErrorAction SilentlyContinue)
+if ($packedIsf.Count -gt 0) {
+    throw "windows.zip ISF pack must not be shipped in the installer payload: $($packedIsf[0].FullName)"
+}
+if ($nsiText -match '(?im)^\s*File[^\r\n]*windows\.zip') {
+    throw "generated NSIS script must not File windows.zip into INSTDIR"
+}
+if ($nsiText -notmatch [regex]::Escape('%LOCALAPPDATA%\Dumplyzer\symbols')) {
+    throw "generated NSIS script must keep kernel symbols in user data, not INSTDIR"
+}
+Write-Host "windows_isf_pack_not_bundled"
 
 Write-Host "VERIFY_OK"
