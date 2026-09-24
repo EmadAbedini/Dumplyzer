@@ -917,11 +917,13 @@ function AntivirusBanner() {
     <div className="mt-2 flex min-w-0 w-full items-center gap-2 rounded-md border border-danger/40 bg-danger/5 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
       <ShieldAlert size={16} className="shrink-0 text-danger" aria-hidden />
       <p className="min-w-0 flex-1 text-justify">
-        Pause real-time <span className="font-bold text-danger">antivirus</span> for the
-        Dumplyzer data folder before running either job in this section. Carved Artifacts
-        and Extracted Files both write recovered content to disk, including reconstructed
-        EXE/DLL files; endpoint products often quarantine those files because they look
-        like live binaries, which can delete output or stop the scan mid-run.
+        Exclude the Dumplyzer data folder from real-time{" "}
+        <span className="font-bold text-danger">antivirus</span> before running either job
+        in this section. Carved Artifacts and Extracted Files both write recovered content
+        to disk, including reconstructed EXE/DLL files. Endpoint products often quarantine
+        those files because they look like live binaries, which can delete output or stop
+        the scan mid-run. The same heuristics can treat Dumplyzer as the process writing
+        those files and quarantine or delete the application executable itself.
       </p>
     </div>
   );
@@ -958,9 +960,11 @@ function AntivirusConfirmDialog({
                 Antivirus warning
               </h2>
               <p id="carved-av-warning-body" className="mt-1.5 text-justify text-sm leading-5 text-muted">
-                Carved Artifacts and Extracted Files both write recovered content to the
-                Dumplyzer data folder. Real-time antivirus may quarantine those files and
-                interrupt the analysis.
+                Exclude the Dumplyzer data folder from real-time antivirus before
+                continuing. Carved Artifacts and Extracted Files write recovered content
+                there, including reconstructed EXE/DLL files. Endpoint products often
+                quarantine those files, interrupt the analysis, or treat Dumplyzer as the
+                writer and remove the application executable itself.
                 {action === "pe" ? (
                   <>
                     {" "}
