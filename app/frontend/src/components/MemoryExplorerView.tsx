@@ -31,6 +31,7 @@ export function MemoryExplorerView({
   selectedProcessId,
   onSelectProcess,
   onJobSubmitted,
+  onExtractCompleted,
   onError,
   refreshToken,
   coverage,
@@ -42,6 +43,7 @@ export function MemoryExplorerView({
   selectedProcessId: string | null;
   onSelectProcess: (id: string) => void;
   onJobSubmitted: (job: Job) => void;
+  onExtractCompleted?: () => void;
   onError: (m: string) => void;
   refreshToken?: number | string;
   coverage?: CapabilityCoverage;
@@ -144,7 +146,11 @@ export function MemoryExplorerView({
         setJob(got);
         if (got.status === "completed") {
           await load();
-          showToast("Memory job completed");
+          if (got.kind === "vad_extract") {
+            onExtractCompleted?.();
+          } else {
+            showToast("Memory job completed");
+          }
         } else if (got.status === "failed") {
           const msg =
             typeof got.error?.message === "string"
@@ -165,7 +171,7 @@ export function MemoryExplorerView({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [job, load, onError, showToast]);
+  }, [job, load, onError, onExtractCompleted, showToast]);
 
   const scanJob = job?.kind === "vad_scan" ? job : activeJobOfKind(activeJobs, "vad_scan");
   const extractJob =

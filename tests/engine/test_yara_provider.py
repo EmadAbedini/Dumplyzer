@@ -548,3 +548,38 @@ def test_extracted_files_scan_covers_pe_artifacts(tmp_path: Path) -> None:
     assert listed["total"] >= 1
     assert listed["items"][0]["scan"]["artifact_id"] == art_id
     db.close()
+
+
+def test_extracted_files_scan_includes_vad_dump(tmp_path: Path) -> None:
+    _require_yara()
+    paths = AppPaths(tmp_path / "data").ensure()
+    db = Database(paths.db_path)
+    img = tmp_path / "mem.raw"
+    img.write_bytes(b"\x00\x01DUMPLYZER-YARA-IMAGE\x00")
+    ev = import_evidence(db, str(img))
+    adir = artifact_store.artifact_dir(paths, ev["id"])
+    apath = adir / "pid.1.vad.x1000-x2000.dmp"
+    apath.write_bytes(b"MZ" + b"\x00" * 40 + b"mimikatz sekurlsa::logonpasswords")
+    digest = artifact_store.sha256_file(apath)
+    art_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO artifacts (
+          id, evidence_id, process_id, pid, memory_region_id, filename, stored_path,
+          sha256, size_bytes, file_type, extraction_method, source_plugin, tool_name,
+          tool_version, start_vpn, end_vpn, extracted_at, notes, metadata_json
+        ) VALUES (?, ?, NULL, 1, NULL, ?, ?, ?, ?, 'raw', 'volatility3.windows.vadinfo.vad_dump',
+          'windows.vadinfo', 'volatility3', '0', '0x1000', '0x2000',
+          '2020-01-01T00:00:00+00:00', 'fixture', '{}')
+        """,
+        (art_id, ev["id"], apath.name, str(apath), digest, apath.stat().st_size),
+    )
+    result = yara_workflows.run_yara_extracted_files_job(
+        db,
+        {"evidence_id": ev["id"]},
+        cancelled=lambda: False,
+        progress=lambda _m: None,
+        paths=paths,
+    )
+    assert result["scanned"] == 1
+    db.close()

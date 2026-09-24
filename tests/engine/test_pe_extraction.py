@@ -342,6 +342,39 @@ def test_ipc_handlers(tmp_path: Path) -> None:
     assert "pe_extraction.artifacts" in HANDLERS
 
 
+def test_list_extracted_pe_artifacts_includes_vad_dump(tmp_path: Path) -> None:
+    from uuid import uuid4
+
+    from memscope_engine.artifacts import store as artifact_store
+
+    paths = AppPaths(tmp_path / "data").ensure()
+    db = Database(paths.db_path)
+    img = tmp_path / "img.raw"
+    img.write_bytes(b"dump")
+    ev = import_evidence(db, str(img))
+    adir = artifact_store.artifact_dir(paths, ev["id"])
+    apath = adir / "pid.4.vad.x1000-x2000.dmp"
+    apath.write_bytes(b"\x00" * 32)
+    digest = artifact_store.sha256_file(apath)
+    art_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO artifacts (
+          id, evidence_id, process_id, pid, memory_region_id, filename, stored_path,
+          sha256, size_bytes, file_type, extraction_method, source_plugin, tool_name,
+          tool_version, start_vpn, end_vpn, extracted_at, notes, metadata_json
+        ) VALUES (?, ?, NULL, 4, NULL, ?, ?, ?, ?, 'raw', 'volatility3.windows.vadinfo.vad_dump',
+          'windows.vadinfo', 'volatility3', '0', '0x1000', '0x2000',
+          '2020-01-01T00:00:00+00:00', 'fixture', '{}')
+        """,
+        (art_id, ev["id"], apath.name, str(apath), digest, apath.stat().st_size),
+    )
+    listed = pe_extraction_workflows.list_extracted_pe_artifacts(db, ev["id"])
+    assert listed["total"] == 1
+    assert listed["items"][0]["id"] == art_id
+    db.close()
+
+
 def test_yara_jail_allows_pe_extraction_store(tmp_path: Path) -> None:
     from memscope_engine.artifacts.store import ensure_within_controlled_data
 

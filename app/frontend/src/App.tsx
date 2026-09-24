@@ -14,7 +14,7 @@ import { NetworkView } from "./components/NetworkView";
 import { IocsView, SearchView } from "./components/SearchIocViews";
 import { MemoryExplorerView } from "./components/MemoryExplorerView";
 import { TimelineView } from "./components/TimelineArtifactsViews";
-import { ArtifactsView } from "./components/ArtifactsView";
+import { ArtifactsView, type ArtifactsPane } from "./components/ArtifactsView";
 import { SignaturesView } from "./components/SignaturesView";
 import { PluginExplorerView } from "./components/PluginExplorerView";
 import { ExportView } from "./components/ExportView";
@@ -102,6 +102,7 @@ export default function App() {
   const [memoryShownCount, setMemoryShownCount] = useState(0);
   const [timelineShownCount, setTimelineShownCount] = useState<number | null>(null);
   const [artifactsShownCount, setArtifactsShownCount] = useState<number | null>(null);
+  const [artifactsPane, setArtifactsPane] = useState<ArtifactsPane>("extraction");
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
   const [jobTick, setJobTick] = useState(0);
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
@@ -182,6 +183,11 @@ export default function App() {
       return [...jobs, job];
     });
     setJobTick((t) => t + 1);
+  }, []);
+
+  const openExtractedFiles = useCallback(() => {
+    setArtifactsPane("pe");
+    setNav("artifacts");
   }, []);
 
   const retryPendingAnalysis = useCallback(async () => {
@@ -395,6 +401,7 @@ export default function App() {
       setMemoryShownCount(0);
       setTimelineShownCount(null);
       setArtifactsShownCount(null);
+      setArtifactsPane("extraction");
       setOverview(null);
       setEvidence(imported);
       setNav("overview");
@@ -484,6 +491,8 @@ export default function App() {
                 }
                 if (j.status === "failed" && j.error) {
                   handleFailedJob(j);
+                } else if (j.status === "completed" && j.kind === "vad_extract") {
+                  openExtractedFiles();
                 }
               }
             } catch {
@@ -564,6 +573,7 @@ export default function App() {
     handleFailedJob,
     importJobId,
     importStillCurrent,
+    openExtractedFiles,
     presentError,
     refreshEvidenceViews,
   ]);
@@ -723,6 +733,7 @@ export default function App() {
     setMemoryShownCount(0);
     setTimelineShownCount(null);
     setArtifactsShownCount(null);
+    setArtifactsPane("extraction");
     setSelectedProcessId(null);
     setNav("overview");
     void engineCall("jobs.reset_visible")
@@ -957,6 +968,7 @@ export default function App() {
             setNav("process_dive");
           }}
           onJobSubmitted={onPluginJobSubmitted}
+          onExtractCompleted={openExtractedFiles}
           onError={setErr}
           refreshToken={coverageTick}
           coverage={coverageItem(coverage, "memory_vad")}
@@ -1029,12 +1041,14 @@ export default function App() {
           evidenceId={evidence?.id ?? null}
           onError={setErr}
           onJobSubmitted={onPluginJobSubmitted}
-          refreshToken={coverageTick}
+          refreshToken={`${coverageTick}:${jobTick}`}
           coverage={coverageItem(coverage, "artifacts")}
           jobsRunning={jobsRunning}
           activeJobs={activeJobs}
           nowMs={nowMs}
           onShownCountChange={setArtifactsShownCount}
+          pane={artifactsPane}
+          onPaneChange={setArtifactsPane}
         />
       );
       break;

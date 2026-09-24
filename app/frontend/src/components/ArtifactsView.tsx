@@ -56,6 +56,7 @@ function isBoilerplateNotes(notes: string | null | undefined): boolean {
   return /not executed|not classified as malware/i.test(notes);
 }
 
+export type ArtifactsPane = "pe" | "extraction";
 type ArtifactAction = "pe" | "extraction" | "yara" | "capa" | "floss";
 type DiskWriteAction = "pe" | "extraction";
 
@@ -124,6 +125,8 @@ export function ArtifactsView({
   activeJobs = [],
   nowMs = Date.now(),
   onShownCountChange,
+  pane,
+  onPaneChange,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
@@ -134,6 +137,8 @@ export function ArtifactsView({
   activeJobs?: Job[];
   nowMs?: number;
   onShownCountChange?: (count: number) => void;
+  pane: ArtifactsPane;
+  onPaneChange: (pane: ArtifactsPane) => void;
 }) {
   const caps = useCapabilityStatus();
   const [items, setItems] = useState<Artifact[]>([]);
@@ -151,7 +156,6 @@ export function ArtifactsView({
   );
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState<ArtifactAction | null>(null);
-  const [pane, setPane] = useState<"pe" | "extraction">("extraction");
   const [confirmAction, setConfirmAction] = useState<DiskWriteAction | null>(null);
   const peStatus = caps.peExtraction;
   const bulkExtractorStatus = caps.bulkExtractor;
@@ -352,7 +356,7 @@ export function ArtifactsView({
       void queue("pe_extraction.run", { evidence_id: evidenceId }, "pe");
       return;
     }
-    setPane("extraction");
+    onPaneChange("extraction");
     void queue("bulk_extractor.scan", { evidence_id: evidenceId }, "extraction");
   };
 
@@ -363,7 +367,7 @@ export function ArtifactsView({
         <SegmentedControl
           ariaLabel="Artifact sections"
           value={pane}
-          onChange={setPane}
+          onChange={onPaneChange}
           options={[
             { id: "extraction", label: "Carved Artifacts" },
             { id: "pe", label: "Extracted Files" },

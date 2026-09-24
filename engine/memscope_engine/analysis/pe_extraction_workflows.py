@@ -545,25 +545,10 @@ def list_pe_extraction_runs(db: Database, evidence_id: str) -> dict[str, Any]:
 
 
 def list_extracted_pe_artifacts(db: Database, evidence_id: str) -> dict[str, Any]:
-    from memscope_engine.analysis.memory_artifacts import _artifact_dto
+    """Files shown in Carved Data → Extracted Files (PE reconstruction and VAD dumps)."""
+    from memscope_engine.analysis.memory_artifacts import list_artifacts
 
-    rows = db.fetchall(
-        """
-        SELECT * FROM artifacts
-        WHERE evidence_id = ? AND (
-          file_type = 'pe'
-          OR extraction_method LIKE 'volatility3.windows.pedump%'
-          OR extraction_method LIKE 'volatility3.windows.dumpfiles%'
-        )
-        ORDER BY extracted_at DESC
-        """,
-        (evidence_id,),
-    )
-    return {
-        "evidence_id": evidence_id,
-        "total": len(rows),
-        "items": [_artifact_dto(r) for r in rows],
-    }
+    return list_artifacts(db, evidence_id)
 
 
 def _run_dto(row: dict[str, Any]) -> dict[str, Any]:

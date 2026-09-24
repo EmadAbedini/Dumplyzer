@@ -373,7 +373,7 @@ def run_yara_extracted_files_job(
     *,
     paths: AppPaths,
 ) -> dict[str, Any]:
-    """Scan every extracted PE artifact for this evidence with artifact YARA rules."""
+    """Scan every extracted file for this evidence with artifact YARA rules."""
     from memscope_engine.analysis.pe_extraction_workflows import list_extracted_pe_artifacts
 
     evidence_id = params.get("evidence_id")
@@ -392,8 +392,8 @@ def run_yara_extracted_files_job(
     if not artifacts:
         raise AppError(
             code="extracted_pe_missing",
-            message="No extracted PE files are available to scan.",
-            suggestion="Open Carved Data → Extracted Files and run PE Reconstruction first.",
+            message="No extracted files are available to scan.",
+            suggestion="Open Carved Data → Extracted Files, or extract a region from Memory first.",
             entity="yara",
         )
 

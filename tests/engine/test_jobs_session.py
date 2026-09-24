@@ -597,6 +597,11 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "coverageRefreshKey" in coverage_lib
     assert "coverageShownInView" in coverage_lib
     assert "onShownCountChange" in memory_view
+    assert "onExtractCompleted" in memory_view
+    assert 'got.kind === "vad_extract"' in memory_view
+    assert "openExtractedFiles" in app
+    assert 'kind === "vad_extract"' in app
+    assert "artifactsPane" in app
     timeline_view = (
         root / "app" / "frontend" / "src" / "components" / "TimelineArtifactsViews.tsx"
     ).read_text(encoding="utf-8")

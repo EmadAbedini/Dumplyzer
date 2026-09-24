@@ -198,7 +198,7 @@ export function SignaturesView({
             ) : (
               <ScanPanel
                 title="Extracted PE Scan"
-                description="Scan reconstructed PE files with YARA. This page only scans files that already exist — it does not extract them from the dump."
+                description="Scan files already listed in Carved Data → Extracted Files. This page does not extract them from the dump."
                 buttonLabel={scanButtonLabel(
                   submitting === "extracted",
                   extractedJob,
@@ -208,24 +208,24 @@ export function SignaturesView({
                 disabled={extractedBusy || peFiles.length === 0}
                 buttonTitle={
                   peFiles.length === 0
-                    ? "Reconstruct files in Carved Data → Extracted Files first."
+                    ? "Extract files in Carved Data → Extracted Files, or extract a region from Memory first."
                     : undefined
                 }
                 extra={
                   peFiles.length === 0 ? (
                     <AnalysisScopeNote>
-                      Reconstruct files before scanning. Open{" "}
+                      Extract files before scanning. Open{" "}
                       <span className="font-semibold">Carved Data</span>, switch
                       to <span className="font-semibold">Extracted Files</span>,
-                      and click{" "}
+                      then run{" "}
                       <span className="font-semibold">
                         Run PE Reconstruction
-                      </span>
-                      . When that job finishes, return here and scan those
-                      files.
+                      </span>{" "}
+                      or extract a region from Memory. When those files appear,
+                      return here and scan them.
                     </AnalysisScopeNote>
                   ) : (
-                    `${peFiles.length} reconstructed file${peFiles.length === 1 ? "" : "s"} ready to scan.`
+                    `${peFiles.length} extracted file${peFiles.length === 1 ? "" : "s"} ready to scan.`
                   )
                 }
                 percent={showExtractedPercent ? extractedPercent : null}
