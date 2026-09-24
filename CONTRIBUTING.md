@@ -15,7 +15,7 @@ Prefer packaging, reliability, security, tests, and documentation unless a chang
 | MSVC Build Tools | VS 2022 |
 | WebView2 | Evergreen |
 
-Do not use a global Python 3.13 environment for the engine.
+Do not use a global Python 3.13 environment for the engine. `rust-toolchain.toml` pins Rust **1.98.1** for this repository.
 
 ### First-time setup
 
@@ -35,20 +35,24 @@ npm ci
 
 Work on the development host. Do not install Node, Rust, or Python on a clean-machine validation VM, and do not rebuild the Windows installer for React/Tailwind tweaks.
 
+From the repository root:
+
 ```powershell
 cd app\desktop
 npm run tauri dev
 ```
 
+The first `tauri dev` compiles the Rust shell and can take several minutes.
+
 What that command does:
 
 1. `beforeDevCommand` starts Vite in `app/frontend` on port **1420**.
 2. The Tauri window loads `devUrl` `http://127.0.0.1:1420`. React Fast Refresh / Vite HMR updates the running window without a Rust or NSIS rebuild.
-3. The desktop process still spawns `python -m memscope_engine` and speaks the existing stdio JSON-RPC. React → Tauri → Python engine → Volatility 3 APIs is unchanged.
+3. The desktop process launches the Python engine over stdio JSON-RPC. React → Tauri → Python engine → Volatility 3 APIs is unchanged.
 
-Engine Python (first existing file wins): `DUMPLYZER_ENGINE_PYTHON` or `MEMSCOPE_ENGINE_PYTHON`, then runtime next to `dumplyzer.exe`, then source-tree `app\desktop\resources\runtime\python.exe`, then `engine\.venv\Scripts\python.exe`. `tauri dev` uses the source-tree embeddable runtime when it is present (created by `scripts\windows\build-release.ps1`). The venv is for `pytest`, not a second architecture.
+Engine Python (first existing file wins): `DUMPLYZER_ENGINE_PYTHON` or `MEMSCOPE_ENGINE_PYTHON`, then `runtime\python.exe` next to `dumplyzer.exe` or under the resource dir, then source-tree `app\desktop\resources\runtime\python.exe`, then `engine\.venv\Scripts\python.exe`. On a fresh clone, `tauri dev` uses the venv from first-time setup. After `scripts\windows\build-release.ps1`, `tauri dev` prefers that embeddable runtime and overlays the source `engine\` tree so IPC matches the checkout. Use the same venv for `pytest`. Do not ship the venv; the NSIS payload uses the embeddable runtime.
 
-User data is **this host's** `%LOCALAPPDATA%\Dumplyzer\` (or `DUMPLYZER_DATA_DIR` / the legacy `MEMSCOPE_DATA_DIR` alias). `tauri dev` does not contact the clean VM. To keep host-dev data separate from a locally installed Dumplyzer:
+User data is **this host's** `%LOCALAPPDATA%\Dumplyzer\` (or `DUMPLYZER_DATA_DIR` / the legacy `MEMSCOPE_DATA_DIR` alias). `tauri dev` does not contact the clean VM. To keep host-dev data separate from a locally installed Dumplyzer, start from the repository root:
 
 ```powershell
 $env:DUMPLYZER_DATA_DIR = "$env:TEMP\dumplyzer-dev"
@@ -71,13 +75,13 @@ cargo build
 
 ## Windows installer
 
-This is a separate, heavier step than `tauri dev`. It downloads official CPython embeddable and bundled tools (SHA-256 pinned) and produces `Dumplyzer_0.1.0_x64-setup.exe`.
+This is a separate, heavier step than `tauri dev`. It downloads official CPython embeddable and bundled tools (SHA-256 pinned) and produces `Dumplyzer_0.1.0_x64-setup.exe`. Run it from the repository root. Stop `tauri dev` first if that process is still running.
 
 ```powershell
 .\scripts\windows\build-release.ps1
 ```
 
-See [docs/windows-release.md](docs/windows-release.md).
+The installer lands at `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.0_x64-setup.exe`. See [docs/windows-release.md](docs/windows-release.md).
 
 ## Security notes for contributors
 
