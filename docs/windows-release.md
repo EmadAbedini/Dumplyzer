@@ -39,7 +39,7 @@ YARA / Signature Detection (yara-python **4.5.4**) is installed into the Python 
 
 WiX 3.14.1 is recorded in `packaging/windows/runtime-manifest.json` and `scripts/windows/prepare-wix-tools.ps1` for optional MSI experiments. The release path is NSIS only (`tauri build --bundles nsis`) and does not require WiX.
 
-Use Python 3.12.10 on the build host. Do not use a global 3.13 environment for the engine. `engine\.venv` is for tests only and is not a release input.
+Use Python 3.12.10 on the build host. Do not use a global 3.13 environment for the engine. `engine\.venv` is not a release input.
 
 ## Pinned download (hash-verified)
 
@@ -55,7 +55,7 @@ Only these remote zips/binaries are fetched, and only after SHA-256 verification
 
 YARA rules and `yara-python` are never downloaded. bulk_extractor64.exe, capa.exe, and floss.exe are fetched at **build time** from official GitHub releases with pinned SHA-256.
 
-The Volatility Foundation `windows.zip` ISF pack (~800 MB, SHA-256 `231d69735b9a5482b16bdbf1ec356e0a95574c44079e68dfb02ebddb34d55f3e`) is **not** fetched at build time and is **not** packed into NSIS. The installed app asks before downloading the Microsoft PDB for **one kernel build** via Download & Continue. The user can also provide a `.pdb` / ISF file under `%LOCALAPPDATA%\Dumplyzer\symbols`.
+Microsoft PDBs and Volatility ISF archives are not fetched at build time and are not packed into NSIS. The installed app asks before downloading the Microsoft PDB for **one kernel build** via Download & Continue. The user can also provide a `.pdb` / ISF file under `%LOCALAPPDATA%\Dumplyzer\symbols`.
 
 The Tauri CLI may also cache NSIS into `%LOCALAPPDATA%\tauri\` on first `tauri build`. That is the official Tauri 2.11 bundler toolchain, not a Dumplyzer malware-tool fetch.
 
@@ -74,7 +74,7 @@ py -3.12 -m venv --clear engine\.venv
 cd app\frontend; npm ci; npm run build; cd ..\..
 cd app\desktop; cargo test; cargo build; cd ..\..
 
-# 3. Release payload + installers
+# 3. Release payload + installer (stop tauri dev first if it is still running)
 .\scripts\windows\build-release.ps1
 ```
 
@@ -142,7 +142,7 @@ User data (writable, not removed as part of a normal uninstall of binaries):
 - exactly one NSIS `Dumplyzer_0.1.0_x64-setup.exe`; no MSI
 - NSIS payload `dumplyzer.exe` extracted to `bundle/nsis/payload/` (`BUNDLE_TYPE_VAR_NSS`); unpackaged leftover may differ by only the Tauri UNK/NSS stamp
 - `embedBootstrapper` WebView2 payload is staged and referenced
-- `windows.zip` is absent from `app/desktop/resources` and is not `File`d into INSTDIR; kernel PDBs stay under `%LOCALAPPDATA%\Dumplyzer\symbols`
+- `windows.zip` is not under `app/desktop/resources` and is not `File`d into INSTDIR; kernel PDBs stay under `%LOCALAPPDATA%\Dumplyzer\symbols`
 
 It does not install the NSIS onto a clean VM.
 
@@ -180,7 +180,7 @@ Sign all of the following with the same Authenticode certificate, **after** a su
 1. `bundle/nsis/payload/dumplyzer.exe` (the NSIS-stamped `BUNDLE_TYPE_VAR_NSS` binary that the installer actually ships). Do **not** treat `target/release/dumplyzer.exe` as the shipped app hash; Tauri restores that leftover to `BUNDLE_TYPE_VAR_UNK` after packaging.
 2. NSIS `Dumplyzer_0.1.0_x64-setup.exe`
 
-Signing only the installer and leaving `dumplyzer.exe` unsigned is incomplete. MSI is not an end-user artifact.
+Signing only the installer and leaving `dumplyzer.exe` unsigned is incomplete.
 
 ### Required signing properties
 
@@ -203,7 +203,7 @@ Until that is done, SmartScreen and some enterprise policies will treat the inst
 
 - Clean-machine NSIS install was executed on a Windows 11 x64 VM. See `docs/clean-machine-validation.md`. That run used an older offline WebView2 payload. Current packaging uses `embedBootstrapper`.
 - Default install directory is `%ProgramFiles%\Dumplyzer` (Windows system drive; elevation required). User data remains `%LOCALAPPDATA%\Dumplyzer`.
-- WebView2 Evergreen bootstrapper is packed into the NSIS installer (`embedBootstrapper`). If WebView2 is missing, setup downloads the runtime.
+- WebView2 Evergreen bootstrapper is packed into the NSIS installer (`embedBootstrapper`). If WebView2 is missing, setup asks before downloading the runtime.
 - Windows analysis asks before downloading kernel symbols for that dump's build. Use Download & Continue in the app. You can instead provide a `.pdb` or ISF file.
 - Volatility plugins that need capstone or pycryptodome may appear as import failures. That is intentional: those extras are not bundled. Failed imports must not be marked available. yara-python 4.5.4 **is** bundled, so Volatility YARA plugins may become available as a side effect.
 - Code signing / Authenticode is not configured. Artifacts are unsigned.

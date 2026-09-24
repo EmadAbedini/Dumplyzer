@@ -13,7 +13,7 @@ A memory image is optional. Empty Evidence is a valid state. Do not fabricate fo
 | File | `Dumplyzer_0.1.0_x64-setup.exe` |
 | Default install | `%ProgramFiles%\Dumplyzer` (elevation required) |
 | User data | `%LOCALAPPDATA%\Dumplyzer\` |
-| WebView2 | Small Evergreen bootstrapper packed (`embedBootstrapper`). If WebView2 is already present it is skipped. If it is missing, the bootstrapper downloads the runtime. |
+| WebView2 | Small Evergreen bootstrapper packed (`embedBootstrapper`). If WebView2 is already present it is skipped. If it is missing, setup asks before downloading the runtime. |
 | Authenticode | Unsigned for 0.1.0 |
 
 MSI is not an end-user artifact.
@@ -48,9 +48,10 @@ Use a Windows 11 x64 VM or spare host.
    `resources\tools\`, `resources\rules\`).
 4. Launch Dumplyzer from the Start menu.
 5. Confirm first launch created `%LOCALAPPDATA%\Dumplyzer\` (`logs`, `artifacts`, `cache`,
-   `exports`, `rules\yara`, `tools`, `tmp`, `memscope.db`). If an older `%LOCALAPPDATA%\MemScope\`
-   database exists and the new database does not, the copy into Dumplyzer should appear without
-   deleting the source.
+   `exports`, `analysis`, `symbols`, `rules\yara`, `tools`, `tmp`, `webview`, `memscope.db`).
+   If `%LOCALAPPDATA%\Dumplyzer\memscope.db` does not exist, first launch copies an older data
+   directory from `%LOCALAPPDATA%\MemScope\` or `%APPDATA%\com.memscope.workbench\` when present.
+   The source is not deleted.
 6. Empty Evidence: the UI should load without an imported image. A short splash should appear first.
 7. Memory-dump providers: Volatility 3 and PE Extraction should be available. bulk_extractor,
    CAPA, FLOSS, and Signature Detection should be available from the installer bundle.
@@ -62,7 +63,8 @@ Use a Windows 11 x64 VM or spare host.
 
 When a memory dump is available:
 
-1. Import the dump (read-only).
+1. Import the dump (read-only). Windows analysis asks before downloading the matching kernel PDB
+   (Download & Continue) or accepting a local `.pdb` / ISF file.
 2. Run PE Extraction; confirm extracted files are labeled extracted PE artifacts.
 3. Run Signature Detection, CAPA, and FLOSS against an extracted PE, and a memory-dump
    Signature Detection scan from Overview.

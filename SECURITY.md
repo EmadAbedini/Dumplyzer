@@ -1,6 +1,6 @@
 # Security
 
-Dumplyzer is an offline, single-user forensic workstation. Memory images, extracted artifacts, and plugin output are treated as untrusted.
+Dumplyzer is a local-first, single-user forensic workstation. Memory images, extracted artifacts, and plugin output are treated as untrusted.
 
 ## Process model
 
@@ -12,7 +12,8 @@ Dumplyzer is an offline, single-user forensic workstation. Memory images, extrac
 ## Paths and data
 
 - Canonical user data: `%LOCALAPPDATA%\Dumplyzer\`.
-- Install trees (`%LOCALAPPDATA%\Programs\Dumplyzer` or `%ProgramFiles%\Dumplyzer`) must not hold databases, artifacts, evidence, or optional tool EXEs.
+- Current install tree is `%ProgramFiles%\Dumplyzer`. Install trees must not hold databases, artifacts, evidence, or optional tool EXEs.
+- UI profile (WebView2) lives under `%LOCALAPPDATA%\Dumplyzer\webview`.
 - Export destinations supplied by the UI are rejected. Reports are written only under `exports\`.
 - Artifact, cache, and export writers confine paths to their roots (no `..` traversal).
 - `app.init` ignores a client `data_dir` when `DUMPLYZER_DATA_DIR` or `MEMSCOPE_DATA_DIR` is already set by the desktop shell.
@@ -35,10 +36,10 @@ Dumplyzer is an offline, single-user forensic workstation. Memory images, extrac
 
 ## Packaging
 
-- Engine runtime zip is pinned by SHA-256 (see `packaging/windows/runtime-manifest.json`). WiX 3.14.1 remains in that manifest for optional MSI experiments; the shipped installer is NSIS.
+- Engine runtime zip is pinned by SHA-256 (see `packaging/windows/runtime-manifest.json`).
 - NSIS defaults to `%ProgramFiles%\Dumplyzer` and requires administrator rights. The engine is spawned by absolute path and does not add that directory to `PATH`. WiX/MSI remains in the runtime manifest for optional experiments; it is not an end-user artifact.
 - DLL search for `python.exe` uses the runtime directory. Packaged engine `PATH` is reduced to `System32`.
-- Startup writes logs/tmp/database under `%LOCALAPPDATA%\Dumplyzer\`, not under Program Files or `%LOCALAPPDATA%\Programs\Dumplyzer`.
+- Startup writes logs/tmp/database under `%LOCALAPPDATA%\Dumplyzer\`, not under Program Files.
 
 ## WebView2
 
@@ -48,11 +49,11 @@ Dumplyzer itself does not phone home. The WebView2 bootstrapper is Microsoft's i
 
 ## Kernel symbols
 
-Windows analysis may download **one** kernel PDB from `https://msdl.microsoft.com/download/symbols` after the user agrees in the app (Download & Continue). The 800 MB Volatility `windows.zip` pack is not in the NSIS installer and is not fetched automatically. The Microsoft response may redirect to Azure Blob Storage; Dumplyzer follows that only over HTTPS to `msdl.microsoft.com` or `*.blob.core.windows.net`, then accepts the bytes only if they verify as a PDB (or expand to one). User-provided `.pdb` / ISF files stay under `%LOCALAPPDATA%\Dumplyzer\symbols`.
+Windows analysis may download **one** kernel PDB from `https://msdl.microsoft.com/download/symbols` after the user agrees in the app (Download & Continue). The Microsoft response may redirect to Azure Blob Storage; Dumplyzer follows that only over HTTPS to `msdl.microsoft.com` or `*.blob.core.windows.net`, then accepts the bytes only if they verify as a PDB (or expand to one). Download never starts by itself. User-provided `.pdb` / ISF files stay under `%LOCALAPPDATA%\Dumplyzer\symbols`.
 
 ## Authenticode
 
-0.1.0 release artifacts are **unsigned**. There is no `certificateThumbprint` or `signCommand` in `tauri.conf.json`. Unsigned NSIS/MSI/`Dumplyzer.exe` files must not be described as signed. The signing procedure for a future trusted build is in `docs/windows-release.md`.
+0.1.0 release artifacts are **unsigned**. There is no `certificateThumbprint` or `signCommand` in `tauri.conf.json`. Unsigned NSIS and `dumplyzer.exe` files must not be described as signed. The signing procedure for a future trusted build is in `docs/windows-release.md`.
 
 ## License
 
@@ -60,4 +61,4 @@ Dumplyzer application source is Apache-2.0. Redistributed Volatility 3 remains u
 
 ## Reporting issues
 
-File security issues against the repository. There is no telemetry, account system, or network service in Dumplyzer.
+File security issues against the repository. Dumplyzer has no telemetry, account system, or network listener. The only optional Microsoft downloads are WebView2 during setup if the runtime is missing, and one kernel PDB after in-app consent.
