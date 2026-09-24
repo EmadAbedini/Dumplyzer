@@ -8,7 +8,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/release-v0.1.0-0B3D2E" alt="v0.1.0">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D6?logo=windows&logoColor=white" alt="Windows x64">
-  <img src="https://img.shields.io/badge/runtime-offline-0B3D2E" alt="Offline">
+  <img src="https://img.shields.io/badge/runtime-local--first-0B3D2E" alt="Local-first">
   <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/engine%20tests-passing-brightgreen" alt="Engine tests passing"></a>
   <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/desktop%20tests-passing-brightgreen" alt="Desktop tests passing"></a>
   <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/frontend%20build-passing-brightgreen" alt="Frontend build passing"></a>
@@ -19,22 +19,18 @@
   <a href="https://www.linkedin.com/in/emad-abedini"><img src="https://img.shields.io/badge/LinkedIn-0077B5?logo=linkedin&logoColor=white" alt="LinkedIn"></a>
 </p>
 
-Do you want to investigate a memory dump without assembling a forensic toolchain? Do you want processes, network activity, indicators, reconstructed binaries, and signatures in **one local workspace**?
-
-You are in the right place.
-
-**Dumplyzer** is an open-source, offline desktop workbench for memory forensics. It is built for DFIR analysts, threat hunters, and malware researchers who need to move from a raw dump to a structured investigation without sending evidence off the workstation.
+Dumplyzer is an open-source, local-first desktop workbench for memory forensics. It brings processes, network activity, indicators, reconstructed binaries, and signatures into one local investigation workspace, without assembling a separate forensic toolchain.
 
 <p align="center">
   <a href="docs/assets/screenshots/01-processes.png"><img src="docs/assets/screenshots/01-processes.png" alt="Process list with command lines" width="48%"></a>
-  <a href="docs/assets/screenshots/02-network.png"><img src="docs/assets/screenshots/02-network.png" alt="Network artifacts recovered from the dump" width="48%"></a>
+  <a href="docs/assets/screenshots/02-network.png"><img src="docs/assets/screenshots/02-network.png" alt="Network connections extracted from the image" width="48%"></a>
 </p>
 <p align="center">
   <a href="docs/assets/screenshots/03-timeline.png"><img src="docs/assets/screenshots/03-timeline.png" alt="Investigation timeline with time-range histogram" width="48%"></a>
   <a href="docs/assets/screenshots/04-memory.png"><img src="docs/assets/screenshots/04-memory.png" alt="Memory VAD regions for a selected process" width="48%"></a>
 </p>
 
-Analysis runs locally. The memory image stays where you imported it. There is no cloud account, no telemetry, and no malware score.
+Analysis runs locally. The original memory image stays at its imported location. There is no cloud analysis, no account system, no telemetry, and no phone-home. Dumplyzer does not produce a malware verdict.
 
 <p align="center">
   <a href="#install"><strong>Install</strong></a> ·
@@ -49,25 +45,23 @@ Analysis runs locally. The memory image stays where you imported it. There is no
 
 ## Features
 
-Dumplyzer is a focused investigation UI, not a command-line wrapper and not a SaaS console.
-
 - **One installer.** Python, the analysis engine, and supporting tools ship inside the Windows package. End users do not install a developer toolchain.
-- **Offline by design.** No network listener, no account system, no phone-home. The two optional Microsoft downloads are explicit: WebView2 during setup if it is missing, and a **single kernel PDB** when you start Windows analysis (see [Kernel symbols](#windows-kernel-symbols)).
+- **Local-first by design.** Analysis runs on the workstation. There is no cloud analysis, no account system, no telemetry, and no phone-home. Dumplyzer does not open a network listener. Explicit Microsoft downloads are limited to two documented cases: WebView2 during setup if the runtime is missing, and a matching Windows kernel PDB when you start Windows analysis (see [Kernel symbols](#windows-kernel-symbols)).
 - **Evidence stays put.** Dumplyzer records path, hash, and metadata. It does not copy the dump into Program Files or the user-data tree.
 - **Windows kernel symbols on demand.** Windows memory analysis needs type information for the NT kernel that was running when the dump was taken — the PDB (or Volatility ISF) for **that OS build**, not a generic pack. **Download & Continue** is the recommended path; you can instead browse to a matching file.
-- **Windows and Linux images.** Import Windows crash dumps, LiME images, ELF cores, QEMU/VMware snapshots, and raw physical memory. Quick Triage and Complete Analysis run the Windows Volatility pipeline (processes, modules, handles, VAD, and related views). Linux dumps can be imported and examined with Plugin Explorer (`linux.*` plugins).
+- **Windows and Linux evidence.** Import supported Windows and Linux memory images, including crash dumps, LiME, ELF cores, QEMU/VMware snapshots, and raw physical memory. Quick Triage and Complete Analysis currently provide the guided Windows Volatility workflow (processes, modules, handles, VAD, and related views). Linux evidence can be explored through Plugin Explorer using supported `linux.*` plugins.
 - **Two analysis modes, plus custom.** **Quick Triage** is a first look (OS/symbol status and the process list). **Complete Analysis** is the evidence-wide pass for processes, command lines, modules, network connections, handles, findings, IOCs, network artifacts, and timeline. **Custom Analysis** runs only the capabilities you select. Heavier jobs stay explicit so a triage run does not walk the whole dump or write reconstructed binaries.
-- **Process intelligence.** Process list, command lines, loaded modules/DLLs, open handles, and parent/child relationships (PPID, with a per-process Family view).
-- **Network.** Image-wide connections, harvested network indicators, and on-demand PCAP reconstruction (Ethernet/IP records carved from the dump; matching flows can be exported as `.pcap`). Connection metadata alone is not a packet capture.
+- **Process analysis.** Process list, command lines, loaded modules/DLLs, open handles, and parent/child relationships (PPID, with a per-process Family view).
+- **Network.** Network connections extracted from the image, plus network indicators and on-demand PCAP reconstruction. Reconstruction builds a `.pcap` from recoverable Ethernet/IP records in the dump; matching flows can be exported. Connection metadata is not a packet capture, and a reconstructed PCAP is not a full original capture.
 - **IOCs.** Indicators extracted from stored process, module, network, and handle data — IPs, domains, URLs, mutexes, registry keys, paths, and MD5/SHA-256 hashes.
 - **Search and timeline.** Indexed lookup across stored artifacts, plus an investigation timeline with time-range filtering. Search reads what analysis already stored; it does not rescan the dump.
 - **Memory regions.** Inspect VAD / virtual-memory regions for a selected PID.
-- **Signatures and capabilities.** YARA scans of the dump and/or extracted PE files (42 bundled Dumplyzer rules, plus your own `.yar` / `.yara` files). CAPA reports capabilities of reconstructed PE files — not malware verdicts.
+- **Signatures and capabilities.** YARA scans of the dump and/or extracted PE files (42 bundled Dumplyzer rules, plus your own `.yar` / `.yara` files). YARA matches are investigation indicators, not malware verdicts. CAPA reports capabilities of reconstructed PE files, not malware verdicts.
 - **Carved strings.** bulk_extractor recovers emails, phone numbers, URLs, IPs, MAC addresses, HTTP logs, AES key candidates, and similar features from the dump.
-- **PE reconstruction.** Rebuild EXE/DLL images from process memory. Extracted files are labeled **extracted artifacts**, not malware, and are never executed.
+- **PE reconstruction.** Rebuild EXE/DLL images from process memory. Reconstructed files are extracted artifacts, not malware, and are never executed.
 - **Plugin Explorer.** Discover and run supported Volatility 3 plugins from the UI, with cached results and job history.
 - **Reports.** Export HTML, JSON, or Excel under the user-data `exports\` directory. HTML reports are static (no JavaScript, no CDN).
-- **Hostile-input hygiene.** Memory images and extracted artifacts are treated as untrusted. Dumplyzer does not execute them. Matches, strings, and carved features are investigation indicators — not verdicts.
+- **Untrusted evidence.** Memory images and extracted artifacts are treated as untrusted. Dumplyzer does not execute them. Matches, strings, and carved features are investigation indicators — not verdicts.
 
 Complete Analysis does **not** auto-run PE reconstruction, signature detection, CAPA, FLOSS, bulk_extractor, or PCAP reconstruction. Start those from the workspace when you need them.
 
@@ -77,13 +71,13 @@ Complete Analysis does **not** auto-run PE reconstruction, signature detection, 
 |------|----------------|
 | Overview | Case snapshot and coverage of what has already run |
 | Processes | Process list, command lines, parent/child, and per-process deep dive |
-| Network | Connections, harvested network indicators, optional PCAP reconstruction |
+| Network | Connections extracted from the image, network indicators, optional PCAP reconstruction |
 | Modules / Memory | Loaded modules, handles, and VAD regions |
 | Findings / IOCs / Search | Heuristics, extracted indicators, and cross-view search |
 | Timeline | Investigation timeline built from stored records, with time-range filter |
 | Carved Data | Reconstructed PE images and carved feature files |
 | Signatures | Memory-dump and artifact signature scans, including your own rules |
-| Plugins | Advanced plugin execution against the imported image |
+| Plugins | Supported Volatility 3 plugins against the imported image |
 | Export | HTML / JSON / Excel reports of completed analysis |
 | Jobs | Background work with real progress when the engine knows it |
 
@@ -96,10 +90,10 @@ Dumplyzer integrates established open-source engines. They are **bundled in the 
 | Capability | Role | Bundled implementation |
 |------------|------|------------------------|
 | Memory analysis | Processes, modules, network, VAD, plugin explorer | [Volatility 3](https://github.com/volatilityfoundation/volatility3) **2.28.0** (Python APIs, not `vol.py` stdout) |
-| PE reconstruction | Rebuild EXE/DLL images from process memory | Engine workflow on top of the memory-analysis runtime (`windows.pedump` / VAD MZ / optional `windows.dumpfiles`) |
+| PE reconstruction | Rebuild EXE/DLL images from process memory | Engine workflow on top of Volatility 3 |
 | Artifact extraction | Carve URLs, domains, IPs, emails, MAC addresses, HTTP logs, AES key candidates, and similar strings from the dump | [bulk_extractor](https://github.com/simsong/bulk_extractor) **2.2.0** (separate process, GPLv3, corresponding source shipped) |
-| Signature detection | Scan the dump and/or extracted PE files | yara-python **4.5.4** plus **42** original Dumplyzer rules (memory + artifact). Copy extra `.yar` / `.yara` files into the custom rules folder |
-| Capability analysis | Report capabilities of reconstructed PE files | [CAPA](https://github.com/mandiant/capa) **9.4.0** (separate process) |
+| Signature detection | Scan the dump and/or extracted PE files. Matches are investigation indicators. | yara-python **4.5.4** plus **42** original Dumplyzer rules (memory + artifact). Copy extra `.yar` / `.yara` files into the custom rules folder |
+| Capability analysis | Report capabilities of reconstructed PE files, not malware verdicts | [CAPA](https://github.com/mandiant/capa) **9.4.0** (separate process) |
 | String analysis | Static and deobfuscated strings from reconstructed PE files | [FLOSS](https://github.com/mandiant/flare-floss) **3.1.1** (separate process) |
 
 ## Architecture
@@ -114,7 +108,9 @@ Local Python engine
 Memory image on disk
 ```
 
-The UI consumes normalized application data. Forensic output lives under `%LOCALAPPDATA%\Dumplyzer\`, never inside the install tree.
+The original memory image remains at its imported location. Dumplyzer stores analysis metadata, indexes, logs, cached symbols, extracted artifacts, and exports under `%LOCALAPPDATA%\Dumplyzer\`. That directory is generated analysis and application data. It is separate from the original evidence and is never written into the install tree.
+
+The UI consumes normalized application data.
 
 ```
 app/frontend/     Investigation UI (Vite, React, TypeScript)
@@ -140,7 +136,7 @@ You do **not** need Python, Node, Rust, or a source checkout. This is the suppor
 2. Run the installer. It defaults to `%ProgramFiles%\Dumplyzer` and requires administrator rights.
 3. Launch **Dumplyzer** from the Start menu.
 
-The Microsoft Edge **WebView2** runtime is required. If it is already installed, setup skips it. If it is missing, setup asks whether to download it now or whether you will install WebView2 yourself and run the installer again. Cancelling that download exits setup.
+The Microsoft Edge **WebView2** runtime is required. If it is already installed, setup skips it. If it is missing, setup asks to download it from Microsoft, or to install WebView2 yourself and run the installer again. Cancelling that download exits setup.
 
 Windows dumps also need a matching kernel PDB the first time you analyze a given OS build. That is handled in the app, not by the installer — see [Windows kernel symbols](#windows-kernel-symbols).
 
@@ -148,8 +144,8 @@ Windows dumps also need a matching kernel PDB the first time you analyze a given
 
 #### Supported platform
 
-| | |
-|---|---|
+| Requirement | Detail |
+|-------------|--------|
 | Desktop app | Windows 10 22H2+ / Windows 11, x64 |
 | Arch | x64 only |
 | Evidence | Windows and Linux memory images (crash dump, LiME, ELF core, raw / QEMU / VMware, …) |
@@ -157,15 +153,15 @@ Windows dumps also need a matching kernel PDB the first time you analyze a given
 | Engine runtime | Bundled CPython **3.12.10** |
 | Linux / macOS hosts | Not a release target yet |
 
-Additional hosts where the installed app was run:
+**Tested on**
 
-| Edition | Version | OS build | Experience |
-|---------|---------|----------|------------|
-| Windows 11 Pro | 24H2 | 26100.1742 | Windows Feature Experience Pack 1000.26100.18.0 |
-| Windows 10 Pro | 22H2 | 19045.2006 | Windows Feature Experience Pack 120.2212.4180.0 |
-| Windows 10 Education | 22H2 | 19045.6456 | |
+| Edition              | Version | OS Build   | Experience Pack |
+| -------------------- | ------- | ---------- | --------------- |
+| Windows 11 Pro       | 24H2    | 26100.1742 | 1000.26100.18.0 |
+| Windows 10 Pro       | 22H2    | 19045.2006 | 120.2212.4180.0 |
+| Windows 10 Education | 22H2    | 19045.6456 | —               |
 
-A separate clean-machine NSIS checklist (no developer toolchain on the guest) is recorded for Windows 11 Pro 10.0.26100 in [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
+A separate clean-machine install checklist is recorded in [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
 
 ### 2. Build from source
 
@@ -220,15 +216,15 @@ Tests, engine notes, and packaging details: [CONTRIBUTING.md](CONTRIBUTING.md) a
 
 ## Windows kernel symbols
 
-Volatility 3 cannot walk a Windows dump without type information for the kernel that produced it. That information is **build-specific**: a dump from Windows 11 24H2 (for example build 26100.1742) needs the PDB for that kernel, not a Windows 10 22H2 symbol file, and not a generic "Windows symbols" archive.
+Windows memory analysis requires kernel symbols matching the OS build captured in the memory image.
 
 The NSIS installer does **not** ship Microsoft PDBs or the large Volatility `windows.zip` pack. Dumplyzer asks the first time you start **Quick Triage**, **Complete Analysis**, or **Custom Analysis** on a Windows image whose symbols are not already cached. Linux images do not use this path.
 
-Two ways to continue. **Download is the recommended one.**
+Two workflows. **Download & Continue** is recommended.
 
 | Path | When to use |
 |------|-------------|
-| **Download & Continue** (recommended) | The machine can reach Microsoft. Dumplyzer fetches **only that dump's kernel PDB**, verifies it, converts it to a Volatility ISF, and caches it. Later dumps from the same build reuse the cache. Faster, and you do not have to hunt for the right file. |
+| **Download & Continue** (recommended) | The machine can reach Microsoft. Dumplyzer fetches **only that dump's kernel PDB**, verifies it, converts it to a Volatility ISF, and caches it. Later dumps from the same build reuse the cache. |
 | **Browse File** | Air-gapped or policy-blocked networks, or you already have the matching `.pdb` or ISF (`.json` / `.json.xz` / `.json.gz`). The file must match the captured kernel; a PDB from a different build will not analyze that dump. |
 
 Download never starts by itself. You confirm in the dialog. Closing the prompt keeps the imported dump; you can run analysis again when you are ready.
@@ -237,7 +233,9 @@ Cached symbols live under `%LOCALAPPDATA%\Dumplyzer\symbols\`, not in Program Fi
 
 ## Data locations
 
-Install binaries and user data are separate.
+The original memory image remains at its imported location. Dumplyzer does not copy it into the data directory.
+
+Install binaries and generated analysis data are separate.
 
 | Kind | Location |
 |------|----------|
@@ -251,9 +249,9 @@ Install binaries and user data are separate.
 
 Override the data directory with `DUMPLYZER_DATA_DIR` only for tests or support.
 
-Uninstall keeps user data unless **Delete app data** is checked. That option removes `%LOCALAPPDATA%\Dumplyzer\` (database, logs, cache, WebView2 profile) and leftover identifier folders such as `%LOCALAPPDATA%\com.dumplyzer.workbench\`. SQLite migrations are additive; opening an older `memscope.db` upgrades the schema and keeps existing evidence.
+Uninstall keeps user data unless **Delete app data** is checked. That option removes `%LOCALAPPDATA%\Dumplyzer\` (database, logs, cache, artifacts, exports, symbol cache, custom YARA rules, WebView2 profile) and leftover identifier folders such as `%LOCALAPPDATA%\com.dumplyzer.workbench\`. SQLite migrations are additive; opening an older `memscope.db` upgrades the schema and keeps existing evidence.
 
-This product was previously named MemScope. The engine import path remains `memscope_engine`, and the database file remains `memscope.db`. If `%LOCALAPPDATA%\MemScope\memscope.db` exists and the Dumplyzer database does not, first launch copies the older data directory. The source is not deleted.
+This product was previously named MemScope. The engine import path remains `memscope_engine`, and the database file remains `memscope.db`. If `%LOCALAPPDATA%\Dumplyzer\memscope.db` does not exist, first launch copies an older data directory from `%LOCALAPPDATA%\MemScope\` or `%APPDATA%\com.memscope.workbench\` when present. The source is not deleted.
 
 ## Documentation
 
@@ -267,9 +265,16 @@ This product was previously named MemScope. The engine import path remains `mems
 | [docs/windows-release.md](docs/windows-release.md) | How the NSIS installer is built |
 | [docs/clean-machine-validation.md](docs/clean-machine-validation.md) | Clean-machine install checklist |
 
+## What Dumplyzer is not
+
+- A malware verdict engine. YARA matches, CAPA capabilities, and carved strings are investigation indicators.
+- A cloud analysis service. There is no account, no telemetry, and no off-workstation analysis.
+- A replacement for Volatility 3. Dumplyzer uses Volatility 3 as the memory-analysis runtime and exposes supported plugins. The UI consumes normalized application data, not `vol.py` stdout.
+- An endpoint detection product. It analyzes imported memory images on a Windows x64 desktop.
+
 ## Security and limitations
 
-- Treat dumps and extracted artifacts as hostile.
+- Treat dumps and extracted artifacts as untrusted. Dumplyzer does not execute evidence.
 - Dumplyzer does not score malware and does not claim a verdict from signatures, capabilities, or strings.
 - The desktop application is Windows x64. Linux and macOS hosts are not a release target yet. Evidence is not limited to Windows dumps.
 - Unsigned 0.1.0 artifacts may be blocked by SmartScreen until a signed build is published.
