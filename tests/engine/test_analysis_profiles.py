@@ -886,3 +886,67 @@ def test_signatures_coverage_sums_both_yara_tabs(tmp_path: Path) -> None:
     assert items["signatures"]["count"] == 8
     db.close()
 
+
+def test_timeline_count_shows_after_page_rebuild(tmp_path: Path) -> None:
+    from memscope_engine.analysis.coverage import coverage_for_evidence
+
+    db, ev = _import(tmp_path)
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["timeline"]["state"] == "not_analyzed"
+    assert items["timeline"]["count"] is None
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, provenance_json, created_at
+        ) VALUES (?, ?, datetime('now'), 'observed', 'observed', 'process_create',
+          'pid 4', 'processes', '{}', datetime('now'))
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["timeline"]["state"] == "not_analyzed"
+    assert items["timeline"]["count"] == 1
+    db.close()
+
+
+def test_carved_data_count_sums_files_and_features(tmp_path: Path) -> None:
+    from memscope_engine.analysis.coverage import coverage_for_evidence
+
+    db, ev = _import(tmp_path)
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["artifacts"]["state"] == "not_analyzed"
+    assert items["artifacts"]["count"] is None
+    db.execute(
+        """
+        INSERT INTO artifacts (
+          id, evidence_id, filename, stored_path, sha256, size_bytes, file_type,
+          extraction_method, extracted_at, metadata_json
+        ) VALUES (?, ?, 'a.exe', 'a.exe', 'ab', 16, 'pe', 'pedump', datetime('now'), '{}')
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    db.execute(
+        """
+        INSERT INTO bulk_extractor_scans (
+          id, evidence_id, status, ui_state, feature_count, scanner_count,
+          invoked, observed_json, interpretation_json, started_at
+        ) VALUES (?, ?, 'completed', 'completed_features', 7, 1, 1, '{}', '{}', datetime('now'))
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    db.execute(
+        """
+        INSERT INTO bulk_extractor_scans (
+          id, evidence_id, status, ui_state, feature_count, scanner_count,
+          invoked, observed_json, interpretation_json, started_at, finished_at
+        ) VALUES (?, ?, 'cancelled', 'cancelled', 99, 0, 0, '{}', '{}', datetime('now', '-1 hour'), datetime('now'))
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    items = coverage_for_evidence(db, ev["id"])["items"]
+    assert items["artifacts"]["state"] == "not_analyzed"
+    assert items["artifacts"]["count"] == 8
+    db.close()
+
+

@@ -597,6 +597,19 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "coverageRefreshKey" in coverage_lib
     assert "coverageShownInView" in coverage_lib
     assert "onShownCountChange" in memory_view
+    timeline_view = (
+        root / "app" / "frontend" / "src" / "components" / "TimelineArtifactsViews.tsx"
+    ).read_text(encoding="utf-8")
+    artifacts_view = (
+        root / "app" / "frontend" / "src" / "components" / "ArtifactsView.tsx"
+    ).read_text(encoding="utf-8")
+    be_view = (
+        root / "app" / "frontend" / "src" / "components" / "BulkExtractorResults.tsx"
+    ).read_text(encoding="utf-8")
+    assert "onShownCountChange" in timeline_view
+    assert "onShownCountChange" in artifacts_view
+    assert "onCoverageRefresh" in timeline_view
+    assert "Artifact extraction ${scan.ui_state || scan.status}." not in be_view
     assert "sidebarCoverage" in app
     assert "coverageHasSearchableData" in coverage_lib
     assert "coverageProcessListReady" in coverage_lib

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
 import { engineCall, EngineClientError, openLocalFolder } from "../lib/api";
 import { CAPABILITY, UNAVAILABLE_DETAIL } from "../lib/analysisCapabilities";
@@ -123,6 +123,7 @@ export function ArtifactsView({
   jobsRunning = false,
   activeJobs = [],
   nowMs = Date.now(),
+  onShownCountChange,
 }: {
   evidenceId: string | null;
   onError: (m: string) => void;
@@ -132,6 +133,7 @@ export function ArtifactsView({
   jobsRunning?: boolean;
   activeJobs?: Job[];
   nowMs?: number;
+  onShownCountChange?: (count: number) => void;
 }) {
   const caps = useCapabilityStatus();
   const [items, setItems] = useState<Artifact[]>([]);
@@ -195,6 +197,10 @@ export function ArtifactsView({
     setYaraBundles([]);
     setCapaBundles([]);
     setFlossBundles([]);
+    setItems([]);
+    setPeBundles([]);
+    setBulkExtractorBundles([]);
+    setLoadedEvidenceId(null);
   }, [evidenceId]);
 
   useEffect(() => {
@@ -237,6 +243,16 @@ export function ArtifactsView({
     return "";
   }, []);
   const { sorted, sort, toggle } = useTableSort(visible, artifactSortValue);
+
+  const carvedShownCount = useMemo(() => {
+    const completed = bulkExtractorBundles.find((b) => b.scan.status === "completed");
+    const features = completed?.scan.feature_count ?? 0;
+    return items.length + features;
+  }, [bulkExtractorBundles, items.length]);
+
+  useLayoutEffect(() => {
+    onShownCountChange?.(carvedShownCount);
+  }, [carvedShownCount, onShownCountChange]);
 
   const openDetail = useCallback(async (id: string) => {
     try {
@@ -295,7 +311,12 @@ export function ArtifactsView({
 
   const loading = loadedEvidenceId !== evidenceId;
   const latestPe = peBundles[0]?.run;
-  const latestBe = bulkExtractorBundles[0];
+  const latestBe =
+    bulkExtractorBundles.find((b) => b.scan.status === "completed") ??
+    bulkExtractorBundles.find(
+      (b) => b.scan.status === "running" || b.scan.status === "queued",
+    ) ??
+    null;
   const extractedCount = latestPe?.extracted_count ?? visible.filter((a) => a.file_type === "pe").length;
   const actionsLocked = busy || jobsRunning || coverageIsUpdating(coverage);
   const peAvailable = Boolean(peStatus?.available);
@@ -399,7 +420,11 @@ export function ArtifactsView({
                 }
               />
             ) : latestBe ? (
-              <BulkExtractorResults bundle={latestBe} onError={onError} />
+              <BulkExtractorResults
+                key={latestBe.scan.id}
+                bundle={latestBe}
+                onError={onError}
+              />
             ) : (
               <EmptyHint
                 title="No carved artifacts yet."

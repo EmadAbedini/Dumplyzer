@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
 import { activeJobOfKind, isActiveJobStatus } from "../lib/analysisOptions";
 import {
@@ -256,13 +256,9 @@ export function MemoryExplorerView({
   const loading = Boolean(listKey) && loadedKey !== listKey;
   const shownCount = activePid == null ? 0 : visibleRegions.length;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onShownCountChange?.(shownCount);
   }, [shownCount, onShownCountChange]);
-
-  useEffect(() => {
-    return () => onShownCountChange?.(0);
-  }, [onShownCountChange]);
 
   if (!evidenceId) {
     return <ImportEvidenceState title="Memory / VAD" />;

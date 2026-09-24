@@ -21,8 +21,9 @@ from memscope_engine.storage import Database
 # Standalone analysis_runs.kind values that mean a capability executed.
 # Plugin Explorer (`plugin_advanced`) is intentionally omitted so dlllist/netscan
 # there cannot mark evidence-wide Modules/Network as analyzed.
-# Page-level iocs.extract / timeline.build do not write analysis_runs; coverage
-# for those capabilities comes from analysis_profile steps (or a later profile run).
+# Page-level iocs.extract does not write analysis_runs; IOC coverage comes from
+# analysis_profile steps (or a later profile run). Timeline/Carved Data still
+# expose a count when stored rows exist after a page-level rebuild or carve.
 KIND_CAPABILITIES: dict[str, tuple[str, ...]] = {
     "basic_triage": ("processes",),
     "process_recommended": ("recommended", "process_deep_dive"),
@@ -134,11 +135,7 @@ def _counts(db: Database, evidence_id: str) -> dict[str, int]:
         )
         if _table_exists(db, "memory_regions")
         else 0,
-        "artifacts": _count(
-            db, "SELECT COUNT(*) AS c FROM artifacts WHERE evidence_id = ?", (evidence_id,)
-        )
-        if _table_exists(db, "artifacts")
-        else 0,
+        "artifacts": _carved_data_count(db, evidence_id),
         "signatures": _count(
             db,
             "SELECT COALESCE(SUM(match_count), 0) AS c FROM yara_scans WHERE evidence_id = ?",
@@ -150,6 +147,27 @@ def _counts(db: Database, evidence_id: str) -> dict[str, int]:
         "process_deep_dive": 0,
     }
     return out
+
+
+def _carved_data_count(db: Database, evidence_id: str) -> int:
+    """Extracted files plus unique values from the latest completed carve."""
+    files = (
+        _count(db, "SELECT COUNT(*) AS c FROM artifacts WHERE evidence_id = ?", (evidence_id,))
+        if _table_exists(db, "artifacts")
+        else 0
+    )
+    features = 0
+    if _table_exists(db, "bulk_extractor_scans"):
+        row = db.fetchone(
+            """
+            SELECT feature_count AS c FROM bulk_extractor_scans
+            WHERE evidence_id = ? AND status = 'completed'
+            ORDER BY started_at DESC LIMIT 1
+            """,
+            (evidence_id,),
+        )
+        features = int(row["c"] or 0) if row else 0
+    return files + features
 
 
 def _capability_ids(raw: Any) -> set[str]:
@@ -321,7 +339,8 @@ def coverage_for_evidence(db: Database, evidence_id: str) -> dict[str, Any]:
             items[cid] = _item(cid, "failed", None)
         else:
             n = int(count or 0)
-            show_count = updating or (n > 0 and (cid in sourced or in_progress))
+            stored = cid in ("timeline", "artifacts")
+            show_count = updating or (n > 0 and (cid in sourced or in_progress or stored))
             items[cid] = _item(
                 cid,
                 "not_analyzed",

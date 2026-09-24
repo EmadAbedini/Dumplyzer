@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
 import { TimestampText } from "../lib/datetime";
 import { matchesFieldQuery } from "../lib/resultFilter";
@@ -145,6 +145,8 @@ export function TimelineView({
   refreshToken,
   coverage,
   analysisCoverage,
+  onShownCountChange,
+  onCoverageRefresh,
 }: {
   evidenceId: string | null;
   onOpenProcess: (processId: string) => void;
@@ -152,6 +154,8 @@ export function TimelineView({
   refreshToken?: number | string;
   coverage?: CapabilityCoverage;
   analysisCoverage?: AnalysisCoverage;
+  onShownCountChange?: (count: number) => void;
+  onCoverageRefresh?: () => void;
 }) {
   const [items, setItems] = useState<TimelineEvent[]>([]);
   const [loadedEvidenceId, setLoadedEvidenceId] = useState<string | null>(null);
@@ -186,6 +190,8 @@ export function TimelineView({
     setTimeRange(null);
     setSpanId("auto");
     setBuiltHere(false);
+    setItems([]);
+    setLoadedEvidenceId(null);
   }, [evidenceId]);
 
   const rebuild = async () => {
@@ -199,6 +205,7 @@ export function TimelineView({
       setLoadedEvidenceId(evidenceId);
       setBuiltHere(true);
       showToast("Timeline rebuilt from stored analysis results.");
+      onCoverageRefresh?.();
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
     } finally {
@@ -207,6 +214,10 @@ export function TimelineView({
   };
 
   const dumpItems = useMemo(() => items.filter((e) => !isAnalysisClock(e)), [items]);
+
+  useLayoutEffect(() => {
+    onShownCountChange?.(dumpItems.length);
+  }, [dumpItems.length, onShownCountChange]);
 
   const eventTimes = useMemo(() => {
     const times: number[] = [];

@@ -100,6 +100,8 @@ export default function App() {
   const [processes, setProcesses] = useState<ProcessRow[]>([]);
   const [processTotal, setProcessTotal] = useState(0);
   const [memoryShownCount, setMemoryShownCount] = useState(0);
+  const [timelineShownCount, setTimelineShownCount] = useState<number | null>(null);
+  const [artifactsShownCount, setArtifactsShownCount] = useState<number | null>(null);
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
   const [jobTick, setJobTick] = useState(0);
   const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
@@ -391,6 +393,8 @@ export default function App() {
       setProcessTotal(0);
       lastProcessCountRef.current = null;
       setMemoryShownCount(0);
+      setTimelineShownCount(null);
+      setArtifactsShownCount(null);
       setOverview(null);
       setEvidence(imported);
       setNav("overview");
@@ -717,6 +721,8 @@ export default function App() {
     setProcessTotal(0);
     lastProcessCountRef.current = null;
     setMemoryShownCount(0);
+    setTimelineShownCount(null);
+    setArtifactsShownCount(null);
     setSelectedProcessId(null);
     setNav("overview");
     void engineCall("jobs.reset_visible")
@@ -801,8 +807,23 @@ export default function App() {
         ...coverage,
         items: {
           ...coverage.items,
-          memory_vad: coverageShownInView(coverageItem(coverage, "memory_vad"), memoryShownCount) ??
+          memory_vad:
+            coverageShownInView(coverageItem(coverage, "memory_vad"), memoryShownCount) ??
             coverageItem(coverage, "memory_vad"),
+          timeline:
+            timelineShownCount != null && timelineShownCount > 0
+              ? coverageShownInView(
+                  coverageItem(coverage, "timeline"),
+                  timelineShownCount,
+                ) ?? coverageItem(coverage, "timeline")
+              : coverageItem(coverage, "timeline"),
+          artifacts:
+            artifactsShownCount != null && artifactsShownCount > 0
+              ? coverageShownInView(
+                  coverageItem(coverage, "artifacts"),
+                  artifactsShownCount,
+                ) ?? coverageItem(coverage, "artifacts")
+              : coverageItem(coverage, "artifacts"),
         },
       }
     : coverage;
@@ -995,6 +1016,10 @@ export default function App() {
           refreshToken={coverageTick}
           coverage={coverageItem(coverage, "timeline")}
           analysisCoverage={coverage}
+          onShownCountChange={setTimelineShownCount}
+          onCoverageRefresh={() => {
+            if (evidence) void refreshOverview(evidence);
+          }}
         />
       );
       break;
@@ -1009,6 +1034,7 @@ export default function App() {
           jobsRunning={jobsRunning}
           activeJobs={activeJobs}
           nowMs={nowMs}
+          onShownCountChange={setArtifactsShownCount}
         />
       );
       break;

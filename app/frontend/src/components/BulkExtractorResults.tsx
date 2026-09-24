@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engineCall, EngineClientError } from "../lib/api";
 import { matchesFieldQuery } from "../lib/resultFilter";
 import { useTableSort } from "../lib/tableSort";
@@ -78,66 +78,72 @@ export function BulkExtractorResults({
   const [filterField, setFilterField] = useState("all");
   const [hideWeak, setHideWeak] = useState(true);
   const [loading, setLoading] = useState(false);
+  const loadGen = useRef(0);
   const { toast, showToast } = useStatusToast();
 
   const categories = page?.categories?.length
     ? page.categories
     : (scan?.categories as BulkExtractorCategory[] | undefined) ?? [];
-
-  useEffect(() => {
-    if (!categories.length) return;
-    if (!category || !categories.some((c) => c.id === category)) {
-      setCategory(categories[0].id);
-    }
-  }, [categories, category]);
+  const selectedCategory =
+    (category && categories.some((c) => c.id === category) ? category : categories[0]?.id) ??
+    "";
+  const pageMatches =
+    page != null &&
+    page.scan_id === scan?.id &&
+    (page.category || "") === selectedCategory &&
+    (selectedCategory !== "aes_keys" || Boolean(page.hide_weak) === hideWeak);
 
   const load = useCallback(async () => {
     if (!scan?.id) {
       setPage(null);
       return;
     }
+    if (!selectedCategory && categories.length) return;
+    const gen = ++loadGen.current;
     setLoading(true);
     try {
       const res = await engineCall<BulkExtractorFeaturePage>("bulk_extractor.features", {
         scan_id: scan.id,
-        category: category || undefined,
-        hide_weak: category === "aes_keys" ? hideWeak : false,
+        category: selectedCategory || undefined,
+        hide_weak: selectedCategory === "aes_keys" ? hideWeak : false,
         limit: 800,
         offset: 0,
       });
+      if (gen !== loadGen.current) return;
       setPage(res);
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setPage(null);
       onError(e instanceof EngineClientError ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
-  }, [scan?.id, category, hideWeak, onError]);
+  }, [scan?.id, selectedCategory, categories.length, hideWeak, onError]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const items = page?.items ?? [];
+  const items = pageMatches && page ? page.items : [];
   const filtered = useMemo(
     () =>
       items.filter((item) =>
-        matchesFieldQuery(filter, filterField, featureFields(item, category), [
+        matchesFieldQuery(filter, filterField, featureFields(item, selectedCategory), [
           item.scanner,
           JSON.stringify(item.extra || {}),
         ]),
       ),
-    [items, filter, filterField, category],
+    [items, filter, filterField, selectedCategory],
   );
 
   const sortValue = useCallback(
     (item: BulkExtractorFeature, key: string) => {
-      const fields = featureFields(item, category);
+      const fields = featureFields(item, selectedCategory);
       if (key === "count") return item.count;
       if (key === "size") return extraNumber(item.extra, "size_bytes") ?? 0;
       return String(fields[key] ?? "");
     },
-    [category],
+    [selectedCategory],
   );
   const { sorted, sort, toggle } = useTableSort(filtered, sortValue);
 
@@ -161,22 +167,26 @@ export function BulkExtractorResults({
     );
   }
 
+  if (scan.status === "running" || scan.status === "queued") {
+    return <CenteredLoading label="Carving artifacts…" />;
+  }
+
   if (scan.status !== "completed") {
     return (
-      <CenteredLoading
-        label={
-          scan.status === "running" || scan.status === "queued"
-            ? "Carving artifacts…"
-            : `Artifact extraction ${scan.ui_state || scan.status}.`
-        }
-      />
+      <div className="flex min-h-[16rem] flex-1 flex-col items-center justify-center px-6 py-16 text-center">
+        <div className="text-sm font-semibold">No carved artifacts yet.</div>
+        <p className="mt-2 max-w-sm text-sm leading-5 text-muted">
+          Carve artifacts from this memory image.
+        </p>
+      </div>
     );
   }
 
-  const active = categories.find((c) => c.id === category);
+  const active = categories.find((c) => c.id === selectedCategory);
+  const uniqueTotal = pageMatches && page ? page.total : (active?.unique_count ?? 0);
   const totalLabel = active
-    ? `${(page?.total ?? active.unique_count).toLocaleString()} unique ${active.label.toLowerCase()}`
-    : `${scan.feature_count.toLocaleString()} unique values`;
+    ? `${uniqueTotal.toLocaleString()} unique ${active.label.toLowerCase()}`
+    : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col text-xs">
@@ -198,14 +208,14 @@ export function BulkExtractorResults({
               title={c.description}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium",
-                c.id === category
+                c.id === selectedCategory
                   ? "border-accent bg-accent text-accent-fg"
                   : "border-border bg-surface-2 text-muted hover:text-foreground",
               )}
               onClick={() => setCategory(c.id)}
             >
               <span>{c.label}</span>
-              <span className={c.id === category ? "opacity-90" : "text-muted"}>
+              <span className={c.id === selectedCategory ? "opacity-90" : "text-muted"}>
                 {c.unique_count.toLocaleString()}
               </span>
             </button>
@@ -229,7 +239,7 @@ export function BulkExtractorResults({
               { id: "network", label: "Network" },
             ]}
           />
-          {category === "aes_keys" ? (
+          {selectedCategory === "aes_keys" ? (
             <Button
               size="sm"
               variant={hideWeak ? "default" : "outline"}
@@ -258,7 +268,7 @@ export function BulkExtractorResults({
           </div>
         ) : (
           <FeatureTable
-            category={category}
+            category={selectedCategory}
             items={sorted}
             sort={sort}
             onToggle={toggle}
