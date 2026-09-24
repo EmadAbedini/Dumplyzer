@@ -524,7 +524,13 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "modules.list": lambda p: process_analysis.list_modules(
         _db(), p["evidence_id"], pid=p.get("pid")
     ),
-    "findings.list": lambda p: process_analysis.list_findings(_db(), p["evidence_id"]),
+    "findings.list": lambda p: process_analysis.list_findings(
+        _db(),
+        p["evidence_id"],
+        severity=p.get("severity"),
+        limit=int(p["limit"]) if p.get("limit") is not None else None,
+        offset=int(p.get("offset") or 0),
+    ),
     "search.query": lambda p: search_iocs.global_search(
         _db(),
         p["evidence_id"],

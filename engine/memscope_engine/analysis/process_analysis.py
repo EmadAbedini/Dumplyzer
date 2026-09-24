@@ -775,12 +775,91 @@ def list_modules(db: Database, evidence_id: str, pid: int | None = None) -> dict
     }
 
 
-def list_findings(db: Database, evidence_id: str) -> dict[str, Any]:
+def _canonical_finding_severity(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value in ("", "informational"):
+        return "info"
+    return value or "info"
+
+
+def _severity_filter_values(severity: str) -> tuple[str, ...]:
+    key = _canonical_finding_severity(severity)
+    if key == "info":
+        return ("info", "informational", "")
+    return (key,)
+
+
+def _finding_count(
+    db: Database, evidence_id: str, severity: str | None = None
+) -> int:
+    sql = "SELECT COUNT(*) AS n FROM findings WHERE evidence_id = ?"
+    args: list[Any] = [evidence_id]
+    if severity:
+        values = _severity_filter_values(severity)
+        sql += " AND LOWER(TRIM(IFNULL(severity, ''))) IN ({})".format(
+            ",".join("?" * len(values))
+        )
+        args.extend(values)
+    row = db.fetchone(sql, tuple(args))
+    return int((row or {}).get("n") or 0)
+
+
+def _finding_severity_counts(db: Database, evidence_id: str) -> dict[str, int]:
     rows = db.fetchall(
-        "SELECT * FROM findings WHERE evidence_id = ? ORDER BY created_at DESC",
+        """
+        SELECT severity, COUNT(*) AS n FROM findings
+        WHERE evidence_id = ? GROUP BY severity
+        """,
         (evidence_id,),
     )
-    return {"evidence_id": evidence_id, "total": len(rows), "items": [_finding_dto(r) for r in rows]}
+    out: dict[str, int] = {}
+    for row in rows:
+        key = _canonical_finding_severity(row.get("severity"))
+        out[key] = out.get(key, 0) + int(row["n"] or 0)
+    return out
+
+
+def list_findings(
+    db: Database,
+    evidence_id: str,
+    *,
+    severity: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> dict[str, Any]:
+    total = _finding_count(db, evidence_id, severity)
+    sql = "SELECT * FROM findings WHERE evidence_id = ?"
+    args: list[Any] = [evidence_id]
+    if severity:
+        values = _severity_filter_values(severity)
+        sql += " AND LOWER(TRIM(IFNULL(severity, ''))) IN ({})".format(
+            ",".join("?" * len(values))
+        )
+        args.extend(values)
+    sql += """
+        ORDER BY CASE LOWER(TRIM(IFNULL(severity, '')))
+          WHEN 'critical' THEN 0
+          WHEN 'high' THEN 1
+          WHEN 'medium' THEN 2
+          WHEN 'low' THEN 3
+          WHEN 'info' THEN 4
+          WHEN 'informational' THEN 4
+          ELSE 50
+        END, created_at DESC
+    """
+    start = max(0, int(offset or 0))
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        args.extend([max(0, int(limit)), start])
+    rows = db.fetchall(sql, tuple(args))
+    return {
+        "evidence_id": evidence_id,
+        "total": total,
+        "items": [_finding_dto(r) for r in rows],
+        "severity_counts": _finding_severity_counts(db, evidence_id),
+        "offset": start,
+        "limit": int(limit) if limit is not None else None,
+    }
 
 
 def _insert_process(db: Database, p: dict[str, Any]) -> None:

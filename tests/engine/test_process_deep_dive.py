@@ -16,7 +16,7 @@ from memscope_engine.volatility.normalize import (
     normalize_netscan,
     normalize_vadinfo,
 )
-from memscope_engine.analysis.process_analysis import get_process_deep_dive
+from memscope_engine.analysis.process_analysis import get_process_deep_dive, list_findings
 from memscope_engine.analysis.workflows import import_evidence
 from uuid import uuid4
 
@@ -152,3 +152,42 @@ def test_process_deep_dive_empty_related(tmp_path: Path) -> None:
     assert dive["counts"]["modules"] == 0
     assert dive["modules"] == []
     db.close()
+
+
+def test_list_findings_severity_filter_and_pagination(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.db")
+    img = tmp_path / "t.raw"
+    img.write_bytes(b"findings-page")
+    ev = import_evidence(db, str(img))
+    now = "2020-01-01T00:00:00+00:00"
+    for i, sev in enumerate(("high", "high", "medium", "low", "info", "informational")):
+        db.execute(
+            """
+            INSERT INTO findings (
+              id, evidence_id, finding_type, severity, explanation, created_at
+            ) VALUES (?, ?, 'encoded_powershell', ?, ?, ?)
+            """,
+            (str(uuid4()), ev["id"], sev, f"finding {i}", now),
+        )
+    listed = list_findings(db, ev["id"])
+    assert listed["total"] == 6
+    assert len(listed["items"]) == 6
+    assert listed["severity_counts"]["high"] == 2
+    assert listed["severity_counts"]["medium"] == 1
+    assert listed["severity_counts"]["low"] == 1
+    assert listed["severity_counts"]["info"] == 2
+    page = list_findings(db, ev["id"], limit=1, offset=0)
+    assert len(page["items"]) == 1
+    assert page["total"] == 6
+    next_page = list_findings(db, ev["id"], limit=1, offset=1)
+    assert len(next_page["items"]) == 1
+    assert page["items"][0]["id"] != next_page["items"][0]["id"]
+    high = list_findings(db, ev["id"], severity="high")
+    assert high["total"] == 2
+    assert len(high["items"]) == 2
+    assert all(i["severity"] == "high" for i in high["items"])
+    info = list_findings(db, ev["id"], severity="info")
+    assert info["total"] == 2
+    assert {i["severity"] for i in info["items"]} == {"info", "informational"}
+    db.close()
+

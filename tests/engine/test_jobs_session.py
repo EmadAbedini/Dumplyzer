@@ -617,6 +617,12 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "STORED_ACTION_TITLE" in scope
     assert "limitedResultsNote" in scope
     assert "findingsScopeNote" in scope
+    investigation = (
+        root / "app" / "frontend" / "src" / "components" / "InvestigationViews.tsx"
+    ).read_text(encoding="utf-8")
+    assert "Filter type" in investigation
+    assert "Load more" in investigation
+    assert "FINDING_PAGE" in investigation
     assert "iocsScopeNote" in scope
     assert "searchScopeNote" in scope
     assert "jobProgressPercentText" in dive

@@ -17,10 +17,14 @@ const SEVERITY_RANK: Record<string, number> = {
   informational: 4,
 };
 
-export function findingTitle(finding: Finding): string {
-  const raw = (finding.finding_type || "").trim();
+export function findingTypeLabel(findingType: string): string {
+  const raw = (findingType || "").trim();
   if (!raw) return "Finding";
   return TITLE_COPY[raw] ?? humanizeToken(raw);
+}
+
+export function findingTitle(finding: Finding): string {
+  return findingTypeLabel(finding.finding_type);
 }
 
 export function findingSeverity(finding: Finding): string {
