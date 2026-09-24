@@ -194,7 +194,9 @@ npm ci
 npm run tauri dev
 ```
 
-That starts the investigation UI against the local Python engine. To keep this session's data separate from an installed copy of Dumplyzer:
+The first `tauri dev` compiles the Rust shell and can take several minutes. After that, the investigation UI starts against the local Python engine. Empty Evidence is a valid first-launch state.
+
+To keep this session's data separate from an installed copy of Dumplyzer, start again from the repository root:
 
 ```powershell
 $env:DUMPLYZER_DATA_DIR = "$env:TEMP\dumplyzer-dev"
@@ -204,7 +206,7 @@ npm run tauri dev
 
 #### Produce the Windows installer
 
-This step is heavier: it downloads the pinned CPython embeddable runtime and bundled tools, then builds the NSIS setup EXE.
+This step is heavier: it downloads the pinned CPython embeddable runtime and bundled tools, then builds the NSIS setup EXE. Run it from the repository root. Stop `tauri dev` first if that process is still running.
 
 ```powershell
 .\scripts\windows\build-release.ps1
