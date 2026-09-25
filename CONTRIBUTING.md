@@ -1,19 +1,19 @@
 # Contributing
 
-End users should install Dumplyzer from the Windows setup EXE ([README](README.md#install)). This document is for people changing the source.
+End users should install Dumplyzer from the Windows setup EXE ([README](README.md#install)). This document is for contributors working on the source code.
 
 Prefer packaging, reliability, security, tests, and documentation unless a change is a clear bug fix or a discussed forensic feature. Architecture: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Developer machine
 
-| Tool | Pinned / tested |
-|------|-----------------|
-| Windows x64 | 10 21H2+ / 11 |
-| Python | **3.12.10** (`py -3.12`) |
-| Node.js / npm | **22.18.0** / 10.9.3 |
-| Rust / cargo | **1.98.1** (`stable-x86_64-pc-windows-msvc`) |
-| MSVC Build Tools | VS 2022 |
-| WebView2 | Evergreen |
+| Tool             | Pinned / tested                              |
+| ---------------- | -------------------------------------------- |
+| Windows x64      | 10 21H2+ / 11                                |
+| Python           | **3.12.10** (`py -3.12`)                     |
+| Node.js / npm    | **22.18.0** / 10.9.3                         |
+| Rust / cargo     | **1.98.1** (`stable-x86_64-pc-windows-msvc`) |
+| MSVC Build Tools | VS 2022                                      |
+| WebView2         | Evergreen                                    |
 
 Do not use a global Python 3.13 environment for the engine. `rust-toolchain.toml` pins Rust **1.98.1** for this repository.
 
