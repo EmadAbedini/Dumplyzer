@@ -1,8 +1,12 @@
 # Dumplyzer architecture
 
-Offline Windows x64 desktop workbench for Volatility 3 memory forensics.
+Local-first Windows x64 desktop workbench for memory forensics.
 
 React UI → Tauri 2 shell → bundled Python 3.12 engine → Volatility 3 APIs.
+
+The application host is Windows x64. Evidence may be Windows or Linux memory images.
+Linux images are explored through Plugin Explorer (`linux.*` plugins). Quick Triage
+and Complete Analysis currently provide the guided Windows Volatility workflow.
 
 Dumplyzer is not a CLI wrapper, not a cloud product, and does not score malware.
 
@@ -15,7 +19,7 @@ Tauri 2 shell (app/desktop, Rust)
         │  JSON-RPC NDJSON over stdio
 Python engine (engine/memscope_engine)
         │  Volatility 3 APIs, optional tool EXEs
-Memory image on disk (never copied into the install tree)
+Memory image on disk (read-only; never copied into the install tree)
 ```
 
 The UI consumes normalized application data, not `vol.py` stdout.
@@ -61,16 +65,19 @@ argument array (no shell). Packaged builds use `<install>\resources\runtime\pyth
 
 ### Engine (`engine/memscope_engine`)
 
-Forensic analysis, SQLite persistence, job queue, Volatility 3 adapter, and provider workflows
-(PE Extraction, Signature Detection, CAPA, FLOSS, bulk_extractor, network artifacts, PCAP reconstruction).
+Forensic analysis, SQLite persistence, job queue, Volatility 3 adapter, kernel-symbol fetch,
+and provider workflows (PE Extraction, Signature Detection, CAPA, FLOSS, bulk_extractor,
+network artifacts, PCAP reconstruction).
 
 ## IPC
 
 Frontend ↔ Tauri: commands for request/response, events for job progress and engine status.
 
-Tauri ↔ engine: JSON-RPC 2.0 NDJSON on stdin/stdout. stderr is for bootstrap failures only.
-Stdio is used instead of a localhost HTTP port so the product stays offline-first and does not
-open a network listener.
+Tauri ↔ engine: JSON-RPC 2.0 NDJSON on stdin/stdout. Stdio is used instead of a localhost HTTP
+port so the product does not open a network listener.
+
+stdout is reserved for RPC. Structured engine logs go under the user-data `logs\` directory.
+stderr is for bootstrap failures and warnings only, so they cannot corrupt the RPC stream.
 
 ## Volatility 3
 
@@ -80,6 +87,10 @@ discovers the installed registry dynamically. Failed imports are listed and are 
 
 The memory image is never loaded into SQLite. Evidence rows store path, hash, and metadata.
 
+Windows analysis needs the kernel PDB (or Volatility ISF) for **that dump's OS build**.
+Cached symbols live under `%LOCALAPPDATA%\Dumplyzer\symbols\`, not in Program Files.
+Download & Continue is an explicit, consented job; Linux images do not use this path.
+
 ## Data locations
 
 | Kind | Location |
@@ -87,6 +98,9 @@ The memory image is never loaded into SQLite. Evidence rows store path, hash, an
 | Install | `%ProgramFiles%\Dumplyzer\` |
 | User data | `%LOCALAPPDATA%\Dumplyzer\` |
 | Database | `%LOCALAPPDATA%\Dumplyzer\memscope.db` |
+| Logs / cache / artifacts / exports | under the user-data directory |
+| UI profile (WebView2) | `%LOCALAPPDATA%\Dumplyzer\webview\` |
+| Kernel symbols | `%LOCALAPPDATA%\Dumplyzer\symbols\` |
 | Signature rules | `%LOCALAPPDATA%\Dumplyzer\rules\yara\` (`bundled\` refreshed, `custom\` never overwritten) |
 
 Override the data directory with `DUMPLYZER_DATA_DIR` (or the legacy `MEMSCOPE_DATA_DIR` alias)
@@ -125,14 +139,16 @@ parameters, and schema version. Cache hits still create execution rows with `cac
 |------------|------|----------|
 | Volatility 3 | Memory analysis | Bundled in the engine runtime (2.28.0) |
 | PE Extraction | Reconstruct EXE/DLL from the dump | Volatility 3 workflow, not a separate EXE |
-| Signature Detection | YARA on the dump and/or extracted PE | Bundled yara-python 4.5.4 + curated rules |
+| Signature Detection | YARA on the dump and/or extracted files | Bundled yara-python 4.5.4 + curated rules |
 | CAPA | Capabilities on extracted PE | Bundled official Windows EXE v9.4.0 |
 | FLOSS | Strings on extracted PE | Bundled official Windows EXE v3.1.1 |
 | bulk_extractor | Feature extraction on the dump | Bundled official Windows EXE v2.2.0 (GPLv3, separate process) |
+| Network artifacts | Harvest indicators from stored analysis | Engine workflow; included in Complete Analysis |
+| PCAP reconstruction | Carve Ethernet/IP records to `.pcap` | Engine workflow; explicit job |
 
-These jobs are explicit. Complete Analysis does not auto-run Signature Detection, CAPA, FLOSS,
-bulk_extractor, or PE Extraction. Extracted PE files are labeled artifacts, not malware, and
-are never executed.
+Signature Detection, CAPA, FLOSS, bulk_extractor, PE Extraction, and PCAP reconstruction are
+explicit jobs. Complete Analysis does not auto-run them. Extracted PE files are labeled
+artifacts, not malware, and are never executed.
 
 PE-sieve and mal_unpack are not part of Dumplyzer. Older SQLite tables remain so existing
 databases still open.
@@ -145,6 +161,8 @@ databases still open.
 - Exports are written only under the user-data `exports\` directory.
 - Packaged Python uses `python312._pth` isolation, `PYTHONNOUSERSITE=1`, and a reduced `PATH`.
 - HTML reports are static (`html.escape`, no JavaScript, no CDN).
+- The only optional Microsoft downloads are WebView2 during setup if the runtime is missing,
+  and one kernel PDB after in-app consent.
 
 See `SECURITY.md`.
 
@@ -152,7 +170,8 @@ See `SECURITY.md`.
 
 One NSIS installer (`Dumplyzer_0.1.0_x64-setup.exe`), default `%ProgramFiles%\Dumplyzer`,
 elevation required. The small WebView2 Evergreen bootstrapper is packed (`embedBootstrapper`).
-If WebView2 is missing, that bootstrapper downloads the runtime during setup.
+If WebView2 is already present, setup skips it. If it is missing, setup asks before downloading
+from Microsoft; declining or cancelling that download exits setup.
 
 The engine runtime is official CPython 3.12.10 embeddable plus `site-packages`. Not PyInstaller.
 Not a first-run venv. Generated `app/desktop/resources/runtime/` is gitignored.
@@ -165,7 +184,7 @@ Implemented methods in `engine/memscope_engine/server.py`:
 
 | Area | Methods |
 |------|---------|
-| Lifecycle | `health`, `app.init`, `app.paths`, `app.shutdown`, `volatility.init`, `smoke.e2e` |
+| Lifecycle | `health`, `app.init`, `app.paths`, `app.shutdown`, `volatility.init`, `capabilities.status`, `smoke.e2e` |
 | Evidence | `evidence.import`, `evidence.list`, `evidence.get`, `evidence.analyze_basic` |
 | Analysis | `analysis.profiles`, `analysis.run`, `overview.get` |
 | Processes | `processes.list`, `process.get`, `process.analyze_recommended` |
@@ -175,9 +194,10 @@ Implemented methods in `engine/memscope_engine/server.py`:
 | YARA | `yara.status`, `yara.reload`, `yara.configure`, `yara.scan_*`, `yara.scans_*`, `yara.scan_get`, `yara.matches_for_evidence` |
 | PE / CAPA / FLOSS | `pe_extraction.*`, `capa.*`, `floss.*` |
 | bulk_extractor | `bulk_extractor.status`, `bulk_extractor.configure`, `bulk_extractor.scan`, `bulk_extractor.scans`, `bulk_extractor.scan_get`, `bulk_extractor.features` |
-| Plugins | `plugins.list`, `plugins.get`, `plugins.validate`, `plugins.execute`, `plugins.execution_get`, `plugins.executions` |
+| Plugins | `plugins.warmup`, `plugins.list`, `plugins.get`, `plugins.validate`, `plugins.execute`, `plugins.execution_get`, `plugins.executions` |
 | Export | `export.options`, `export.generate`, `export.list`, `export.get`, `export.delete` |
-| Jobs | `jobs.submit`, `jobs.get`, `jobs.list`, `jobs.cancel` |
+| Jobs | `jobs.submit`, `jobs.get`, `jobs.list`, `jobs.cancel`, `jobs.reset_visible` |
+| Symbols | `symbols.fetch`, `symbols.save_pdb`, `symbols.import_file` |
 
 ## Tests
 
