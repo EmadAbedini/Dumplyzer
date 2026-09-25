@@ -639,7 +639,7 @@ export function IocsView({
                 type="button"
                 onClick={() => setTypeFilter(active ? null : type)}
                 className={cn(
-                  "cursor-pointer rounded-md border px-1.5 py-0.5 text-[0.78rem] font-medium uppercase tracking-wide",
+                  "h-6 cursor-pointer rounded-md border px-1.5 text-[0.78rem] font-medium uppercase leading-none tracking-wide",
                   active
                     ? "border-accent bg-accent/15 text-accent"
                     : "border-border bg-surface-2 text-muted hover:bg-surface-2/80 hover:text-foreground",
@@ -649,11 +649,21 @@ export function IocsView({
               </button>
             );
           })}
-          {typeFilter ? (
-            <Button size="sm" variant="ghost" onClick={() => setTypeFilter(null)}>
-              Clear
-            </Button>
-          ) : null}
+          <button
+            type="button"
+            disabled={!typeFilter}
+            aria-hidden={!typeFilter}
+            tabIndex={typeFilter ? 0 : -1}
+            onClick={() => setTypeFilter(null)}
+            className={cn(
+              "h-6 rounded-md border px-1.5 text-[0.78rem] font-medium leading-none",
+              typeFilter
+                ? "cursor-pointer border-border bg-transparent text-muted hover:bg-surface-2/80 hover:text-foreground"
+                : "invisible pointer-events-none",
+            )}
+          >
+            Clear
+          </button>
         </div>
       ) : null}
       <div className="border-b border-border px-3 py-2">

@@ -352,7 +352,7 @@ export function FindingsView({
                 type="button"
                 onClick={() => setSeverityFilter(active ? null : severity)}
                 className={cn(
-                  "cursor-pointer rounded-md border px-1.5 py-0.5 text-[0.78rem] font-medium capitalize",
+                  "h-6 cursor-pointer rounded-md border px-1.5 text-[0.78rem] font-medium capitalize leading-none",
                   active
                     ? "border-accent bg-accent/15 text-accent"
                     : "border-border bg-surface-2 text-muted hover:bg-surface-2/80 hover:text-foreground",
@@ -362,11 +362,21 @@ export function FindingsView({
               </button>
             );
           })}
-          {severityFilter ? (
-            <Button size="sm" variant="ghost" onClick={() => setSeverityFilter(null)}>
-              Clear
-            </Button>
-          ) : null}
+          <button
+            type="button"
+            disabled={!severityFilter}
+            aria-hidden={!severityFilter}
+            tabIndex={severityFilter ? 0 : -1}
+            onClick={() => setSeverityFilter(null)}
+            className={cn(
+              "h-6 rounded-md border px-1.5 text-[0.78rem] font-medium leading-none",
+              severityFilter
+                ? "cursor-pointer border-border bg-transparent text-muted hover:bg-surface-2/80 hover:text-foreground"
+                : "invisible pointer-events-none",
+            )}
+          >
+            Clear
+          </button>
         </div>
       ) : null}
       <div className="border-b border-border px-3 py-2">
