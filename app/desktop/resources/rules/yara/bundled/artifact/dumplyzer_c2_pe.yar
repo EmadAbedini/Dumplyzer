@@ -82,3 +82,63 @@ rule dumplyzer_c2_covenant_pe : c2 artifact
     condition:
         $mz at 0 and 2 of ($s*)
 }
+
+rule dumplyzer_c2_havoc_pe : c2 artifact
+{
+    meta:
+        author = "Dumplyzer"
+        license = "Apache-2.0"
+        category = "c2"
+        severity = "high"
+        target = "artifact"
+        description = "Havoc Demon profile/config key combination in an extracted PE image"
+        origin = "original"
+    strings:
+        $mz = { 4D 5A }
+        $s1 = "Havoc" ascii wide
+        $s2 = "SleepObf" ascii wide
+        $s3 = "IndirectSyscall" ascii wide
+        $s4 = "StackDuplication" ascii wide
+    condition:
+        $mz at 0 and $s1 and 2 of ($s2, $s3, $s4)
+}
+
+rule dumplyzer_c2_bruteratel_pe : c2 artifact
+{
+    meta:
+        author = "Dumplyzer"
+        license = "Apache-2.0"
+        category = "c2"
+        severity = "high"
+        target = "artifact"
+        description = "Brute Ratel C4 / BRc4 product strings in an extracted PE image"
+        origin = "original"
+    strings:
+        $mz = { 4D 5A }
+        $s1 = "Brute Ratel" ascii wide nocase
+        $s2 = "BRc4" ascii wide
+        $s3 = "badger_metadata" ascii wide
+        $s4 = "BruteRatel" ascii wide
+    condition:
+        $mz at 0 and 2 of ($s*)
+}
+
+rule dumplyzer_c2_mythic_pe : c2 artifact
+{
+    meta:
+        author = "Dumplyzer"
+        license = "Apache-2.0"
+        category = "c2"
+        severity = "high"
+        target = "artifact"
+        description = "Mythic C2 RPC / Apollo agent type names in an extracted PE image"
+        origin = "original"
+    strings:
+        $mz = { 4D 5A }
+        $s1 = "MythicRPC" ascii
+        $s2 = "mythic_payload" ascii
+        $s3 = "Apollo.Jobs" ascii wide
+        $s4 = "Mythic.Crypto" ascii wide
+    condition:
+        $mz at 0 and 1 of ($s*)
+}

@@ -465,6 +465,160 @@
       "source": "Dumplyzer",
       "description": "RedLine stealer namespace strings in an extracted PE image",
       "severity": "high"
+    },
+    {
+      "name": "dumplyzer_credtheft_procdump_memory",
+      "category": "credential_theft",
+      "target": "memory",
+      "file": "memory/dumplyzer_credtheft_memory.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Sysinternals ProcDump strings commonly used to dump LSASS",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_credtheft_comsvcs_minidump_memory",
+      "category": "credential_theft",
+      "target": "memory",
+      "file": "memory/dumplyzer_credtheft_memory.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "rundll32 comsvcs.dll MiniDump LSASS dump command line in raw memory",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_c2_mythic_memory",
+      "category": "c2",
+      "target": "memory",
+      "file": "memory/dumplyzer_c2_memory.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Mythic C2 RPC / Apollo agent type names in raw memory",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_malware_lumma_memory",
+      "category": "malware",
+      "target": "memory",
+      "file": "memory/dumplyzer_malware_memory.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "LummaC2 stealer product string in raw memory",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_malware_vidar_memory",
+      "category": "malware",
+      "target": "memory",
+      "file": "memory/dumplyzer_malware_memory.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Vidar stealer product / namespace strings in raw memory",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_recon_seatbelt_memory",
+      "category": "recon",
+      "target": "memory",
+      "file": "memory/dumplyzer_recon_memory.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "GhostPack Seatbelt command type names in raw memory",
+      "severity": "medium"
+    },
+    {
+      "name": "dumplyzer_recon_powerview_memory",
+      "category": "recon",
+      "target": "memory",
+      "file": "memory/dumplyzer_recon_memory.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "PowerView AD reconnaissance cmdlet names in raw memory",
+      "severity": "medium"
+    },
+    {
+      "name": "dumplyzer_credtheft_procdump_pe",
+      "category": "credential_theft",
+      "target": "artifact",
+      "file": "artifact/dumplyzer_credtheft_pe.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Sysinternals ProcDump strings in an extracted PE image",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_c2_havoc_pe",
+      "category": "c2",
+      "target": "artifact",
+      "file": "artifact/dumplyzer_c2_pe.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Havoc Demon profile/config key combination in an extracted PE image",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_c2_bruteratel_pe",
+      "category": "c2",
+      "target": "artifact",
+      "file": "artifact/dumplyzer_c2_pe.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Brute Ratel C4 / BRc4 product strings in an extracted PE image",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_c2_mythic_pe",
+      "category": "c2",
+      "target": "artifact",
+      "file": "artifact/dumplyzer_c2_pe.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Mythic C2 RPC / Apollo agent type names in an extracted PE image",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_malware_remcos_pe",
+      "category": "malware",
+      "target": "artifact",
+      "file": "artifact/dumplyzer_malware_pe.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Remcos RAT product string combination in an extracted PE image",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_malware_lumma_pe",
+      "category": "malware",
+      "target": "artifact",
+      "file": "artifact/dumplyzer_malware_pe.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "LummaC2 stealer product string in an extracted PE image",
+      "severity": "high"
+    },
+    {
+      "name": "dumplyzer_malware_vidar_pe",
+      "category": "malware",
+      "target": "artifact",
+      "file": "artifact/dumplyzer_malware_pe.yar",
+      "origin": "original",
+      "license": "Apache-2.0",
+      "source": "Dumplyzer",
+      "description": "Vidar stealer product / namespace strings in an extracted PE image",
+      "severity": "high"
     }
   ]
 }

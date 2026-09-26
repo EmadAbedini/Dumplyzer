@@ -106,3 +106,39 @@ rule dumplyzer_credtheft_pypykatz_memory : credtheft memory
     condition:
         2 of them
 }
+
+rule dumplyzer_credtheft_procdump_memory : credtheft memory
+{
+    meta:
+        author = "Dumplyzer"
+        license = "Apache-2.0"
+        category = "credential_theft"
+        severity = "high"
+        target = "memory"
+        description = "Sysinternals ProcDump strings commonly used to dump LSASS"
+        origin = "original"
+    strings:
+        $s1 = "ProcDump" ascii wide
+        $s2 = "Sysinternals" ascii wide
+        $s3 = "Dumping process" ascii wide
+    condition:
+        $s1 and 1 of ($s2, $s3)
+}
+
+rule dumplyzer_credtheft_comsvcs_minidump_memory : credtheft memory
+{
+    meta:
+        author = "Dumplyzer"
+        license = "Apache-2.0"
+        category = "credential_theft"
+        severity = "high"
+        target = "memory"
+        description = "rundll32 comsvcs.dll MiniDump LSASS dump command line in raw memory"
+        origin = "original"
+    strings:
+        $s1 = "comsvcs.dll" ascii wide nocase
+        $s2 = "MiniDump" ascii wide
+        $s3 = "rundll32" ascii wide nocase
+    condition:
+        all of them
+}

@@ -87,3 +87,22 @@ rule dumplyzer_credtheft_safetykatz_pe : credtheft artifact
     condition:
         $mz at 0 and $s1 and 1 of ($s2, $s3)
 }
+
+rule dumplyzer_credtheft_procdump_pe : credtheft artifact
+{
+    meta:
+        author = "Dumplyzer"
+        license = "Apache-2.0"
+        category = "credential_theft"
+        severity = "high"
+        target = "artifact"
+        description = "Sysinternals ProcDump strings in an extracted PE image"
+        origin = "original"
+    strings:
+        $mz = { 4D 5A }
+        $s1 = "ProcDump" ascii wide
+        $s2 = "Sysinternals" ascii wide
+        $s3 = "Dumping process" ascii wide
+    condition:
+        $mz at 0 and $s1 and 1 of ($s2, $s3)
+}

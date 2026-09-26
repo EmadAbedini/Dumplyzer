@@ -34,14 +34,14 @@ The Settings UI and `yara.status` report the **number of valid compiled rules**,
 
 | Category | Memory | PE / artifact | Purpose |
 |----------|--------|---------------|---------|
-| credential_theft | 5 | 4 | Mimikatz, Rubeus, SafetyKatz, NanoDump, pypykatz |
+| credential_theft | 7 | 5 | Mimikatz, Rubeus, SafetyKatz, NanoDump, pypykatz, ProcDump, comsvcs MiniDump |
 | command_script | 3 | 2 | AMSI bypass one-liner, hidden/encoded PowerShell, PowerSploit cmdlets |
-| c2 | 8 | 4 | Cobalt Strike, Meterpreter, Sliver, Havoc, Empire, Covenant, Brute Ratel |
+| c2 | 9 | 7 | Cobalt Strike, Meterpreter, Sliver, Havoc, Empire, Covenant, Brute Ratel, Mythic |
 | injection | 4 | 2 | ReflectiveLoader, Donut, sRDI, ror13 API-hash stub |
-| malware | 5 | 4 | Quasar, AsyncRAT, Remcos, NanoCore, RedLine |
-| recon | 1 | 0 | SharpHound / BloodHound collector |
+| malware | 7 | 7 | Quasar, AsyncRAT, Remcos, NanoCore, RedLine, LummaC2, Vidar |
+| recon | 3 | 0 | SharpHound, Seatbelt, PowerView |
 
-**Total: 42 rules** (26 memory, 16 artifact). Quality was preferred over hitting a round number.
+**Total: 56 rules** (33 memory, 23 artifact). Quality was preferred over hitting a round number.
 
 ## Rule inventory
 
@@ -56,10 +56,13 @@ Every rule below is original Dumplyzer work. Indicator strings are facts publish
 | `dumplyzer_credtheft_safetykatz_memory` | memory | SafetyKatz wrapper + Mimikatz CLI | original | Apache-2.0 |
 | `dumplyzer_credtheft_nanodump_memory` | memory | `NanoDumpWriteDump` / NanoDump | original | Apache-2.0 |
 | `dumplyzer_credtheft_pypykatz_memory` | memory | pypykatz decryptor module paths | original | Apache-2.0 |
+| `dumplyzer_credtheft_procdump_memory` | memory | Sysinternals ProcDump (LSASS dump helper) | original | Apache-2.0 |
+| `dumplyzer_credtheft_comsvcs_minidump_memory` | memory | `rundll32` + `comsvcs.dll` + `MiniDump` | original | Apache-2.0 |
 | `dumplyzer_credtheft_mimikatz_pe` | artifact | Same Mimikatz indicators in a PE | original | Apache-2.0 |
 | `dumplyzer_credtheft_rubeus_pe` | artifact | Rubeus in a PE | original | Apache-2.0 |
 | `dumplyzer_credtheft_nanodump_pe` | artifact | NanoDump in a PE | original | Apache-2.0 |
 | `dumplyzer_credtheft_safetykatz_pe` | artifact | SafetyKatz in a PE | original | Apache-2.0 |
+| `dumplyzer_credtheft_procdump_pe` | artifact | ProcDump in a PE | original | Apache-2.0 |
 
 ### Command and script execution
 
@@ -83,10 +86,14 @@ Every rule below is original Dumplyzer work. Indicator strings are facts publish
 | `dumplyzer_c2_empire_memory` | memory | Empire agent/module names | original | Apache-2.0 |
 | `dumplyzer_c2_covenant_memory` | memory | `GruntStager` / `Covenant.API` | original | Apache-2.0 |
 | `dumplyzer_c2_bruteratel_memory` | memory | `Brute Ratel` / `BRc4` | original | Apache-2.0 |
+| `dumplyzer_c2_mythic_memory` | memory | `MythicRPC` / Apollo agent types | original | Apache-2.0 |
 | `dumplyzer_c2_cobaltstrike_beacon_pe` | artifact | Beacon strings in a PE | original | Apache-2.0 |
 | `dumplyzer_c2_meterpreter_pe` | artifact | Meterpreter strings in a PE | original | Apache-2.0 |
 | `dumplyzer_c2_sliver_pe` | artifact | Sliver strings in a PE | original | Apache-2.0 |
 | `dumplyzer_c2_covenant_pe` | artifact | Covenant strings in a PE | original | Apache-2.0 |
+| `dumplyzer_c2_havoc_pe` | artifact | Havoc Demon keys in a PE | original | Apache-2.0 |
+| `dumplyzer_c2_bruteratel_pe` | artifact | Brute Ratel / BRc4 in a PE | original | Apache-2.0 |
+| `dumplyzer_c2_mythic_pe` | artifact | Mythic / Apollo in a PE | original | Apache-2.0 |
 
 ### Injection / in-memory execution
 
@@ -110,16 +117,23 @@ The ror13 DWORD pair (`0xEC0E4E8E`, `0x7C0DFCAA`) is the publicly documented Met
 | `dumplyzer_malware_remcos_memory` | memory | Remcos product string combination | original | Apache-2.0 |
 | `dumplyzer_malware_nanocore_memory` | memory | `NanoCore.ClientPluginHost` / `NanoCoreClient` | original | Apache-2.0 |
 | `dumplyzer_malware_redline_memory` | memory | RedLine.Reborn / product strings | original | Apache-2.0 |
+| `dumplyzer_malware_lumma_memory` | memory | LummaC2 product string | original | Apache-2.0 |
+| `dumplyzer_malware_vidar_memory` | memory | Vidar stealer product / namespace | original | Apache-2.0 |
 | `dumplyzer_malware_quasar_pe` | artifact | Quasar in a PE | original | Apache-2.0 |
 | `dumplyzer_malware_asyncrat_pe` | artifact | AsyncRAT in a PE | original | Apache-2.0 |
 | `dumplyzer_malware_nanocore_pe` | artifact | NanoCore in a PE | original | Apache-2.0 |
 | `dumplyzer_malware_redline_pe` | artifact | RedLine in a PE | original | Apache-2.0 |
+| `dumplyzer_malware_remcos_pe` | artifact | Remcos in a PE | original | Apache-2.0 |
+| `dumplyzer_malware_lumma_pe` | artifact | LummaC2 in a PE | original | Apache-2.0 |
+| `dumplyzer_malware_vidar_pe` | artifact | Vidar in a PE | original | Apache-2.0 |
 
 ### Recon
 
 | Rule | Target | Purpose | Origin | License |
 |------|--------|---------|--------|---------|
 | `dumplyzer_recon_sharphound_memory` | memory | SharpHound / BloodHound collector strings | original | Apache-2.0 |
+| `dumplyzer_recon_seatbelt_memory` | memory | GhostPack Seatbelt command types | original | Apache-2.0 |
+| `dumplyzer_recon_powerview_memory` | memory | PowerView AD recon cmdlets | original | Apache-2.0 |
 
 ## Existing rules that were rewritten
 

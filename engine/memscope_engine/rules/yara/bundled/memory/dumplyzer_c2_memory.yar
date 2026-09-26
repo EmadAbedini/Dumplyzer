@@ -157,3 +157,22 @@ rule dumplyzer_c2_bruteratel_memory : c2 memory
     condition:
         2 of them
 }
+
+rule dumplyzer_c2_mythic_memory : c2 memory
+{
+    meta:
+        author = "Dumplyzer"
+        license = "Apache-2.0"
+        category = "c2"
+        severity = "high"
+        target = "memory"
+        description = "Mythic C2 RPC / Apollo agent type names in raw memory"
+        origin = "original"
+    strings:
+        $s1 = "MythicRPC" ascii
+        $s2 = "mythic_payload" ascii
+        $s3 = "Apollo.Jobs" ascii wide
+        $s4 = "Mythic.Crypto" ascii wide
+    condition:
+        1 of them
+}

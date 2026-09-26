@@ -106,6 +106,20 @@ POSITIVE_FIXTURES: dict[str, bytes] = {
     "dumplyzer_malware_asyncrat_pe": b"MZ" + (b"\x00" * 32) + b"AsyncRAT\x00AsyncClient",
     "dumplyzer_malware_nanocore_pe": b"MZ" + (b"\x00" * 32) + b"NanoCoreClient",
     "dumplyzer_malware_redline_pe": b"MZ" + (b"\x00" * 32) + b"RedLine.Reborn\x00RedLine Stealer",
+    "dumplyzer_credtheft_procdump_memory": b"ProcDump\x00Sysinternals",
+    "dumplyzer_credtheft_comsvcs_minidump_memory": b"rundll32.exe C:\\Windows\\System32\\comsvcs.dll MiniDump",
+    "dumplyzer_c2_mythic_memory": b"MythicRPC",
+    "dumplyzer_malware_lumma_memory": b"LummaC2",
+    "dumplyzer_malware_vidar_memory": b"Vidar Stealer",
+    "dumplyzer_recon_seatbelt_memory": b"Seatbelt.Commands",
+    "dumplyzer_recon_powerview_memory": b"Invoke-UserHunter",
+    "dumplyzer_credtheft_procdump_pe": b"MZ" + (b"\x00" * 32) + b"ProcDump\x00Sysinternals",
+    "dumplyzer_c2_havoc_pe": b"MZ" + (b"\x00" * 32) + b"Havoc\x00SleepObf\x00IndirectSyscall",
+    "dumplyzer_c2_bruteratel_pe": b"MZ" + (b"\x00" * 32) + b"Brute Ratel\x00BRc4",
+    "dumplyzer_c2_mythic_pe": b"MZ" + (b"\x00" * 32) + b"MythicRPC",
+    "dumplyzer_malware_remcos_pe": b"MZ" + (b"\x00" * 32) + b"Remcos\x00remcos.exe",
+    "dumplyzer_malware_lumma_pe": b"MZ" + (b"\x00" * 32) + b"LummaC2",
+    "dumplyzer_malware_vidar_pe": b"MZ" + (b"\x00" * 32) + b"Vidar Stealer",
 }
 
 BENIGN_MEMORY = (
