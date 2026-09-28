@@ -166,19 +166,20 @@ def write_csv_file(
     rows: list[dict[str, Any]],
     *,
     meta: dict[str, Any] | None = None,
+    columns: tuple[str, ...] | None = None,
 ) -> int:
     from memscope_engine.export.shape import EXPORT_META_KEYS
 
-    columns = CSV_COLUMNS[dataset]
+    cols = columns if columns is not None else CSV_COLUMNS[dataset]
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
         if meta:
             for key in EXPORT_META_KEYS:
                 writer.writerow([key, csv_cell(meta.get(key))])
             writer.writerow([])
-        writer.writerow(columns)
+        writer.writerow(cols)
         for row in rows:
-            writer.writerow([csv_cell(row.get(col)) for col in columns])
+            writer.writerow([csv_cell(row.get(col)) for col in cols])
     return path.stat().st_size
 
 

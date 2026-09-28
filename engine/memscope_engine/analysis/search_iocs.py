@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 from datetime import datetime, timezone
 
+from memscope_engine.analysis.domain_extract import extract_domains, extract_network_host
 from memscope_engine.errors import AppError
 from memscope_engine.paths import AppPaths
 from memscope_engine.storage import Database
@@ -20,10 +21,6 @@ _RE_IPV4 = re.compile(
 )
 _RE_IPV6 = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b")
 _RE_URL = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
-_RE_DOMAIN = re.compile(
-    r"\b(?!(?:\d+\.)+\d+\b)(?:[a-zA-Z0-9-]+\.)+(?:com|net|org|edu|gov|mil|io|co|info|biz|ru|cn|uk|de|fr|local)\b",
-    re.IGNORECASE,
-)
 _RE_SHA256 = re.compile(r"\b[a-fA-F0-9]{64}\b")
 _RE_MD5 = re.compile(r"\b[a-fA-F0-9]{32}\b")
 _RE_PATH_WIN = re.compile(
@@ -352,10 +349,7 @@ def extract_iocs(db: Database, evidence_id: str) -> dict[str, Any]:
             ip = m.group(0)
             # skip obvious non-routable noise optionally kept; still forensic
             found.append(("ipv4", ip, context, process_id, pid, source))
-        for m in _RE_DOMAIN.finditer(text):
-            d = m.group(0)
-            if d.lower() in ("microsoft.com", "windows.com", "www.microsoft.com"):
-                continue
+        for d in extract_domains(text, source=source):
             found.append(("domain", d, context, process_id, pid, source))
         for m in _RE_PATH_WIN.finditer(text):
             found.append(("path", m.group(0), context, process_id, pid, source))
@@ -430,6 +424,19 @@ def extract_iocs(db: Database, evidence_id: str) -> dict[str, Any]:
                         "network_connections",
                     )
                 )
+            else:
+                host = extract_network_host(str(addr) if addr else None)
+                if host:
+                    found.append(
+                        (
+                            "domain",
+                            host,
+                            f"network {field} PID {row.get('pid')}",
+                            row.get("process_id"),
+                            row.get("pid"),
+                            "network_connections",
+                        )
+                    )
 
     for row in db.fetchall(
         "SELECT id, pid, process_id, name, handle_type FROM handle_entries WHERE evidence_id = ?",
@@ -639,7 +646,7 @@ def write_iocs_export(
     *,
     destination: str | None = None,
 ) -> dict[str, Any]:
-    """Write per-type IOC JSON (ZIP) or a single Excel workbook under exports."""
+    """Write per-type IOC JSON (ZIP), a single Excel workbook, or a CSV under exports."""
     from memscope_engine.analysis.workflows import get_evidence
     from memscope_engine.export.constants import REPORT_SCHEMA_VERSION
     from memscope_engine.export.safe_paths import (
@@ -647,18 +654,19 @@ def write_iocs_export(
         reject_user_destination,
         sanitize_filename,
     )
+    from memscope_engine.export.csv_export import write_csv_file
     from memscope_engine.export.xlsx_export import write_xlsx_workbook
 
     reject_user_destination(destination)
     fmt_n = str(fmt or "").strip().lower()
-    if fmt_n in {"csv", "excel"}:
+    if fmt_n == "excel":
         fmt_n = "xlsx"
-    if fmt_n not in {"json", "xlsx"}:
+    if fmt_n not in {"json", "xlsx", "csv"}:
         raise AppError(
             code="export_format_unsupported",
             message="Unsupported IOC export format.",
             details=fmt_n,
-            suggestion="Use json or xlsx.",
+            suggestion="Use json, xlsx, or csv.",
             entity="export",
         )
 
@@ -727,6 +735,17 @@ def write_iocs_export(
                         }
                     )
             primary = zip_path
+        elif fmt_n == "csv":
+            export_rows = [_export_ioc_item(row) for row in payload["iocs"]]
+            primary = out_dir / "iocs.csv"
+            size = write_csv_file(
+                primary,
+                "iocs",
+                export_rows,
+                meta=file_meta,
+                columns=_EXPORT_ITEM_KEYS,
+            )
+            files.append({"name": primary.name, "kind": "iocs_csv", "size_bytes": size})
         else:
             sheets = [
                 (

@@ -24,6 +24,12 @@ Volatility 3’s VSL is **not** Apache-2.0. Redistribution of Volatility 3 must 
 |-----------|--------|
 | Volatility Foundation Windows ISF pack (`windows.zip`) | Official zip from `https://downloads.volatilityfoundation.org/volatility3/symbols/windows.zip` (SHA-256 `231d69735b9a5482b16bdbf1ec356e0a95574c44079e68dfb02ebddb34d55f3e`, 839727133 bytes). Dumplyzer does **not** put this in the NSIS installer and does **not** download it automatically. You may copy it under `%LOCALAPPDATA%\Dumplyzer\symbols` if you want the full pack locally. The default path is in-app Download & Continue for one Microsoft kernel build, or a `.pdb` / ISF file you browse to. |
 
+## Bundled Public Suffix List (hostname validation)
+
+| Component | Notes |
+|-----------|--------|
+| Mozilla Public Suffix List (`public_suffix_list.dat`) | Snapshot shipped under `engine/memscope_engine/data/` for domain IOC validation. License: **Mozilla Public License 2.0**. Source: https://publicsuffix.org/list/public_suffix_list.dat . Dumplyzer does not relicense the list. |
+
 ## Not redistributed
 
 | Component | Notes |

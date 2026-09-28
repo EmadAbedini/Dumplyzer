@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import uuid4
 
+from memscope_engine.analysis.domain_extract import extract_domains, extract_network_host
 from memscope_engine.errors import AppError
 from memscope_engine.paths import AppPaths
 from memscope_engine.storage import Database
@@ -32,10 +33,6 @@ _RE_IPV4 = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
 )
 _RE_URL = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
-_RE_DOMAIN = re.compile(
-    r"\b(?!(?:\d+\.)+\d+\b)(?:[a-zA-Z0-9-]+\.)+(?:com|net|org|edu|gov|mil|io|co|info|biz|ru|cn|uk|de|fr|local)\b",
-    re.IGNORECASE,
-)
 
 ProgressFn = Callable[..., None]
 
@@ -218,6 +215,18 @@ def _from_connections(db: Database, evidence_id: str, collector: _Collector) -> 
                         "metadata": {**base["metadata"], "side": side},
                     }
                 )
+            else:
+                host = extract_network_host(row.get(addr_key))
+                if host:
+                    collector.add(
+                        {
+                            **base,
+                            "artifact_type": "dns",
+                            "value": host,
+                            "context": f"{side} hostname PID {row.get('pid')}",
+                            "metadata": {**base["metadata"], "side": side},
+                        }
+                    )
             port = row.get(port_key)
             if port is not None:
                 collector.add(
@@ -432,6 +441,21 @@ def _from_floss(db: Database, evidence_id: str, collector: _Collector) -> None:
                     "metadata": {"scan_id": row.get("scan_id")},
                 }
             )
+        for d in extract_domains(str(text), source="floss_strings"):
+            collector.add(
+                {
+                    "process_id": process_id,
+                    "pid": pid,
+                    "artifact_type": "dns",
+                    "value": d,
+                    "source": "floss_strings",
+                    "source_plugin": "provider.floss",
+                    "extraction_method": "floss",
+                    "source_address": row.get("offset"),
+                    "context": f"FLOSS {row.get('kind') or 'string'}",
+                    "metadata": {"scan_id": row.get("scan_id")},
+                }
+            )
 
 
 def _from_process_text(db: Database, evidence_id: str, collector: _Collector) -> None:
@@ -476,10 +500,7 @@ def _from_process_text(db: Database, evidence_id: str, collector: _Collector) ->
                     "metadata": {},
                 }
             )
-        for m in _RE_DOMAIN.finditer(str(text)):
-            d = m.group(0)
-            if d.lower() in {"microsoft.com", "windows.com", "www.microsoft.com"}:
-                continue
+        for d in extract_domains(str(text), source="processes.command_line"):
             collector.add(
                 {
                     "process_id": process_id,

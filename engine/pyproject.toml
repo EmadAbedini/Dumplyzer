@@ -23,7 +23,12 @@ where = ["."]
 include = ["memscope_engine*"]
 
 [tool.setuptools.package-data]
-memscope_engine = ["rules/yara/bundled/**/*", "rules/yara/custom_README.txt", "rules/yara/RULES.md"]
+memscope_engine = [
+  "data/*",
+  "rules/yara/bundled/**/*",
+  "rules/yara/custom_README.txt",
+  "rules/yara/RULES.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["../tests/engine"]
