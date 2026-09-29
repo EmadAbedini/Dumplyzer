@@ -50,5 +50,5 @@ SECTION_TO_CSV: dict[str, str] = {
     "artifacts": "artifacts",
 }
 
-FORMATS: tuple[str, ...] = ("json", "xlsx", "html")
+FORMATS: tuple[str, ...] = ("json", "xlsx", "html", "csv")
 SCOPES: tuple[str, ...] = ("complete", "selected")

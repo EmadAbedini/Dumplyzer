@@ -53,6 +53,7 @@ export type ProcessRow = {
   session_id: number | null;
   wow64: boolean | null;
   source_plugin: string | null;
+  process_analyzed?: boolean;
 };
 
 export type ModuleRow = {
@@ -693,6 +694,7 @@ export type Job = {
   params: Record<string, unknown>;
   cancel_requested: boolean;
   evidence_filename?: string | null;
+  process_name?: string | null;
 };
 
 export type AnalysisCapability = {
@@ -726,6 +728,7 @@ export type Overview = {
   ioc_count: number;
   recent_runs: Array<Record<string, unknown>>;
   coverage?: AnalysisCoverage;
+  complete_analysis_completed?: boolean;
 };
 
 export type AnalysisCoverageState =
@@ -901,7 +904,7 @@ export type Ioc = {
   created_at: string | null;
 };
 
-export type ExportFormat = "json" | "xlsx" | "html";
+export type ExportFormat = "json" | "xlsx" | "html" | "csv";
 export type ExportScope = "complete" | "selected";
 export type ExportUiState =
   | "idle"

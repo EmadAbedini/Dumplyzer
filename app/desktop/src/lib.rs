@@ -801,7 +801,12 @@ fn path_is_within(child: &Path, parent: &Path) -> bool {
     child.starts_with(parent)
 }
 
-/// Copy a generated export ZIP (under application data / exports) to a user Save As path.
+fn export_copy_extension(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    matches!(ext.as_str(), "zip" | "xlsx" | "csv").then_some(ext)
+}
+
+/// Copy a generated export file (under application data / exports) to a user Save As path.
 
 #[tauri::command]
 fn copy_export_file(source: String, destination: String) -> Result<(), EngineError> {
@@ -812,14 +817,9 @@ fn copy_export_file(source: String, destination: String) -> Result<(), EngineErr
     if !dest.is_absolute() {
         return Err(EngineError::Message("Save location must be an absolute path.".into()));
     }
-    let dest_name = dest
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if !dest_name.ends_with(".zip") {
-        return Err(EngineError::Message("Save location must be a .zip file.".into()));
-    }
+    let dest_ext = export_copy_extension(&dest).ok_or_else(|| {
+        EngineError::Message("Save location must be a .zip, .xlsx, or .csv file.".into())
+    })?;
     if dest.is_dir() {
         return Err(EngineError::Message("Save location is a folder.".into()));
     }
@@ -847,13 +847,13 @@ fn copy_export_file(source: String, destination: String) -> Result<(), EngineErr
             "Refusing to copy a file outside the exports directory.".into(),
         ));
     }
-    let src_ext = src_abs
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .eq_ignore_ascii_case("zip");
-    if !src_ext {
-        return Err(EngineError::Message("Export file is not a ZIP archive.".into()));
+    let src_ext = export_copy_extension(&src_abs).ok_or_else(|| {
+        EngineError::Message("Export file type is not allowed.".into())
+    })?;
+    if dest_ext != src_ext {
+        return Err(EngineError::Message(format!(
+            "Save location must be a .{src_ext} file."
+        )));
     }
     if let Ok(dest_abs) = dest.canonicalize() {
         if dest_abs == src_abs {
@@ -1098,6 +1098,24 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_copy_extension_allows_ioc_formats() {
+        assert_eq!(
+            export_copy_extension(Path::new(r"C:\exports\iocs-json.zip")).as_deref(),
+            Some("zip")
+        );
+        assert_eq!(
+            export_copy_extension(Path::new(r"C:\exports\iocs.xlsx")).as_deref(),
+            Some("xlsx")
+        );
+        assert_eq!(
+            export_copy_extension(Path::new(r"C:\exports\iocs.csv")).as_deref(),
+            Some("csv")
+        );
+        assert_eq!(export_copy_extension(Path::new(r"C:\exports\out.json")), None);
+        assert_eq!(export_copy_extension(Path::new(r"C:\exports\out.exe")), None);
+    }
 
     #[test]
     fn engine_volatility_init_via_ipc() {

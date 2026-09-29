@@ -304,6 +304,7 @@ def test_empty_investigation_all_formats(tmp_path: Path) -> None:
     html_rec = generate_export(db, paths, evidence_id=ev["id"], fmt="html")
     json_rec = generate_export(db, paths, evidence_id=ev["id"], fmt="json")
     xlsx_rec = generate_export(db, paths, evidence_id=ev["id"], fmt="xlsx")
+    csv_rec = generate_export(db, paths, evidence_id=ev["id"], fmt="csv")
     html = Path(html_rec["primary_path"]).read_text(encoding="utf-8")
     assert "No malware or risk score" in html
     assert "Signatures and reconstructed artifacts" in html
@@ -341,6 +342,12 @@ def test_empty_investigation_all_formats(tmp_path: Path) -> None:
     assert Path(xlsx_rec["primary_path"]).name == "investigation.xlsx"
     sheets = _xlsx_sheets(Path(xlsx_rec["primary_path"]))
     assert "processes" in sheets
+    csv_path = Path(csv_rec["primary_path"])
+    assert csv_path.name == "investigation-csv.zip"
+    csv_names = _zip_names(csv_path)
+    assert "processes.csv" in csv_names
+    assert "iocs.csv" in csv_names
+    assert "manifest.json" in csv_names
     db.close()
 
 
@@ -352,7 +359,7 @@ def test_large_section_html_truncates(tmp_path: Path) -> None:
         _process(db, ev["id"], run_id, 1000 + i, 4, f"p{i}.exe")
     rec = generate_export(db, paths, evidence_id=ev["id"], fmt="html", scope="complete")
     html = Path(rec["primary_path"]).read_text(encoding="utf-8")
-    assert "Remaining rows are in the JSON/Excel export" in html
+    assert "Remaining rows are in the JSON, Excel, or CSV export" in html
     assert html.count("<tr>") < HTML_MAX_ROWS + 80
     db.close()
 
@@ -520,6 +527,35 @@ def test_selected_json_and_xlsx_sections(tmp_path: Path) -> None:
             sections=["summary", "malware"],
         )
     assert exc.value.code == "export_xlsx_empty"
+    csv_rec = generate_export(
+        db,
+        paths,
+        evidence_id=ev["id"],
+        fmt="csv",
+        scope="selected",
+        sections=["processes", "iocs", "summary"],
+    )
+    csv_path = Path(csv_rec["primary_path"])
+    assert csv_path.name == "investigation-csv.zip"
+    csv_names = _zip_names(csv_path)
+    assert "processes.csv" in csv_names
+    assert "iocs.csv" in csv_names
+    assert "summary.csv" not in csv_names
+    with zipfile.ZipFile(csv_path) as zf:
+        proc_csv = list(csv.reader(StringIO(zf.read("processes.csv").decode("utf-8"))))
+    assert proc_csv[0][0] == "evidence_file_name"
+    assert proc_csv[2][0] == "sha256"
+    assert proc_csv[4][0] == "pid"
+    with pytest.raises(AppError) as csv_exc:
+        generate_export(
+            db,
+            paths,
+            evidence_id=ev["id"],
+            fmt="csv",
+            scope="selected",
+            sections=["summary", "malware"],
+        )
+    assert csv_exc.value.code == "export_csv_empty"
     db.close()
 
 
@@ -542,7 +578,7 @@ def test_ipc_round_trip(tmp_path: Path) -> None:
     opts = HANDLERS["export.options"]({})
     assert "html" in opts["formats"]
     assert "xlsx" in opts["formats"]
-    assert "csv" not in opts["formats"]
+    assert "csv" in opts["formats"]
     assert opts["pdf"] is False
     from memscope_engine import server as srv
 
@@ -606,15 +642,15 @@ def test_frontend_export_states_present() -> None:
     for state in ("idle", "queued", "running", "completed", "failed", "cancelled"):
         assert state in view
     assert "generating" in view
-    assert "Select all" in view
+    assert "Select All" in view
     assert "Delete" in view
     assert "export.delete" in view
     assert "Excel" in view
     assert "xlsx" in view
-    assert '{ id: "csv", label: "CSV" }' not in view
+    assert '{ id: "csv", label: "CSV" }' in view
     types = (root / "app" / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
     assert "ExportUiState" in types
-    assert 'ExportFormat = "json" | "xlsx" | "html"' in types
+    assert 'ExportFormat = "json" | "xlsx" | "html" | "csv"' in types
 
 
 def test_delete_exports_removes_files_and_rows(tmp_path: Path) -> None:

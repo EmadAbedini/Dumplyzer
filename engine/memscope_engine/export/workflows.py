@@ -24,6 +24,7 @@ from memscope_engine.export.csv_export import (
     CSV_COLUMNS,
     dataset_rows,
     datasets_for_sections,
+    write_csv_file,
 )
 from memscope_engine.export.xlsx_export import write_xlsx_workbook
 from memscope_engine.export.json_export import write_json_exports, write_json_file
@@ -201,7 +202,7 @@ def delete_exports(
 
 def _validate_format_scope(fmt: str, scope: str) -> tuple[str, str]:
     fmt_n = str(fmt or "").strip().lower()
-    if fmt_n in {"excel", "csv"}:
+    if fmt_n == "excel":
         fmt_n = "xlsx"
     scope_n = str(scope or "complete").strip().lower()
     if fmt_n not in FORMATS:
@@ -209,7 +210,7 @@ def _validate_format_scope(fmt: str, scope: str) -> tuple[str, str]:
             code="export_format_unsupported",
             message="Unsupported export format.",
             details=fmt_n,
-            suggestion="Use json, xlsx, or html.",
+            suggestion="Use json, xlsx, csv, or html.",
             entity="export",
         )
     if scope_n not in SCOPES:
@@ -241,12 +242,13 @@ def generate_export(
     hint = parse_optional_basename(filename_hint)
     section_list = normalize_sections(scope_n, sections)
 
-    if fmt_n == "xlsx":
+    if fmt_n in {"xlsx", "csv"}:
         ds = datasets_for_sections(section_list, scope=scope_n)
         if not ds:
+            label = "Excel" if fmt_n == "xlsx" else "CSV"
             raise AppError(
-                code="export_xlsx_empty",
-                message="Excel export requires at least one tabular section.",
+                code="export_xlsx_empty" if fmt_n == "xlsx" else "export_csv_empty",
+                message=f"{label} export requires at least one tabular section.",
                 suggestion="Choose processes, network, modules, memory, findings, IOCs, timeline, or artifacts.",
                 entity="export",
             )
@@ -319,6 +321,15 @@ def generate_export(
             primary = out_dir / "investigation.xlsx"
             size = write_xlsx_workbook(primary, sheets, meta=meta)
             files.append({"name": primary.name, "kind": "xlsx_workbook", "size_bytes": size})
+        elif fmt_n == "csv":
+            datasets = datasets_for_sections(section_list, scope=scope_n)
+            meta = file_meta(doc)
+            for ds in datasets:
+                path = out_dir / f"{ds}.csv"
+                size = write_csv_file(path, ds, dataset_rows(doc, ds), meta=meta)
+                files.append({"name": path.name, "kind": ds, "size_bytes": size})
+                if primary is None:
+                    primary = path
 
         manifest = {
             "format": fmt_n,
@@ -335,7 +346,7 @@ def generate_export(
         write_json_file(man_path, manifest)
         files.append({"name": man_path.name, "kind": "manifest", "size_bytes": man_path.stat().st_size})
 
-        if fmt_n == "json":
+        if fmt_n in {"json", "csv"}:
             zip_path = out_dir / f"investigation-{fmt_n}.zip"
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for info in files:

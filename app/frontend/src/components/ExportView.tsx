@@ -154,11 +154,12 @@ export function ExportView({
     );
   };
 
-  const excelWarning = useMemo(() => {
-    if (format !== "xlsx" || scope !== "selected") return null;
+  const tabularWarning = useMemo(() => {
+    if ((format !== "xlsx" && format !== "csv") || scope !== "selected") return null;
     const usable = selected.filter((s) => TABULAR_SECTIONS.has(s));
     if (usable.length === 0) {
-      return "Excel requires at least one tabular section (processes, network, modules, memory, findings, IOCs, timeline, artifacts).";
+      const label = format === "csv" ? "CSV" : "Excel";
+      return `${label} requires at least one tabular section (processes, network, modules, memory, findings, IOCs, timeline, artifacts).`;
     }
     return null;
   }, [format, scope, selected]);
@@ -278,7 +279,7 @@ export function ExportView({
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <div className="text-sm font-semibold">Export / Report</div>
         <div className="text-xs text-muted">
-          Offline JSON, Excel, and HTML reports include only analysis results already stored for this dump. Original evidence is never modified or overwritten.
+          Offline JSON, Excel, CSV, and HTML reports include only analysis results already stored for this dump. Original evidence is never modified or overwritten.
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
@@ -293,10 +294,11 @@ export function ExportView({
                   { id: "html", label: "HTML" },
                   { id: "json", label: "JSON" },
                   { id: "xlsx", label: "Excel" },
+                  { id: "csv", label: "CSV" },
                 ]}
               />
               <div className="mt-1 text-[11px] text-muted">
-                HTML is the human-readable forensic report. JSON preserves structure. Excel is tabular
+                HTML is the human-readable forensic report. JSON preserves structure. Excel and CSV are tabular
                 only. PDF is not generated.
               </div>
             </section>
@@ -329,8 +331,8 @@ export function ExportView({
                     </label>
                   ))}
                 </div>
-                {excelWarning ? (
-                  <div className="mt-2 text-xs text-danger">{excelWarning}</div>
+                {tabularWarning ? (
+                  <div className="mt-2 text-xs text-danger">{tabularWarning}</div>
                 ) : null}
               </section>
             ) : null}
@@ -347,7 +349,7 @@ export function ExportView({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={busy || !!excelWarning || generateLocked}
+                  disabled={busy || !!tabularWarning || generateLocked}
                   onClick={() => void generate()}
                 >
                   Generate
@@ -424,7 +426,7 @@ export function ExportView({
                     disabled={exports.length === 0}
                     onClick={toggleSelectAll}
                   >
-                    {allSelected ? "Clear selection" : "Select all"}
+                    {allSelected ? "Clear Selection" : "Select All"}
                   </Button>
                   <Button
                     size="sm"
@@ -449,7 +451,7 @@ export function ExportView({
                         }}
                         onChange={toggleSelectAll}
                         disabled={exports.length === 0}
-                        aria-label="Select all exports"
+                        aria-label="Select All exports"
                       />
                     </th>
                     <SortableTh label="Status" column="status" sort={sort} onToggle={toggle} className="px-2 py-1" />

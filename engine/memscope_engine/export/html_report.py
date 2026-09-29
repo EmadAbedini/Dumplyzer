@@ -246,7 +246,7 @@ def _trunc_note(block: dict[str, Any] | None, noun: str) -> str:
     if block.get("truncated"):
         extra = (
             f" <span class='muted'>Showing {esc(shown)} of {esc(total)}. "
-            "Remaining rows are in the JSON/Excel export, not embedded here.</span>"
+            "Remaining rows are in the JSON, Excel, or CSV export, not embedded here.</span>"
         )
     return f"<p class='muted'>{esc(total)} {esc(noun)}.{extra}</p>"
 

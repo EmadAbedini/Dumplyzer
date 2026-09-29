@@ -341,6 +341,7 @@ def test_export_options_available_on_fresh_install(tmp_path: Path) -> None:
     opts = HANDLERS["export.options"]({})
     assert "html" in opts["formats"]
     assert "json" in opts["formats"]
+    assert "csv" in opts["formats"]
 
 
 def test_smoke_ipc_subprocess(tmp_path: Path, monkeypatch) -> None:
