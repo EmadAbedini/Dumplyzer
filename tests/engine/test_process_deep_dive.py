@@ -16,8 +16,8 @@ from memscope_engine.volatility.normalize import (
     normalize_netscan,
     normalize_vadinfo,
 )
-from memscope_engine.analysis.process_analysis import get_process_deep_dive, list_findings
-from memscope_engine.analysis.workflows import import_evidence
+from memscope_engine.analysis.process_analysis import get_process_deep_dive, list_findings, list_modules
+from memscope_engine.analysis.workflows import import_evidence, list_processes
 from uuid import uuid4
 
 
@@ -154,6 +154,162 @@ def test_process_deep_dive_empty_related(tmp_path: Path) -> None:
     db.close()
 
 
+def test_list_processes_marks_analyze_process(tmp_path: Path) -> None:
+    db = Database(tmp_path / "d.db")
+    img = tmp_path / "x.raw"
+    img.write_bytes(b"abc12345")
+    ev = import_evidence(db, str(img))
+    run_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'basic_triage', 'completed', '2020-01-01T00:00:00+00:00', 2, '[]')
+        """,
+        (run_id, ev["id"]),
+    )
+    analyzed_id = str(uuid4())
+    other_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, source_plugin
+        ) VALUES (?, ?, ?, 100, 4, 'demo.exe', 'windows.pslist')
+        """,
+        (analyzed_id, ev["id"], run_id),
+    )
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, source_plugin
+        ) VALUES (?, ?, ?, 200, 4, 'other.exe', 'windows.pslist')
+        """,
+        (other_id, ev["id"], run_id),
+    )
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, finished_at, schema_version,
+          strategy_json, process_id, pid
+        ) VALUES (?, ?, 'process_recommended', 'completed',
+          '2020-01-01T00:00:00+00:00', '2020-01-01T00:01:00+00:00', 2, '[]', ?, 100)
+        """,
+        (str(uuid4()), ev["id"], analyzed_id),
+    )
+    listed = list_processes(db, ev["id"])
+    by_pid = {row["pid"]: row for row in listed["items"]}
+    assert by_pid[100]["process_analyzed"] is True
+    assert by_pid[200]["process_analyzed"] is False
+    db.close()
+
+
+def test_list_processes_marks_analyze_process_from_job(tmp_path: Path) -> None:
+    db = Database(tmp_path / "d.db")
+    img = tmp_path / "x.raw"
+    img.write_bytes(b"abc12345")
+    ev = import_evidence(db, str(img))
+    run_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'basic_triage', 'completed', '2020-01-01T00:00:00+00:00', 2, '[]')
+        """,
+        (run_id, ev["id"]),
+    )
+    proc_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, source_plugin
+        ) VALUES (?, ?, ?, 100, 4, 'demo.exe', 'windows.pslist')
+        """,
+        (proc_id, ev["id"], run_id),
+    )
+    db.execute(
+        """
+        INSERT INTO jobs (
+          id, kind, status, evidence_id, process_id, pid, created_at, progress_kind,
+          params_json, cancel_requested
+        ) VALUES (?, 'process_recommended', 'completed', ?, ?, 100,
+          '2020-01-01T00:00:00+00:00', 'indeterminate', '{}', 0)
+        """,
+        (str(uuid4()), ev["id"], proc_id),
+    )
+    listed = list_processes(db, ev["id"])
+    assert listed["items"][0]["process_analyzed"] is True
+    db.close()
+
+
+def test_list_processes_does_not_mark_stale_pid_after_reanalysis(tmp_path: Path) -> None:
+    db = Database(tmp_path / "d.db")
+    img = tmp_path / "x.raw"
+    img.write_bytes(b"abc12345")
+    ev = import_evidence(db, str(img))
+    old_run = str(uuid4())
+    new_run = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'basic_triage', 'completed', '2020-01-01T00:00:00+00:00', 2, '[]')
+        """,
+        (old_run, ev["id"]),
+    )
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'analysis_profile', 'completed', '2020-01-02T00:00:00+00:00', 2, '[]')
+        """,
+        (new_run, ev["id"]),
+    )
+    old_proc = str(uuid4())
+    new_proc = str(uuid4())
+    other_proc = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, source_plugin
+        ) VALUES (?, ?, ?, 100, 4, 'demo.exe', 'windows.pslist')
+        """,
+        (new_proc, ev["id"], new_run),
+    )
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, source_plugin
+        ) VALUES (?, ?, ?, 200, 4, 'other.exe', 'windows.pslist')
+        """,
+        (other_proc, ev["id"], new_run),
+    )
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, finished_at, schema_version,
+          strategy_json, process_id, pid
+        ) VALUES (?, ?, 'process_recommended', 'completed',
+          '2020-01-01T00:01:00+00:00', '2020-01-01T00:02:00+00:00', 2, '[]', ?, 100)
+        """,
+        (str(uuid4()), ev["id"], old_proc),
+    )
+    db.execute(
+        """
+        INSERT INTO jobs (
+          id, kind, status, evidence_id, process_id, pid, created_at, progress_kind,
+          params_json, cancel_requested
+        ) VALUES (?, 'process_recommended', 'completed', ?, ?, 100,
+          '2020-01-01T00:01:00+00:00', 'indeterminate', '{}', 0)
+        """,
+        (str(uuid4()), ev["id"], old_proc),
+    )
+    listed = list_processes(db, ev["id"])
+    by_pid = {row["pid"]: row for row in listed["items"]}
+    assert by_pid[100]["process_analyzed"] is False
+    assert by_pid[200]["process_analyzed"] is False
+    db.close()
+
+
 def test_list_findings_severity_filter_and_pagination(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.db")
     img = tmp_path / "t.raw"
@@ -189,5 +345,62 @@ def test_list_findings_severity_filter_and_pagination(tmp_path: Path) -> None:
     info = list_findings(db, ev["id"], severity="info")
     assert info["total"] == 2
     assert {i["severity"] for i in info["items"]} == {"info", "informational"}
+    db.close()
+
+
+def test_list_modules_paginates_without_truncating_total(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.db")
+    img = tmp_path / "t.raw"
+    img.write_bytes(b"modules-page")
+    ev = import_evidence(db, str(img))
+    run_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'modules', 'completed', '2020-01-01T00:00:00+00:00', 2, '[]')
+        """,
+        (run_id, ev["id"]),
+    )
+    proc_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, source_plugin
+        ) VALUES (?, ?, ?, 4, 0, 'System', 'windows.pslist')
+        """,
+        (proc_id, ev["id"], run_id),
+    )
+    for i in range(5):
+        db.execute(
+            """
+            INSERT INTO modules (
+              id, evidence_id, analysis_run_id, process_id, pid, name, path,
+              base_address, size, load_count, load_time, source_plugin
+            ) VALUES (?, ?, ?, ?, 4, ?, ?, '0x1', '100', 1, NULL, 'windows.dlllist')
+            """,
+            (
+                str(uuid4()),
+                ev["id"],
+                run_id,
+                proc_id,
+                f"mod{i:02d}.dll",
+                f"C:\\mod{i:02d}.dll",
+            ),
+        )
+    page = list_modules(db, ev["id"], limit=2, offset=0)
+    assert page["total"] == 5
+    assert page["limit"] == 2
+    assert page["offset"] == 0
+    assert len(page["items"]) == 2
+    page2 = list_modules(db, ev["id"], limit=2, offset=2)
+    assert page2["total"] == 5
+    assert len(page2["items"]) == 2
+    assert {row["id"] for row in page["items"]}.isdisjoint(
+        {row["id"] for row in page2["items"]}
+    )
+    all_rows = list_modules(db, ev["id"])
+    assert all_rows["total"] == 5
+    assert len(all_rows["items"]) == 5
     db.close()
 

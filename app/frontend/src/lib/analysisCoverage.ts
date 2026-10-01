@@ -99,6 +99,7 @@ export function coverageItem(
   const item = coverage?.items?.[id] ?? notAnalyzed(id);
   if (id !== "command_lines") return item;
   if (item.state === "failed") return item;
+  if (item.updating) return item;
   if (item.count != null) return item;
   return notAnalyzed(id);
 }
@@ -118,7 +119,82 @@ export function coverageForNav(
   const id = NAV_CAPABILITY[nav];
   if (!id) return undefined;
   if (!coverage) return undefined;
+  if (nav === "processes" || nav === "process_dive") {
+    return coverageForProcessesNav(coverage);
+  }
+  if (nav === "network") {
+    return coverageForNetworkNav(coverage);
+  }
   return coverageItem(coverage, id);
+}
+
+function coverageForProcessesNav(coverage: AnalysisCoverage): CapabilityCoverage {
+  const processes = coverageItem(coverage, "processes");
+  const commandLines = coverageItem(coverage, "command_lines");
+  const procKind = coverageLiveKind(processes);
+  if (
+    procKind === "in_progress" ||
+    procKind === "partial" ||
+    procKind === "waiting_for_pdb" ||
+    procKind === "failed"
+  ) {
+    return processes;
+  }
+  if (commandLinesStillOpen(coverage, commandLines)) {
+    return {
+      ...processes,
+      state: "not_analyzed",
+      updating: true,
+    };
+  }
+  if (coverageWasExecuted(commandLines)) {
+    return processes;
+  }
+  if (coverageWasExecuted(processes) || coverageHasRows(processes)) {
+    return {
+      ...processes,
+      state: "not_analyzed",
+      updating: false,
+    };
+  }
+  return processes;
+}
+
+function commandLinesStillOpen(
+  coverage: AnalysisCoverage,
+  commandLines: CapabilityCoverage,
+): boolean {
+  if (coverageIsUpdating(commandLines) || commandLines.updating) return true;
+  const analysisLive = Object.values(coverage.items).some((item) => item.updating);
+  if (!analysisLive) return false;
+  return !coverageWasExecuted(commandLines);
+}
+
+function coverageForNetworkNav(coverage: AnalysisCoverage): CapabilityCoverage {
+  const network = coverageItem(coverage, "network");
+  const artifacts = coverageItem(coverage, "network_artifacts");
+  const netKind = coverageLiveKind(network);
+  if (
+    netKind === "in_progress" ||
+    netKind === "partial" ||
+    netKind === "waiting_for_pdb" ||
+    netKind === "failed"
+  ) {
+    return network;
+  }
+  const artKind = coverageLiveKind(artifacts);
+  if (
+    artKind === "in_progress" ||
+    artKind === "partial" ||
+    artKind === "waiting_for_pdb"
+  ) {
+    return {
+      ...network,
+      state: "not_analyzed",
+      updating: true,
+    };
+  }
+  return network;
 }
 
 export function coverageEmptyMessage(

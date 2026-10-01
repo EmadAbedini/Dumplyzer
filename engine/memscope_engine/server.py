@@ -406,6 +406,42 @@ def handle_analysis_run(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def handle_process_analyze_recommended(params: dict[str, Any]) -> dict[str, Any]:
+    evidence_id = params.get("evidence_id")
+    process_id = params.get("process_id")
+    pid = params.get("pid")
+    name = params.get("process_name") or params.get("name")
+    if not name and process_id:
+        row = _db().fetchone("SELECT name, pid FROM processes WHERE id = ?", (process_id,))
+        if row:
+            name = row.get("name")
+            if pid is None:
+                pid = row.get("pid")
+    try:
+        pid = int(pid) if pid is not None and pid is not False else None
+    except (TypeError, ValueError):
+        pid = None
+    label = f"Analyze Process PID {pid}"
+    if isinstance(name, str) and name.strip():
+        name = name.strip()
+        label = f"Analyze Process {name} (PID {pid})"
+    else:
+        name = None
+    return _jobs().submit(
+        "process_recommended",
+        evidence_id=evidence_id,
+        process_id=process_id,
+        pid=pid,
+        params={
+            "evidence_id": evidence_id,
+            "process_id": process_id,
+            "pid": pid,
+            "process_name": name,
+        },
+        message=label,
+    )
+
+
 def handle_job_submit(params: dict[str, Any]) -> dict[str, Any]:
     kind = params.get("kind")
     if not kind:
@@ -476,14 +512,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         offset=int(p.get("offset", 0)),
     ),
     "process.get": lambda p: process_analysis.get_process_deep_dive(_db(), p["process_id"]),
-    "process.analyze_recommended": lambda p: _jobs().submit(
-        "process_recommended",
-        evidence_id=p["evidence_id"],
-        process_id=p.get("process_id"),
-        pid=p.get("pid"),
-        params={"evidence_id": p["evidence_id"], "process_id": p.get("process_id"), "pid": p.get("pid")},
-        message=f"Recommended analysis PID {p.get('pid')}",
-    ),
+    "process.analyze_recommended": handle_process_analyze_recommended,
     "overview.get": lambda p: workflows.overview(_db(), p["evidence_id"]),
     "network.list": lambda p: process_analysis.list_network(_db(), p["evidence_id"]),
     "network.artifacts": lambda p: network_artifacts.list_network_artifacts(
@@ -522,7 +551,11 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         paths=_paths(),
     ),
     "modules.list": lambda p: process_analysis.list_modules(
-        _db(), p["evidence_id"], pid=p.get("pid")
+        _db(),
+        p["evidence_id"],
+        pid=p.get("pid"),
+        limit=int(p.get("limit", 500)),
+        offset=int(p.get("offset", 0)),
     ),
     "findings.list": lambda p: process_analysis.list_findings(
         _db(),
@@ -564,7 +597,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         _db(),
         _paths(),
         p["evidence_id"],
-        "xlsx",
+        "csv",
         destination=p.get("destination") or p.get("output_path"),
     ),
     "memory.list": lambda p: memory_artifacts.list_memory_regions(

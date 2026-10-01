@@ -231,7 +231,7 @@ export const TimelineHistogram = memo(function TimelineHistogram({
             className="h-6 px-2 text-xs"
             onClick={() => onRangeChange(null)}
           >
-            Clear selection
+            Clear Selection
           </Button>
         ) : (
           <span className="text-muted">Click or drag to select a time range.</span>

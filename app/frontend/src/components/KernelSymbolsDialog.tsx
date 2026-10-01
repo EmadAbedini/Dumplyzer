@@ -55,10 +55,10 @@ export function KernelSymbolsDialog({
   const downloading = blocked && pct != null && pct < 100;
   const downloadReady = pct != null && pct >= 100;
   const downloadLabel = downloadReady
-    ? "Symbol ready — continuing analysis..."
+    ? "Symbol Ready — Continuing Analysis..."
     : downloading
       ? (pct ?? 0) >= 62
-        ? "Converting symbols..."
+        ? "Converting Symbols..."
         : "Downloading Symbol..."
       : "Download & Continue";
 

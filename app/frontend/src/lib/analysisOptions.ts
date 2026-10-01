@@ -25,6 +25,12 @@ export function recommendedProfileIds(catalog: AnalysisProfileCatalog): string[]
   return rec ? [...rec.capabilities] : [];
 }
 
+export function isCompleteAnalysisJob(job: Job): boolean {
+  if (job.kind !== "analysis_profile") return false;
+  const profile = String(job.params?.profile ?? job.result?.profile ?? "").toLowerCase();
+  return profile === "full";
+}
+
 export function capabilitiesById(
   catalog: AnalysisProfileCatalog,
 ): Map<string, AnalysisCapability> {

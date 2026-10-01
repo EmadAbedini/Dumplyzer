@@ -182,6 +182,7 @@ export function ProcessDeepDiveView({
         evidence_id: evidenceId,
         process_id: processId,
         pid: data.process.pid,
+        process_name: data.process.name,
       });
       setJob(submitted);
       onJobSubmitted?.(submitted);
@@ -241,7 +242,7 @@ export function ProcessDeepDiveView({
     )
       ? "Queued"
       : analysing
-        ? `Analysing ${analyzePercentText ?? "0%"}`
+        ? `Analyzing ${analyzePercentText ?? "0%"}`
         : "Analyze Process";
   const showAnalyze = !processRecommendedCompleted || analysing;
 

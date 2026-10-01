@@ -31,6 +31,7 @@ def test_import_evidence_hashes(tmp_path: Path) -> None:
     assert again["id"] == ev["id"]
     ov = overview(db, ev["id"])
     assert ov["process_count"] == 0
+    assert ov["complete_analysis_completed"] is False
     procs = list_processes(db, ev["id"])
     assert procs["total"] == 0
     db.close()

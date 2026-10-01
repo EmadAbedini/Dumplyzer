@@ -214,10 +214,12 @@ export function TimelineView({
   };
 
   const dumpItems = useMemo(() => items.filter((e) => !isAnalysisClock(e)), [items]);
+  const loading = loadedEvidenceId !== evidenceId;
 
   useLayoutEffect(() => {
+    if (loading) return;
     onShownCountChange?.(dumpItems.length);
-  }, [dumpItems.length, onShownCountChange]);
+  }, [dumpItems.length, loading, onShownCountChange]);
 
   const eventTimes = useMemo(() => {
     const times: number[] = [];
@@ -287,7 +289,6 @@ export function TimelineView({
   const virtual = useVirtualWindow(sorted.length);
   const { scrollerRef, padTop, padBottom } = virtual;
 
-  const loading = loadedEvidenceId !== evidenceId;
   const updating = coverageIsUpdating(coverage);
   const showRebuild = !coverageWasExecuted(coverage) && coverageLiveKind(coverage) !== "in_progress";
   const missingSources = settledMissingSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.timeline);

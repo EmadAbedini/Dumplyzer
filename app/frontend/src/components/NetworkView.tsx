@@ -14,7 +14,6 @@ import {
 import {
   CoverageEmptyState,
   ImportEvidenceState,
-  ListLoadingState,
   AnalysisScopeNote,
   coverageShowsEmptyPanel,
 } from "./CoverageStatus";
@@ -91,6 +90,11 @@ function methodLabel(method: string | null | undefined): string {
 
 function typeLabel(value: string): string {
   return value.replace(/_/g, " ");
+}
+
+function inProgressCoverage(id: string, item?: CapabilityCoverage): CapabilityCoverage {
+  if (item && coverageIsUpdating(item)) return item;
+  return { id, state: "not_analyzed", count: null, updating: true };
 }
 
 export function NetworkView({
@@ -212,9 +216,6 @@ export function NetworkView({
 
   const loading = Boolean(evidenceId) && loadedEvidenceId !== evidenceId;
   if (!evidenceId) return <ImportEvidenceState title="Network" />;
-  if (loading && connections.length === 0 && coverageLiveKind(coverage) !== "in_progress") {
-    return <ListLoadingState title="Network" />;
-  }
 
   const recon = pcap?.reconstruction;
   const pcapJob = activeJobOfKind(activeJobs, "pcap_reconstruction");
@@ -227,6 +228,10 @@ export function NetworkView({
   const pcapQueued = pcapJob?.status === "queued" || recon?.status === "queued";
   const pcapPercent = jobProgressPercentText(pcapJob, nowMs);
   const actionsLocked = busy || jobsRunning;
+  const showConnectionsLoading =
+    connections.length === 0 && (loading || coverageIsUpdating(coverage));
+  const showArtifactsLoading =
+    artifacts.length === 0 && (loading || coverageIsUpdating(artifactCoverage));
 
   return (
     <div className="flex h-full flex-col text-xs">
@@ -243,19 +248,43 @@ export function NetworkView({
           ]}
         />
       </div>
-      {tab === "connections" && (
-        <ConnectionsPanel
-          coverage={coverage}
-          items={connections}
-          flowByConnection={flowByConnection}
-          filter={filter}
-          filterField={filterField}
-          onFilter={setFilter}
-          onFilterField={setFilterField}
-          onOpenProcess={onOpenProcess}
-        />
-      )}
-      {tab === "artifacts" && (
+      {tab === "connections" &&
+        (showConnectionsLoading ? (
+          <CoverageEmptyState
+            item={inProgressCoverage("network", coverage)}
+            title="Network Connections"
+            showTitle={false}
+            inProgressDetail="Network connections are still being analyzed."
+            analyzedZeroDetail="Network analysis completed and found no connections."
+            notAnalyzedDetail="This data was not collected in the analysis you ran."
+            notAnalyzedHint="Quick Triage only collects processes. Run Complete Analysis, or select Network Connections in Custom Analysis."
+            failedDetail="Network analysis failed."
+          />
+        ) : (
+          <ConnectionsPanel
+            coverage={coverage}
+            items={connections}
+            flowByConnection={flowByConnection}
+            filter={filter}
+            filterField={filterField}
+            onFilter={setFilter}
+            onFilterField={setFilterField}
+            onOpenProcess={onOpenProcess}
+          />
+        ))}
+      {tab === "artifacts" &&
+        (showArtifactsLoading ? (
+          <CoverageEmptyState
+            item={inProgressCoverage("network_artifacts", artifactCoverage)}
+            title="Network Artifacts"
+            showTitle={false}
+            inProgressDetail="Network artifacts are still being extracted."
+            analyzedZeroDetail="Network artifact extraction completed and found no recoverable indicators."
+            notAnalyzedDetail="Network artifacts are recovered from connections, command lines, and stored process text — not by rescanning the dump."
+            notAnalyzedHint="Use Extract Network Artifacts for stored results, or include Network Artifact Extraction in Complete or Custom Analysis."
+            failedDetail="Network artifact extraction failed."
+          />
+        ) : (
         <ArtifactsPanel
           coverage={artifactCoverage}
           analysisCoverage={analysisCoverage}
@@ -275,7 +304,7 @@ export function NetworkView({
           }
           extracting={actionsLocked}
         />
-      )}
+        ))}
       {tab === "pcap" && (
         <PcapPanel
           bundle={pcap}
@@ -534,7 +563,7 @@ function ArtifactsPanel({
           onQueryChange={onFilter}
           field={filterField}
           onFieldChange={onFilterField}
-          placeholder="Filter type / value / PID…"
+          placeholder="Filter Type / value / PID…"
           fields={[
             { id: "type", label: "Type" },
             { id: "value", label: "Value" },
@@ -703,16 +732,30 @@ function PcapPanel({
             Packet capture rebuilt from recovered traffic
           </div>
         </div>
-        <div className="ml-auto">
-          <Button size="sm" disabled={reconstructing || busy} onClick={onReconstruct}>
-            {queued
-              ? "Queued"
-              : reconstructing
-                ? "Reconstructing…"
-                : recon && finished
-                  ? "Reconstruct again"
-                  : "Reconstruct PCAP"}
-          </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {busy && !reconstructing ? (
+            <Badge className="normal-case tracking-normal">Waiting for analysis</Badge>
+          ) : null}
+          <span
+            className="inline-flex"
+            title={
+              reconstructing
+                ? "PCAP reconstruction is running."
+                : busy
+                  ? "Wait for analysis to finish."
+                  : undefined
+            }
+          >
+            <Button size="sm" disabled={reconstructing || busy} onClick={onReconstruct}>
+              {queued
+                ? "Queued"
+                : reconstructing
+                  ? "Reconstructing…"
+                  : recon && finished
+                    ? "Reconstruct Again"
+                    : "Reconstruct PCAP"}
+            </Button>
+          </span>
         </div>
       </div>
       {!showResults || !recon ? (

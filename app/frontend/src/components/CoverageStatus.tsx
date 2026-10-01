@@ -3,6 +3,7 @@ import { CircleAlert, CircleDashed, Info } from "lucide-react";
 import { coverageLiveKind } from "../lib/analysisCoverage";
 import type { CapabilityCoverage } from "../lib/types";
 import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 
 const NOT_ANALYZED_DETAIL =
   "This data was not collected in the analysis you ran.";
@@ -36,7 +37,7 @@ export function CoverageStatus({
     const label = n > 0 ? `${n.toLocaleString()} so far · Updating…` : "Analysis in progress";
     return (
       <span className="inline-flex items-center gap-1 text-accent" title={label} aria-label={label}>
-        <span className="tabular-nums">{n.toLocaleString()}</span>
+        {n > 0 ? <span className="tabular-nums">{n.toLocaleString()}</span> : null}
         <LiveSpinner label={label} />
         {compact ? null : <span className="text-muted">Updating…</span>}
       </span>
@@ -45,10 +46,10 @@ export function CoverageStatus({
 
   if (kind === "partial") {
     const n = count ?? 0;
-    const label = `${n.toLocaleString()} so far · Updating…`;
+    const label = n > 0 ? `${n.toLocaleString()} so far · Updating…` : "Analysis in progress";
     return (
       <span className="inline-flex items-center gap-1" title={label} aria-label={label}>
-        <span>{n.toLocaleString()}</span>
+        {n > 0 ? <span>{n.toLocaleString()}</span> : null}
         {compact ? <LiveSpinner label={label} /> : <span className="text-muted">Updating…</span>}
       </span>
     );
@@ -280,6 +281,29 @@ export function coverageShowsEmptyPanel(item: CapabilityCoverage | undefined, ro
     kind === "failed" ||
     kind === "waiting_for_pdb" ||
     kind === "analyzed_zero" ||
-    kind === "analyzed"
+    kind === "analyzed" ||
+    kind === "in_progress" ||
+    kind === "partial"
+  );
+}
+
+export function LoadMoreBar({
+  loaded,
+  total,
+  busy = false,
+  onLoadMore,
+}: {
+  loaded: number;
+  total: number;
+  busy?: boolean;
+  onLoadMore: () => void;
+}) {
+  if (loaded <= 0 || loaded >= total) return null;
+  return (
+    <div className="flex justify-center px-3 py-3">
+      <Button size="sm" variant="outline" disabled={busy} onClick={onLoadMore}>
+        Load More ({loaded.toLocaleString()} of {total.toLocaleString()})
+      </Button>
+    </div>
   );
 }

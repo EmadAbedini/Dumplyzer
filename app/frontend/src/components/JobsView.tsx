@@ -7,7 +7,6 @@ import {
   jobStatusLabel,
 } from "../lib/analysisOptions";
 import {
-  jobAnalysisLabel,
   jobAnalysisTitle,
   jobFileName,
   jobStatusDisplay,
@@ -101,7 +100,7 @@ export function JobsView({ evidenceFilename, refreshToken, onError }: Props) {
   const sortValue = useCallback(
     (job: Job, key: string) => {
       if (key === "status") return jobStatusLabel(job, cancellingIds);
-      if (key === "analysis") return jobAnalysisLabel(job);
+      if (key === "analysis") return jobAnalysisTitle(job);
       if (key === "file") return jobFileName(job, evidenceFilename);
       if (key === "message") return jobTableMessage(job, cancellingIds).text;
       return "";
@@ -174,9 +173,9 @@ export function JobsView({ evidenceFilename, refreshToken, onError }: Props) {
               const cancelling = isJobCancelling(j, cancellingIds);
               const statusLabel = jobStatusLabel(j, cancellingIds);
               const canCancel = isActiveJobStatus(j.status);
-              const analysis = jobAnalysisLabel(j);
               const fileName = jobFileName(j, evidenceFilename);
               const message = jobTableMessage(j, cancellingIds, nowMs);
+              const analysisTitle = jobAnalysisTitle(j);
               return (
               <tr key={j.id} className="border-t border-border/40">
                 <td className="jobs-status-cell px-2 py-1">
@@ -184,8 +183,8 @@ export function JobsView({ evidenceFilename, refreshToken, onError }: Props) {
                     {jobStatusDisplay(statusLabel)}
                   </Badge>
                 </td>
-                <td className="px-2 py-1" title={jobAnalysisTitle(j)}>
-                  {analysis}
+                <td className="jobs-analysis-cell px-2 py-1" title={analysisTitle}>
+                  {analysisTitle}
                 </td>
                 <td className="jobs-file-cell px-2 py-1" title={fileName === "—" ? undefined : fileName}>
                   {fileName}
@@ -198,7 +197,7 @@ export function JobsView({ evidenceFilename, refreshToken, onError }: Props) {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="jobs-cancel-btn h-6 px-2 border-danger/50 bg-danger/10 text-danger hover:border-danger hover:bg-danger/20"
+                      className="jobs-cancel-btn px-2 border-danger/50 bg-danger/10 text-danger hover:border-danger hover:bg-danger/20"
                       disabled={cancelling}
                       onClick={() => cancel(j.id)}
                     >

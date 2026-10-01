@@ -16,6 +16,7 @@ import {
   CoverageEmptyState,
   CenteredLoading,
   ImportEvidenceState,
+  LoadMoreBar,
 } from "./CoverageStatus";
 import {
   DERIVED_SOURCE_IDS,
@@ -40,6 +41,7 @@ import { RefreshButton, StatusToast, useStatusToast } from "./StatusToast";
 
 const SEARCH_LIMIT = 300;
 const IOC_PAGE = 300;
+const iocTypeCountCache = new Map<string, Record<string, number>>();
 
 const SEARCH_FIELDS = [
   {
@@ -373,12 +375,13 @@ export function IocsView({
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
-  const [hasMore, setHasMore] = useState(false);
+  const [typeCounts, setTypeCounts] = useState<Record<string, number>>(
+    () => (evidenceId ? iocTypeCountCache.get(evidenceId) ?? {} : {}),
+  );
+  const [listedTotal, setListedTotal] = useState(0);
   const [listBusy, setListBusy] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [exporting, setExporting] = useState<"json" | "xlsx" | null>(null);
-  const [listedTotal, setListedTotal] = useState(0);
+  const [exporting, setExporting] = useState<"json" | "xlsx" | "csv" | null>(null);
   const [extractedHere, setExtractedHere] = useState(false);
   const loadGen = useRef(0);
   const { toast, showToast } = useStatusToast();
@@ -389,7 +392,6 @@ export function IocsView({
       const gen = ++loadGen.current;
       if (!append) {
         setItems([]);
-        setHasMore(false);
       }
       setListBusy(true);
       try {
@@ -408,15 +410,15 @@ export function IocsView({
         const next = append ? [...itemsRef.current, ...res.items] : res.items;
         setItems(next);
         setListedTotal(res.total);
-        setTypeCounts(res.type_counts ?? {});
-        setHasMore(next.length < res.total);
+        const counts = res.type_counts ?? {};
+        setTypeCounts(counts);
+        if (evidenceId) iocTypeCountCache.set(evidenceId, counts);
       } catch (e) {
         if (gen !== loadGen.current) return;
         if (!append) {
           setItems([]);
           setListedTotal(0);
           setTypeCounts({});
-          setHasMore(false);
         }
         throw e;
       } finally {
@@ -433,7 +435,7 @@ export function IocsView({
     setExtractedHere(false);
     setTypeFilter(null);
     setItems([]);
-    setTypeCounts({});
+    setTypeCounts(evidenceId ? iocTypeCountCache.get(evidenceId) ?? {} : {});
   }, [evidenceId]);
 
   useEffect(() => {
@@ -479,32 +481,49 @@ export function IocsView({
     }
   };
 
-  const doExport = async (fmt: "json" | "xlsx") => {
+  const doExport = async (fmt: "json" | "xlsx" | "csv") => {
     if (!evidenceId || exporting) return;
+    const spec =
+      fmt === "json"
+        ? {
+            method: "iocs.export_json" as const,
+            defaultPath: "iocs-json.zip",
+            filters: [{ name: "ZIP archive", extensions: ["zip"] }],
+            ext: ".zip",
+          }
+        : fmt === "csv"
+          ? {
+              method: "iocs.export_csv" as const,
+              defaultPath: "iocs.csv",
+              filters: [{ name: "CSV", extensions: ["csv"] }],
+              ext: ".csv",
+            }
+          : {
+              method: "iocs.export_xlsx" as const,
+              defaultPath: "iocs.xlsx",
+              filters: [{ name: "Excel workbook", extensions: ["xlsx"] }],
+              ext: ".xlsx",
+            };
     let dest: string | null;
     try {
       dest = await save({
         title: "Save IOC export",
-        defaultPath: fmt === "json" ? "iocs-json.zip" : "iocs.xlsx",
-        filters:
-          fmt === "json"
-            ? [{ name: "ZIP archive", extensions: ["zip"] }]
-            : [{ name: "Excel workbook", extensions: ["xlsx"] }],
+        defaultPath: spec.defaultPath,
+        filters: spec.filters,
       });
     } catch (e) {
       onError(e instanceof EngineClientError ? e.message : String(e));
       return;
     }
     if (dest == null || dest === "") return;
-    const ext = fmt === "json" ? ".zip" : ".xlsx";
-    if (!dest.toLowerCase().endsWith(ext)) dest = `${dest}${ext}`;
+    if (!dest.toLowerCase().endsWith(spec.ext)) dest = `${dest}${spec.ext}`;
     setExporting(fmt);
     try {
       const res = await engineCall<{
         count: number;
         type_count?: number;
         primary_path: string | null;
-      }>(fmt === "json" ? "iocs.export_json" : "iocs.export_xlsx", {
+      }>(spec.method, {
         evidence_id: evidenceId,
       });
       if (!res.primary_path) {
@@ -513,7 +532,7 @@ export function IocsView({
       await copyExportFile(res.primary_path, dest);
       const types = res.type_count ?? 0;
       showToast(
-        types > 1
+        fmt === "json" && types > 1
           ? `Saved ${res.count.toLocaleString()} IOCs in ${types} files`
           : `Saved ${res.count.toLocaleString()} IOCs`,
       );
@@ -556,6 +575,14 @@ export function IocsView({
   const actionsLocked = busy || updating || exporting !== null;
   const iocTotal = coverage?.count ?? listedTotal;
   const captionTotal = typeFilter ? listedTotal : iocTotal;
+  const iocCoverageKind = coverageLiveKind(coverage);
+  const showFilterType =
+    typeEntries.length > 0 ||
+    (loading &&
+      (iocCoverageKind === "analyzed" ||
+        iocCoverageKind === "in_progress" ||
+        iocCoverageKind === "has_results" ||
+        iocCoverageKind === "partial"));
   const showExtract =
     !coverageWasExecuted(coverage) && coverageLiveKind(coverage) !== "in_progress";
   const missingSources = settledMissingSourceIds(analysisCoverage, DERIVED_SOURCE_IDS.iocs);
@@ -613,6 +640,14 @@ export function IocsView({
         >
           {exporting === "xlsx" ? "Saving…" : "Export Excel"}
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void doExport("csv")}
+          disabled={actionsLocked}
+        >
+          {exporting === "csv" ? "Saving…" : "Export CSV"}
+        </Button>
         <ResultFilterBar
           query={filter}
           onQueryChange={setFilter}
@@ -628,9 +663,9 @@ export function IocsView({
           ]}
         />
       </div>
-      {typeEntries.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
-          <span className="mr-1 text-[0.78rem] font-semibold text-muted">Filter type</span>
+      {showFilterType ? (
+        <div className="flex min-h-9 flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
+          <span className="mr-1 text-[0.78rem] font-semibold text-muted">Filter Type</span>
           {typeEntries.map(([type, count]) => {
             const active = typeFilter === type;
             return (
@@ -717,21 +752,17 @@ export function IocsView({
             )}
           </tbody>
         </table>
-        {hasMore && !filter.trim() ? (
-          <div className="flex justify-center border-t border-border px-3 py-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={actionsLocked}
-              onClick={() => {
-                void load(true).catch((e) =>
-                  onError(e instanceof EngineClientError ? e.message : String(e)),
-                );
-              }}
-            >
-              Load more ({items.length.toLocaleString()} of {listedTotal.toLocaleString()})
-            </Button>
-          </div>
+        {!filter.trim() ? (
+          <LoadMoreBar
+            loaded={items.length}
+            total={listedTotal}
+            busy={actionsLocked || listBusy}
+            onLoadMore={() => {
+              void load(true).catch((e) =>
+                onError(e instanceof EngineClientError ? e.message : String(e)),
+              );
+            }}
+          />
         ) : null}
       </div>
       )}

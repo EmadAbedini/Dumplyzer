@@ -11,7 +11,10 @@ from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
-from memscope_engine.analysis.coverage import coverage_for_evidence
+from memscope_engine.analysis.coverage import (
+    complete_analysis_completed,
+    coverage_for_evidence,
+)
 from memscope_engine.errors import AppError
 from memscope_engine.memory_image import require_memory_image
 from memscope_engine.storage import Database
@@ -535,7 +538,22 @@ def list_processes(
     params.extend([limit, offset])
     rows = db.fetchall(
         f"""
-        SELECT * FROM processes
+        SELECT processes.*,
+          (
+            EXISTS (
+              SELECT 1 FROM analysis_runs ar
+              WHERE ar.process_id = processes.id
+                AND ar.kind = 'process_recommended'
+                AND ar.status = 'completed'
+            )
+            OR EXISTS (
+              SELECT 1 FROM jobs j
+              WHERE j.process_id = processes.id
+                AND j.kind = 'process_recommended'
+                AND j.status = 'completed'
+            )
+          ) AS process_analyzed
+        FROM processes
         WHERE {where}
         ORDER BY pid ASC
         LIMIT ? OFFSET ?
@@ -577,6 +595,7 @@ def overview(db: Database, evidence_id: str) -> dict[str, Any]:
         "ioc_count": _count("iocs") if _table_exists(db, "iocs") else 0,
         "recent_runs": runs,
         "coverage": coverage_for_evidence(db, evidence_id),
+        "complete_analysis_completed": complete_analysis_completed(db, evidence_id),
     }
 
 
@@ -633,4 +652,5 @@ def _process_dto(row: dict[str, Any]) -> dict[str, Any]:
         "session_id": row.get("session_id"),
         "wow64": bool(wow) if wow is not None else None,
         "source_plugin": row.get("source_plugin"),
+        "process_analyzed": bool(row.get("process_analyzed")),
     }

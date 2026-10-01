@@ -218,7 +218,7 @@ table {
 }
 
 .app-jobs-table col.jobs-analysis {
-  width: 11rem;
+  width: 18rem;
 }
 
 .app-jobs-table col.jobs-file {
@@ -244,6 +244,7 @@ table {
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
+  height: 2.35rem;
 }
 
 .app-jobs-table > thead > tr > th:first-child,
@@ -263,6 +264,10 @@ table {
   padding-block: 0;
 }
 
+.app-jobs-table > tbody > tr > td.jobs-analysis-cell {
+  text-overflow: ellipsis;
+}
+
 .app-jobs-table > tbody > tr > td.jobs-message-cell {
   max-width: 16rem;
 }
@@ -271,10 +276,11 @@ table {
   white-space: normal;
   text-overflow: clip;
   max-width: none;
+  height: auto;
 }
 
 .app-jobs-table .jobs-cancel-btn {
-  height: 1.5rem;
+  height: 1.35rem;
   min-width: 7.25rem;
   margin-inline: auto;
   padding-inline: 0.5rem;
@@ -410,6 +416,19 @@ table {
 .app-result-table > tbody > tr.app-row-active:hover:not(.app-row-empty) {
   background: color-mix(in srgb, var(--accent) 16%, var(--surface));
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.app-result-table > tbody > tr.app-row-analyzed:not(.app-row-active),
+.app-result-table > tbody > tr.app-row-analyzed:nth-child(even):not(.app-row-active),
+.app-result-table > tbody > tr.app-row-analyzed:hover:not(.app-row-empty):not(.app-row-active) {
+  background: color-mix(in srgb, var(--success) 16%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--success);
+}
+
+.app-result-table > tbody > tr.app-row-analyzed.app-row-active,
+.app-result-table > tbody > tr.app-row-analyzed.app-row-active:nth-child(even),
+.app-result-table > tbody > tr.app-row-analyzed.app-row-active:hover:not(.app-row-empty) {
+  box-shadow: inset 3px 0 0 var(--success);
 }
 
 .selected-record-detail {

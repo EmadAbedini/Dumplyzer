@@ -32,6 +32,7 @@ import {
   coverageShownInView,
   coverageFromJobResult,
   coverageFromOverview,
+  coverageForNav,
   coverageItem,
   coverageProcessListReady,
   coverageRefreshKey,
@@ -43,6 +44,7 @@ import {
   evidenceFromImportJob,
   formatUserError,
   isActiveJobStatus,
+  isCompleteAnalysisJob,
   isNotMemoryImageError,
   jobErrorPayload,
   jobPercent,
@@ -72,6 +74,7 @@ import type {
 import "./styles.css";
 
 const ERROR_TOAST_MS = 5000;
+const PROCESS_PAGE = 5000;
 
 function retryPayloadFromJob(job: Job): { method: string; params: Record<string, unknown> } {
   if (job.kind === "analysis_profile") {
@@ -99,6 +102,7 @@ export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [processes, setProcesses] = useState<ProcessRow[]>([]);
   const [processTotal, setProcessTotal] = useState(0);
+  const [processLoadBusy, setProcessLoadBusy] = useState(false);
   const [memoryShownCount, setMemoryShownCount] = useState(0);
   const [timelineShownCount, setTimelineShownCount] = useState<number | null>(null);
   const [artifactsShownCount, setArtifactsShownCount] = useState<number | null>(null);
@@ -135,6 +139,7 @@ export default function App() {
     null,
   );
   const lastProcessCountRef = useRef<number | null>(null);
+  const lastCommandLineKeyRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     notifyMainWindowReady();
@@ -334,18 +339,45 @@ export default function App() {
     });
     setOverview(ov);
     setEvidence(ov.evidence);
+    return ov;
   }, []);
 
   const refreshEvidenceViews = useCallback(async (ev: Evidence) => {
-    await refreshOverview(ev);
+    const ov = await refreshOverview(ev);
     const procs = await engineCall<{ items: ProcessRow[]; total: number }>(
       "processes.list",
-      { evidence_id: ev.id, limit: 10000, offset: 0 },
+      { evidence_id: ev.id, limit: PROCESS_PAGE, offset: 0 },
     );
     setProcesses(procs.items);
     setProcessTotal(procs.total);
     lastProcessCountRef.current = procs.total;
+    const commandLineItem = ov.coverage?.items?.command_lines;
+    lastCommandLineKeyRef.current = [
+      commandLineItem?.count ?? "",
+      commandLineItem?.state ?? "",
+      commandLineItem?.updating ? "1" : "",
+    ].join(":");
   }, [refreshOverview]);
+
+  const loadMoreProcesses = useCallback(async () => {
+    if (!evidence || processes.length >= processTotal) return;
+    setProcessLoadBusy(true);
+    try {
+      const procs = await engineCall<{ items: ProcessRow[]; total: number }>(
+        "processes.list",
+        { evidence_id: evidence.id, limit: PROCESS_PAGE, offset: processes.length },
+      );
+      setProcesses((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...procs.items.filter((p) => !seen.has(p.id))];
+      });
+      setProcessTotal(procs.total);
+    } catch (err) {
+      if (err instanceof EngineClientError) presentError(err.payload);
+    } finally {
+      setProcessLoadBusy(false);
+    }
+  }, [evidence, processes.length, processTotal, presentError]);
 
   useEffect(() => {
     if (!evidence) return;
@@ -398,6 +430,7 @@ export default function App() {
       setProcesses([]);
       setProcessTotal(0);
       lastProcessCountRef.current = null;
+      lastCommandLineKeyRef.current = null;
       setMemoryShownCount(0);
       setTimelineShownCount(null);
       setArtifactsShownCount(null);
@@ -448,6 +481,7 @@ export default function App() {
         try {
           const still: string[] = [];
           let finished = false;
+          let completeAnalysisJustFinished = false;
           const found: Job[] = [];
           const tickGen = importGenerationRef.current;
           const watchedImportId = importJobId;
@@ -486,6 +520,9 @@ export default function App() {
                 found.push(j);
               } else {
                 finished = true;
+                if (j.status === "completed" && isCompleteAnalysisJob(j)) {
+                  completeAnalysisJustFinished = true;
+                }
                 if (j.kind === "kernel_symbols_fetch") {
                   continue;
                 }
@@ -500,6 +537,11 @@ export default function App() {
             }
           }
           if (cancelled) return;
+          if (completeAnalysisJustFinished) {
+            setOverview((prev) =>
+              prev ? { ...prev, complete_analysis_completed: true } : prev,
+            );
+          }
           setActiveJobIds((prev) => {
             const next = still.filter((id) => id !== watchedImportId);
             if (prev.length === next.length && prev.every((id, i) => id === next[i])) {
@@ -512,35 +554,46 @@ export default function App() {
             .map((job) => coverageFromJobResult(job.result))
             .find((item): item is NonNullable<typeof item> => Boolean(item));
           if (liveCoverage) {
-            setOverview((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    coverage: liveCoverage,
-                    process_count:
-                      liveCoverage.items.processes?.count ?? prev.process_count,
-                  }
-                : prev,
-            );
+            const applyCoverage = () => {
+              setOverview((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      coverage: liveCoverage,
+                      process_count:
+                        liveCoverage.items.processes?.count ?? prev.process_count,
+                    }
+                  : prev,
+              );
+            };
             const processCount = liveCoverage.items.processes?.count;
-            if (
-              evidence &&
-              processCount != null &&
-              processCount !== lastProcessCountRef.current
-            ) {
-              lastProcessCountRef.current = processCount;
+            const commandLineItem = liveCoverage.items.command_lines;
+            const commandLineKey = [
+              commandLineItem?.count ?? "",
+              commandLineItem?.state ?? "",
+              commandLineItem?.updating ? "1" : "",
+            ].join(":");
+            const processCountChanged =
+              processCount != null && processCount !== lastProcessCountRef.current;
+            const commandLinesChanged = commandLineKey !== lastCommandLineKeyRef.current;
+            if (evidence && (processCountChanged || commandLinesChanged)) {
               try {
                 const procs = await engineCall<{ items: ProcessRow[]; total: number }>(
                   "processes.list",
-                  { evidence_id: evidence.id, limit: 10000, offset: 0 },
+                  { evidence_id: evidence.id, limit: PROCESS_PAGE, offset: 0 },
                 );
                 if (!cancelled) {
+                  if (processCount != null) lastProcessCountRef.current = processCount;
+                  lastCommandLineKeyRef.current = commandLineKey;
                   setProcesses(procs.items);
                   setProcessTotal(procs.total);
+                  applyCoverage();
                 }
               } catch {
-                /* ignore transient */
+                if (!cancelled) applyCoverage();
               }
+            } else if (!cancelled) {
+              applyCoverage();
             }
           }
           if (finished) {
@@ -730,6 +783,7 @@ export default function App() {
     setProcesses([]);
     setProcessTotal(0);
     lastProcessCountRef.current = null;
+    lastCommandLineKeyRef.current = null;
     setMemoryShownCount(0);
     setTimelineShownCount(null);
     setArtifactsShownCount(null);
@@ -742,7 +796,7 @@ export default function App() {
   }, []);
 
   const onAnalyze = useCallback(async () => {
-    if (!evidence) return;
+    if (!evidence || overview?.complete_analysis_completed) return;
     try {
       await loadCatalog();
       analysisPromptAfterImportRef.current = false;
@@ -751,7 +805,7 @@ export default function App() {
       if (err instanceof EngineClientError) presentError(err.payload);
       else presentError({ message: String(err) });
     }
-  }, [evidence, loadCatalog, presentError]);
+  }, [evidence, loadCatalog, overview?.complete_analysis_completed, presentError]);
 
   const onRunAnalysis = useCallback(
     async (profile: "full" | "recommended" | "custom", capabilities: string[]) => {
@@ -803,6 +857,7 @@ export default function App() {
   const jobsRunning =
     activeJobIds.length > 0 ||
     Boolean(importJob && isActiveJobStatus(importJob.status));
+  const completeAnalysisDone = Boolean(overview?.complete_analysis_completed);
   const jobsPercent = averageJobProgressPercentText(
     [
       ...activeJobs,
@@ -873,8 +928,10 @@ export default function App() {
           loading={false}
           selectedId={selectedProcessId}
           onSelect={onSelectProcess}
-          coverage={coverageItem(coverage, "processes")}
+          coverage={coverageForNav(coverage, "processes")}
           analysisCoverage={coverage}
+          loadMoreBusy={processLoadBusy}
+          onLoadMore={() => void loadMoreProcesses()}
         />
       );
       break;
@@ -888,6 +945,7 @@ export default function App() {
             onBack={() => {
               setSelectedProcessId(null);
               setNav("processes");
+              if (evidence) void refreshEvidenceViews(evidence).catch(() => undefined);
             }}
             onOpenProcess={(id) => {
               setSelectedProcessId(id);
@@ -1131,7 +1189,10 @@ export default function App() {
         appVersion={appMeta.version}
         onImport={() => void onImport()}
         onAnalyze={() => void onAnalyze()}
-        canAnalyze={!!evidence && !importing && !jobsRunning}
+        canAnalyze={!!evidence && !importing && !jobsRunning && !completeAnalysisDone}
+        analyzeDisabledReason={
+          completeAnalysisDone ? "Complete Analysis already finished." : undefined
+        }
       />
       {importJob && importJobIdRef.current === importJob.id && (
         <ImportProgressBanner

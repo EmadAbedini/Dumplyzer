@@ -149,6 +149,7 @@ def test_analysis_run_persists_full_profile(tmp_path: Path, monkeypatch: pytest.
             continue
         assert items[cid]["state"] == "analyzed_zero", cid
         assert items[cid]["count"] == 0
+    assert overview(db, ev["id"])["complete_analysis_completed"] is True
     assert items["memory_vad"]["state"] == "not_analyzed"
     assert items["artifacts"]["state"] == "not_analyzed"
     assert items["recommended"]["state"] == "not_analyzed"
@@ -415,6 +416,7 @@ def test_analysis_run_handler_queues_job(tmp_path: Path, monkeypatch: pytest.Mon
     assert "analysis_profile" in kinds
     run = next(r for r in ov["recent_runs"] if r["kind"] == "analysis_profile")
     assert run["status"] == "completed"
+    assert ov["complete_analysis_completed"] is False
 
 
 def test_analysis_run_rejects_empty_custom_before_queue(
@@ -672,6 +674,8 @@ def test_nested_triage_keeps_full_analysis_pending(tmp_path: Path) -> None:
     )
     items = coverage_for_evidence(db, ev["id"])["items"]
     assert items["processes"]["state"] in ("analyzed", "analyzed_zero")
+    assert items["command_lines"]["updating"] is True
+    assert items["command_lines"]["state"] == "not_analyzed"
     for cid in ("findings", "iocs", "timeline", "modules", "network", "handles", "network_artifacts"):
         assert items[cid]["state"] == "not_analyzed", cid
         assert items[cid]["count"] == 0, cid
@@ -906,6 +910,35 @@ def test_timeline_count_shows_after_page_rebuild(tmp_path: Path) -> None:
     )
     items = coverage_for_evidence(db, ev["id"])["items"]
     assert items["timeline"]["state"] == "not_analyzed"
+    assert items["timeline"]["count"] == 1
+    db.close()
+
+
+def test_timeline_coverage_count_excludes_analysis_clock_events(tmp_path: Path) -> None:
+    from memscope_engine.analysis.coverage import coverage_for_evidence
+
+    db, ev = _import(tmp_path)
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, provenance_json, created_at
+        ) VALUES (?, ?, datetime('now'), 'observed', 'observed', 'process_create',
+          'pid 4', 'processes', '{}', datetime('now'))
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    db.execute(
+        """
+        INSERT INTO timeline_events (
+          id, evidence_id, event_time, time_precision, classification, event_kind,
+          summary, source_table, provenance_json, created_at
+        ) VALUES (?, ?, datetime('now'), 'analysis_time', 'inferred', 'network_artifacts',
+          'harvested', 'network_artifact_runs', '{}', datetime('now'))
+        """,
+        (str(uuid4()), ev["id"]),
+    )
+    items = coverage_for_evidence(db, ev["id"])["items"]
     assert items["timeline"]["count"] == 1
     db.close()
 

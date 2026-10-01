@@ -6,7 +6,7 @@ import { useTableSort } from "../lib/tableSort";
 import { coverageResultCaption } from "../lib/analysisCoverage";
 import { capabilityHasStoredData } from "../lib/analysisScope";
 import type { AnalysisCoverage, ProcessRow, CapabilityCoverage } from "../lib/types";
-import { CoverageEmptyState, ImportEvidenceState, AnalysisScopeNote, coverageShowsEmptyPanel } from "./CoverageStatus";
+import { CoverageEmptyState, ImportEvidenceState, AnalysisScopeNote, coverageShowsEmptyPanel, LoadMoreBar } from "./CoverageStatus";
 import { ResultFilterBar } from "./ResultFilterBar";
 import { SortableTh } from "./SortableTh";
 
@@ -19,6 +19,8 @@ type Props = {
   onSelect: (p: ProcessRow) => void;
   coverage?: CapabilityCoverage;
   analysisCoverage?: AnalysisCoverage;
+  loadMoreBusy?: boolean;
+  onLoadMore?: () => void;
 };
 
 export function ProcessExplorer({
@@ -30,6 +32,8 @@ export function ProcessExplorer({
   onSelect,
   coverage,
   analysisCoverage,
+  loadMoreBusy = false,
+  onLoadMore,
 }: Props) {
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
@@ -83,7 +87,7 @@ export function ProcessExplorer({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <div className="min-w-0 shrink-0">
           <div className="flex items-baseline gap-2">
@@ -139,6 +143,7 @@ export function ProcessExplorer({
             {sorted.map((p) => {
               const label = `Open details for ${p.name ?? "process"} (PID ${p.pid})`;
               const open = () => onSelect(p);
+              const analyzed = Boolean(p.process_analyzed);
               const onRowKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
@@ -150,13 +155,14 @@ export function ProcessExplorer({
                 key={p.id}
                 tabIndex={0}
                 role="link"
-                aria-label={label}
-                title={label}
+                aria-label={analyzed ? `${label}. Analyze Process completed.` : label}
+                title={analyzed ? `${label}. Analyze Process completed.` : label}
                 onClick={open}
                 onKeyDown={onRowKey}
                 className={
                   "cursor-pointer border-t border-border/40 " +
-                  (selectedId === p.id ? "app-row-active" : "")
+                  (selectedId === p.id ? "app-row-active " : "") +
+                  (analyzed ? "app-row-analyzed " : "")
                 }
               >
                 <td className="whitespace-nowrap px-2 py-1 font-mono">{p.pid}</td>
@@ -186,6 +192,14 @@ export function ProcessExplorer({
             )}
           </tbody>
         </table>
+        {!filter.trim() && onLoadMore ? (
+          <LoadMoreBar
+            loaded={items.length}
+            total={total}
+            busy={loadMoreBusy}
+            onLoadMore={onLoadMore}
+          />
+        ) : null}
       </div>
     </div>
   );

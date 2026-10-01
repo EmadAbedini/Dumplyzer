@@ -130,6 +130,63 @@ def test_list_jobs_includes_evidence_filename(tmp_path: Path) -> None:
     db.close()
 
 
+def test_list_jobs_includes_process_pid_and_name(tmp_path: Path) -> None:
+    db = Database(tmp_path / "j.db")
+    eid = "ev-proc"
+    db.execute(
+        """
+        INSERT INTO evidence (
+          id, path, filename, size_bytes, sha256,
+          symbol_status, import_status, import_timestamp
+        ) VALUES (?, ?, ?, 8, ?, 'unknown', 'imported', ?)
+        """,
+        (eid, str(tmp_path / "case.dmp"), "case.dmp", "sha-proc-1", "2020-01-01T00:00:00+00:00"),
+    )
+    run_id = "run-proc"
+    db.execute(
+        """
+        INSERT INTO analysis_runs (
+          id, evidence_id, kind, status, started_at, schema_version, strategy_json
+        ) VALUES (?, ?, 'basic_triage', 'completed', '2020-01-01T00:00:00+00:00', 2, '[]')
+        """,
+        (run_id, eid),
+    )
+    proc_id = "proc-1"
+    db.execute(
+        """
+        INSERT INTO processes (
+          id, evidence_id, analysis_run_id, pid, ppid, name, source_plugin
+        ) VALUES (?, ?, ?, 1840, 4, 'explorer.exe', 'windows.pslist')
+        """,
+        (proc_id, eid, run_id),
+    )
+    jobs = JobManager(db)
+
+    def handler(_db, params, cancelled, progress):
+        return {"ok": True}
+
+    jobs.register("process_recommended", handler)
+    jobs.start()
+    job = jobs.submit(
+        "process_recommended",
+        evidence_id=eid,
+        process_id=proc_id,
+        pid=1840,
+        params={"process_name": "explorer.exe", "pid": 1840},
+        message="Analyze Process explorer.exe (PID 1840)",
+    )
+    for _ in range(80):
+        if jobs.get(job["id"])["status"] in ("completed", "failed", "cancelled"):
+            break
+        time.sleep(0.02)
+    listed = jobs.list_jobs(evidence_id=eid)
+    assert listed
+    assert listed[0]["pid"] == 1840
+    assert listed[0]["process_name"] == "explorer.exe"
+    assert listed[0]["params"]["pid"] == 1840
+    db.close()
+
+
 def test_list_jobs_omits_bulky_result_payload(tmp_path: Path) -> None:
     db = Database(tmp_path / "j.db")
     jobs = JobManager(db)
@@ -505,6 +562,8 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "jobPollBusyRef" in app
     assert "coverageFromJobResult" in app
     assert "lastProcessCountRef" in app
+    assert "lastCommandLineKeyRef" in app
+    assert 'coverageForNav(coverage, "processes")' in app
     assert "fast ? 500 : 1500" in app
     assert "setInterval(() => void poll(), 500)" in app
     assert "setInterval(() => void load(), 2000)" in view
@@ -542,11 +601,47 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert ">Action<" in view
     assert "Math.round" in helpers
     assert "toFixed(2)" not in helpers
-    assert "Complete Analysis" in helpers
+    assert "isCompleteAnalysisJob" in helpers
+    assert "complete_analysis_completed" in app
+    assert "Complete Analysis already finished." in app
     assert "Quick Triage" in helpers
     assert "Waiting to start" in helpers
     assert "Custom Analysis" in helpers
     assert "Memory Image Import" in display
+    assert "sum / started" in display
+    assert "Queued jobs are omitted" in display
+    assert "process_name" in display
+    assert "jobProcessDetail" in display
+    assert "jobs-analysis-cell" in view
+    assert "${label} - ${detail}" in display
+    assert "jobs-analysis-process" not in view
+    assert "coverageForProcessesNav" in coverage_lib
+    assert "commandLinesStillOpen" in coverage_lib
+    assert "coverageForNetworkNav" in coverage_lib
+    assert "Wait for analysis to finish." in network_view
+    assert "Waiting for analysis" in network_view
+    assert "showConnectionsLoading" in network_view
+    assert "inProgressCoverage" in network_view
+    assert "Network connections are still being analyzed." in network_view
+    assert "Network artifacts are still being extracted." in network_view
+    assert "Results will appear here automatically when available." in coverage
+    assert 'kind === "in_progress"' in coverage
+    timeline_view = (
+        root / "app" / "frontend" / "src" / "components" / "TimelineArtifactsViews.tsx"
+    ).read_text(encoding="utf-8")
+    assert "if (loading) return" in timeline_view
+    assert "process_analyzed" in (
+        root / "app" / "frontend" / "src" / "components" / "ProcessExplorer.tsx"
+    ).read_text(encoding="utf-8")
+    assert "app-row-analyzed" in (
+        root / "app" / "frontend" / "src" / "components" / "ProcessExplorer.tsx"
+    ).read_text(encoding="utf-8")
+    assert "app-row-analyzed" in (
+        root / "app" / "frontend" / "src" / "styles.css"
+    ).read_text(encoding="utf-8")
+    assert "app-analyzed-badge" not in (
+        root / "app" / "frontend" / "src" / "components" / "ProcessExplorer.tsx"
+    ).read_text(encoding="utf-8")
     assert "Modules / DLLs" in helpers
     assert "ANALYSIS_PROFILE_COPY" in display
     assert "windows.dlllist" not in view
@@ -615,6 +710,17 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "onShownCountChange" in artifacts_view
     assert "onCoverageRefresh" in timeline_view
     assert "Artifact extraction ${scan.ui_state || scan.status}." not in be_view
+    assert "FEATURE_PAGE" in be_view
+    assert "LoadMoreBar" in be_view
+    coverage_ui = (
+        root / "app" / "frontend" / "src" / "components" / "CoverageStatus.tsx"
+    ).read_text(encoding="utf-8")
+    assert "Load More" in coverage_ui
+    process_explorer = (
+        root / "app" / "frontend" / "src" / "components" / "ProcessExplorer.tsx"
+    ).read_text(encoding="utf-8")
+    assert "LoadMoreBar" in process_explorer
+    assert "PROCESS_PAGE" in app
     assert "sidebarCoverage" in app
     assert "coverageHasSearchableData" in coverage_lib
     assert "coverageProcessListReady" in coverage_lib
@@ -625,13 +731,14 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     investigation = (
         root / "app" / "frontend" / "src" / "components" / "InvestigationViews.tsx"
     ).read_text(encoding="utf-8")
-    assert "Filter type" in investigation
-    assert "Load more" in investigation
+    assert "Filter Type" in investigation
+    assert "LoadMoreBar" in investigation
     assert "FINDING_PAGE" in investigation
+    assert "MODULE_PAGE" in investigation
     assert "iocsScopeNote" in scope
     assert "searchScopeNote" in scope
     assert "jobProgressPercentText" in dive
-    assert 'Analysing ${analyzePercentText ?? "0%"}' in dive
+    assert 'Analyzing ${analyzePercentText ?? "0%"}' in dive
     assert "nowMs={nowMs}" in app
     assert "activeJobs={activeJobs}" in app
     assert "Rebuild From Extracted Records" in (

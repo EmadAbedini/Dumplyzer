@@ -15,6 +15,7 @@ import {
   ListLoadingState,
   AnalysisScopeNote,
   coverageShowsEmptyPanel,
+  LoadMoreBar,
 } from "./CoverageStatus";
 import {
   DERIVED_SOURCE_IDS,
@@ -26,10 +27,11 @@ import type { AnalysisCoverage, ModuleRow, Finding, CapabilityCoverage } from ".
 import { FindingCard } from "./FindingCard";
 import { ResultFilterBar } from "./ResultFilterBar";
 import { SortableTh } from "./SortableTh";
-import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 
 const FINDING_PAGE = 300;
+const MODULE_PAGE = 500;
+const findingsSeverityCache = new Map<string, Record<string, number>>();
 
 function PidCell({
   value,
@@ -55,48 +57,6 @@ function PidCell({
   return <>{label}</>;
 }
 
-function useEvidenceItems<T>(
-  evidenceId: string | null,
-  method: string,
-  onError: (m: string) => void,
-  refreshToken?: number | string,
-): { items: T[]; loading: boolean } {
-  const [items, setItems] = useState<T[]>([]);
-  const [loadedEvidenceId, setLoadedEvidenceId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!evidenceId) {
-      setItems([]);
-      setLoadedEvidenceId(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await engineCall<{ items: T[] }>(method, { evidence_id: evidenceId });
-        if (!cancelled) {
-          setItems(res.items);
-          setLoadedEvidenceId(evidenceId);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setItems([]);
-          setLoadedEvidenceId(evidenceId);
-          onError(e instanceof EngineClientError ? e.message : String(e));
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [evidenceId, method, onError, refreshToken]);
-
-  return {
-    items,
-    loading: Boolean(evidenceId) && loadedEvidenceId !== evidenceId,
-  };
-}
-
 export function ModulesView({
   evidenceId,
   onError,
@@ -110,15 +70,53 @@ export function ModulesView({
   refreshToken?: number | string;
   onOpenProcess: (processId: string) => void;
 }) {
-  const { items, loading } = useEvidenceItems<ModuleRow>(
-    evidenceId,
-    "modules.list",
-    onError,
-    refreshToken,
-  );
+  const [items, setItems] = useState<ModuleRow[]>([]);
+  const itemsRef = useRef<ModuleRow[]>([]);
+  itemsRef.current = items;
+  const [loadedEvidenceId, setLoadedEvidenceId] = useState<string | null>(null);
+  const [listedTotal, setListedTotal] = useState(0);
+  const [listBusy, setListBusy] = useState(false);
+  const loadGen = useRef(0);
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
 
+  const load = useCallback(
+    async (append = false) => {
+      if (!evidenceId) return;
+      const gen = ++loadGen.current;
+      setListBusy(true);
+      try {
+        const offset = append ? itemsRef.current.length : 0;
+        const res = await engineCall<{ items: ModuleRow[]; total: number }>("modules.list", {
+          evidence_id: evidenceId,
+          limit: MODULE_PAGE,
+          offset,
+        });
+        if (gen !== loadGen.current) return;
+        const next = append ? [...itemsRef.current, ...res.items] : res.items;
+        setItems(next);
+        setListedTotal(res.total);
+        setLoadedEvidenceId(evidenceId);
+      } catch (e) {
+        if (gen !== loadGen.current) return;
+        if (!append) {
+          setItems([]);
+          setListedTotal(0);
+          setLoadedEvidenceId(evidenceId);
+        }
+        onError(e instanceof EngineClientError ? e.message : String(e));
+      } finally {
+        if (gen === loadGen.current) setListBusy(false);
+      }
+    },
+    [evidenceId, onError],
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load, refreshToken]);
+
+  const loading = Boolean(evidenceId) && loadedEvidenceId !== evidenceId;
   const filtered = useMemo(
     () =>
       items.filter((m) =>
@@ -158,7 +156,7 @@ export function ModulesView({
   return (
     <SimpleTable
       title="Modules / DLLs"
-      caption={coverageResultCaption(coverage, items.length, filtered.length)}
+      caption={coverageResultCaption(coverage, listedTotal || items.length, filtered.length)}
       filter={filter}
       onFilter={setFilter}
       filterField={filterField}
@@ -185,7 +183,11 @@ export function ModulesView({
           m.path ?? "—",
         ],
       }))}
-      total={items.length}
+      total={listedTotal || items.length}
+      loadedCount={items.length}
+      hasMore={!filter.trim() && items.length < listedTotal}
+      loadMoreBusy={listBusy}
+      onLoadMore={() => void load(true)}
       onOpenProcess={onOpenProcess}
     />
   );
@@ -213,8 +215,9 @@ export function FindingsView({
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
   const [severityFilter, setSeverityFilter] = useState<string | null>(null);
-  const [severityCounts, setSeverityCounts] = useState<Record<string, number>>({});
-  const [hasMore, setHasMore] = useState(false);
+  const [severityCounts, setSeverityCounts] = useState<Record<string, number>>(
+    () => (evidenceId ? findingsSeverityCache.get(evidenceId) ?? {} : {}),
+  );
   const [listBusy, setListBusy] = useState(false);
   const [listedTotal, setListedTotal] = useState(0);
   const loadGen = useRef(0);
@@ -223,10 +226,6 @@ export function FindingsView({
     async (append = false) => {
       if (!evidenceId) return;
       const gen = ++loadGen.current;
-      if (!append) {
-        setItems([]);
-        setHasMore(false);
-      }
       setListBusy(true);
       try {
         const offset = append ? itemsRef.current.length : 0;
@@ -244,15 +243,15 @@ export function FindingsView({
         const next = append ? [...itemsRef.current, ...res.items] : res.items;
         setItems(next);
         setListedTotal(res.total);
-        setSeverityCounts(res.severity_counts ?? {});
-        setHasMore(next.length < res.total);
+        const counts = res.severity_counts ?? {};
+        setSeverityCounts(counts);
+        if (evidenceId) findingsSeverityCache.set(evidenceId, counts);
       } catch (e) {
         if (gen !== loadGen.current) return;
         if (!append) {
           setItems([]);
           setListedTotal(0);
           setSeverityCounts({});
-          setHasMore(false);
         }
         onError(e instanceof EngineClientError ? e.message : String(e));
       } finally {
@@ -268,7 +267,7 @@ export function FindingsView({
   useEffect(() => {
     setSeverityFilter(null);
     setItems([]);
-    setSeverityCounts({});
+    setSeverityCounts(evidenceId ? findingsSeverityCache.get(evidenceId) ?? {} : {});
   }, [evidenceId]);
 
   useEffect(() => {
@@ -315,6 +314,14 @@ export function FindingsView({
   const loading = loadedEvidenceId !== evidenceId || (listBusy && items.length === 0);
   const findingTotal = coverage?.count ?? listedTotal;
   const captionTotal = severityFilter ? listedTotal : findingTotal;
+  const coverageKind = coverageLiveKind(coverage);
+  const showFilterType =
+    severityEntries.length > 0 ||
+    (loading &&
+      (coverageKind === "analyzed" ||
+        coverageKind === "in_progress" ||
+        coverageKind === "has_results" ||
+        coverageKind === "partial"));
 
   if (!evidenceId) return <ImportEvidenceState title="Findings" />;
 
@@ -341,9 +348,9 @@ export function FindingsView({
           ]}
         />
       </div>
-      {severityEntries.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
-          <span className="mr-1 text-[0.78rem] font-semibold text-muted">Filter type</span>
+      {showFilterType ? (
+        <div className="flex min-h-9 flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
+          <span className="mr-1 text-[0.78rem] font-semibold text-muted">Filter Type</span>
           {severityEntries.map(([severity, count]) => {
             const active = severityFilter === severity;
             return (
@@ -404,17 +411,13 @@ export function FindingsView({
           {filtered.length === 0 && (
             <div className="p-4 text-muted">No findings match the current filter.</div>
           )}
-          {hasMore && !filter.trim() ? (
-            <div className="flex justify-center pt-1">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={listBusy}
-                onClick={() => void load(true)}
-              >
-                Load more ({items.length.toLocaleString()} of {listedTotal.toLocaleString()})
-              </Button>
-            </div>
+          {!filter.trim() ? (
+            <LoadMoreBar
+              loaded={items.length}
+              total={listedTotal}
+              busy={listBusy}
+              onLoadMore={() => void load(true)}
+            />
           ) : null}
         </div>
       )}
@@ -436,6 +439,10 @@ function SimpleTable({
   filterFields,
   filterPlaceholder,
   total,
+  loadedCount,
+  hasMore,
+  loadMoreBusy,
+  onLoadMore,
   onOpenProcess,
 }: {
   title: string;
@@ -451,6 +458,10 @@ function SimpleTable({
   filterFields?: { id: string; label: string }[];
   filterPlaceholder?: string;
   total?: number;
+  loadedCount?: number;
+  hasMore?: boolean;
+  loadMoreBusy?: boolean;
+  onLoadMore?: () => void;
   onOpenProcess?: (processId: string) => void;
 }) {
   const count = total ?? rows.length;
@@ -461,7 +472,7 @@ function SimpleTable({
   const { sorted, sort, toggle } = useTableSort(rows, getValue);
   const pidIndex = columns.indexOf("PID");
   return (
-    <div className="flex h-full flex-col text-xs">
+    <div className="flex h-full min-h-0 flex-col text-xs">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <div className="text-sm font-semibold">{title}</div>
         <div className="text-xs text-muted">
@@ -521,6 +532,14 @@ function SimpleTable({
               ))}
             </tbody>
           </table>
+          {hasMore && onLoadMore ? (
+            <LoadMoreBar
+              loaded={loadedCount ?? rows.length}
+              total={count}
+              busy={loadMoreBusy}
+              onLoadMore={onLoadMore}
+            />
+          ) : null}
         </div>
       )}
     </div>

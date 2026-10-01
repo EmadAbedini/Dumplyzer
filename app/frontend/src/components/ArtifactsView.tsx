@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
-import { engineCall, EngineClientError, openLocalFolder } from "../lib/api";
+import { engineCall, EngineClientError, ensureAppPaths, openLocalFolder } from "../lib/api";
 import { CAPABILITY, UNAVAILABLE_DETAIL } from "../lib/analysisCapabilities";
 import { activeJobOfKind, isActiveJobStatus } from "../lib/analysisOptions";
 import { jobProgressPercentText } from "../lib/jobDisplay";
@@ -390,7 +390,7 @@ export function ArtifactsView({
                     variant="outline"
                     onClick={() => void browseCarved(carvedOutputDir)}
                   >
-                    Browse carved artifacts
+                    Browse Carved Artifacts
                   </Button>
                 ) : null}
                 <Button
@@ -771,7 +771,7 @@ function ExtractedFileDetail({
             onClick={() => void onQueue("yara.scan_artifact", runParams, "yara")}
           >
             {actionButtonLabel(
-              "Scan signatures",
+              "Scan Signatures",
               "yara",
               submitting,
               activeJobs,
@@ -789,7 +789,7 @@ function ExtractedFileDetail({
                 onClick={() => void onQueue("capa.scan_artifact", runParams, "capa")}
               >
                 {actionButtonLabel(
-                  "Analyze capabilities",
+                  "Analyze Capabilities",
                   "capa",
                   submitting,
                   activeJobs,
@@ -805,7 +805,7 @@ function ExtractedFileDetail({
                 onClick={() => void onQueue("floss.scan_artifact", runParams, "floss")}
               >
                 {actionButtonLabel(
-                  "Extract strings",
+                  "Extract Strings",
                   "floss",
                   submitting,
                   activeJobs,
@@ -916,19 +916,88 @@ function ResultBlock({ title, children }: { title: string; children: React.React
   );
 }
 
-function AntivirusBanner() {
+function useDataDir(): string | null {
+  const [dataDir, setDataDir] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void ensureAppPaths()
+      .then((paths) => {
+        if (!cancelled && typeof paths.root === "string" && paths.root.trim()) {
+          setDataDir(paths.root);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return dataDir;
+}
+
+function ExcludeFolderPath({ dataDir }: { dataDir: string | null }) {
+  const [copied, setCopied] = useState(false);
+  if (!dataDir) return null;
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(dataDir);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
   return (
-    <div className="mt-2 flex min-w-0 w-full items-center gap-2 rounded-md border border-danger/40 bg-danger/5 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
-      <ShieldAlert size={16} className="shrink-0 text-danger" aria-hidden />
-      <p className="min-w-0 flex-1 text-justify">
-        Exclude the Dumplyzer data folder from real-time{" "}
-        <span className="font-bold text-danger">antivirus</span> before running either job
-        in this section. Carved Artifacts and Extracted Files both write recovered content
-        to disk, including reconstructed EXE/DLL files. Endpoint products often quarantine
-        those files because they look like live binaries, which can delete output or stop
-        the scan mid-run. The same heuristics can treat Dumplyzer as the process writing
-        those files and quarantine or delete the application executable itself.
-      </p>
+    <div className="space-y-1.5 pt-[5px] text-left">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="shrink-0 font-semibold text-foreground">Exclude this folder:</span>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-6 shrink-0 px-2 text-[11px]"
+            onClick={() => void copyPath()}
+          >
+            {copied ? "Copied" : "Copy Path"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-6 shrink-0 px-2 text-[11px]"
+            onClick={() => void openLocalFolder(dataDir)}
+          >
+            Open Folder
+          </Button>
+        </div>
+      </div>
+      <code className="block break-all rounded bg-background/80 px-2 py-1.5 font-mono text-[11px] leading-5 text-foreground">
+        {dataDir}
+      </code>
+    </div>
+  );
+}
+
+function AntivirusBanner() {
+  const dataDir = useDataDir();
+  return (
+    <div className="mt-2 flex min-w-0 w-full items-start gap-2 rounded-md border border-danger/40 bg-danger/5 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
+      <ShieldAlert size={16} className="mt-0.5 shrink-0 text-danger" aria-hidden />
+      <div className="min-w-0 flex-1 space-y-1.5 text-justify">
+        <p>
+          Exclude the Dumplyzer data folder from real-time{" "}
+          <span className="font-bold text-danger">antivirus</span> before running either job
+          in this section. Carved Artifacts and Extracted Files both write recovered content
+          to disk, including reconstructed EXE/DLL files. Endpoint products often quarantine
+          those files because they look like live binaries, which can delete output or stop
+          the scan mid-run.{" "}
+          <strong className="font-bold text-danger">
+            The same heuristics can treat Dumplyzer as the process writing those files and
+            quarantine or delete the application executable itself.
+          </strong>
+        </p>
+        <ExcludeFolderPath dataDir={dataDir} />
+      </div>
     </div>
   );
 }
@@ -946,6 +1015,7 @@ function AntivirusConfirmDialog({
   onCancel: () => void;
   onContinue: () => void;
 }) {
+  const dataDir = useDataDir();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -954,33 +1024,37 @@ function AntivirusConfirmDialog({
         aria-modal="true"
         aria-labelledby="carved-av-warning-title"
         aria-describedby="carved-av-warning-body"
-        className="card w-full max-w-md shadow-xl"
+        className="card w-full max-w-2xl shadow-xl"
       >
-        <div className="px-4 py-3">
-          <div className="flex items-start gap-2">
-            <ShieldAlert size={16} className="mt-0.5 shrink-0 text-danger" aria-hidden />
-            <div className="min-w-0">
-              <h2 id="carved-av-warning-title" className="text-sm font-semibold">
-                Antivirus warning
-              </h2>
-              <p id="carved-av-warning-body" className="mt-1.5 text-justify text-sm leading-5 text-muted">
-                Exclude the Dumplyzer data folder from real-time antivirus before
-                continuing. Carved Artifacts and Extracted Files write recovered content
-                there, including reconstructed EXE/DLL files. Endpoint products often
-                quarantine those files, interrupt the analysis, or treat Dumplyzer as the
-                writer and remove the application executable itself.
-                {action === "pe" ? (
-                  <>
-                    {" "}
-                    PE reconstruction also walks the whole dump, so on large memory images it
-                    can take a long time.
-                  </>
-                ) : null}
-              </p>
-            </div>
+        <div className="px-[17px] py-3">
+          <div className="flex items-center gap-2">
+            <ShieldAlert size={16} className="shrink-0 text-danger" aria-hidden />
+            <h2 id="carved-av-warning-title" className="text-sm font-semibold">
+              Antivirus Warning
+            </h2>
+          </div>
+          <div id="carved-av-warning-body" className="mt-1.5 space-y-2 text-sm leading-[1.45] text-muted">
+            <p className="text-justify leading-[1.45]">
+              Exclude the Dumplyzer data folder from real-time antivirus before
+              continuing. Carved Artifacts and Extracted Files write recovered content
+              there, including reconstructed EXE/DLL files. Endpoint products often
+              quarantine those files or interrupt the analysis.{" "}
+              <strong className="font-bold text-danger">
+                The same heuristics can treat Dumplyzer as the process writing those
+                files and quarantine or delete the application executable itself.
+              </strong>
+              {action === "pe" ? (
+                <>
+                  {" "}
+                  PE reconstruction also walks the whole dump, so on large memory images it
+                  can take a long time.
+                </>
+              ) : null}
+            </p>
+            <ExcludeFolderPath dataDir={dataDir} />
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-[17px] py-3">
           <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
             Cancel
           </Button>

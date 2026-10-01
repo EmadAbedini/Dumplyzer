@@ -34,6 +34,38 @@ def _evidence_filename(row: dict[str, Any]) -> str | None:
     return None
 
 
+def _coerce_pid(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _job_process_name(row: dict[str, Any], params: dict[str, Any] | None = None) -> str | None:
+    for value in (
+        row.get("process_name"),
+        (params or {}).get("process_name"),
+        row.get("param_process_name"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _job_pid(row: dict[str, Any], params: dict[str, Any] | None = None) -> int | None:
+    for value in (
+        row.get("pid"),
+        (params or {}).get("pid"),
+        row.get("param_pid"),
+    ):
+        pid = _coerce_pid(value)
+        if pid is not None:
+            return pid
+    return None
+
+
 _JOB_SELECT = """
 SELECT jobs.*,
   (SELECT filename FROM evidence WHERE evidence.id = jobs.evidence_id) AS evidence_filename
@@ -64,6 +96,9 @@ SELECT
   json_extract(jobs.params_json, '$.profile') AS param_profile,
   json_extract(jobs.params_json, '$.filename') AS param_filename,
   json_extract(jobs.params_json, '$.path') AS param_path,
+  json_extract(jobs.params_json, '$.process_name') AS param_process_name,
+  json_extract(jobs.params_json, '$.pid') AS param_pid,
+  (SELECT name FROM processes WHERE processes.id = jobs.process_id) AS process_name,
   json_extract(jobs.error_json, '$.message') AS error_message,
   json_extract(jobs.error_json, '$.suggestion') AS error_suggestion,
   COALESCE(
@@ -175,7 +210,7 @@ class JobManager:
         *,
         evidence_id: str | None = None,
         process_id: str | None = None,
-        pid: int | None = None,
+        pid: Any = None,
         params: dict[str, Any] | None = None,
         message: str | None = None,
     ) -> dict[str, Any]:
@@ -200,7 +235,7 @@ class JobManager:
                 kind,
                 evidence_id,
                 process_id,
-                pid,
+                _coerce_pid(pid),
                 now,
                 message or kind,
                 json.dumps(params or {}),
@@ -563,7 +598,7 @@ class JobManager:
             "status": row["status"],
             "evidence_id": row.get("evidence_id"),
             "process_id": row.get("process_id"),
-            "pid": row.get("pid"),
+            "pid": _job_pid(row, _json(row.get("params_json")) or {}),
             "analysis_run_id": row.get("analysis_run_id"),
             "created_at": row.get("created_at"),
             "started_at": row.get("started_at"),
@@ -575,6 +610,7 @@ class JobManager:
             "params": _json(row.get("params_json")) or {},
             "cancel_requested": bool(row.get("cancel_requested")),
             "evidence_filename": _evidence_filename(row),
+            "process_name": _job_process_name(row, _json(row.get("params_json")) or {}),
         }
 
     def _list_dto(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -596,10 +632,14 @@ class JobManager:
             ("profile", "param_profile"),
             ("filename", "param_filename"),
             ("path", "param_path"),
+            ("process_name", "param_process_name"),
         ):
             value = row.get(column)
             if isinstance(value, str) and value.strip():
                 params[key] = value.strip()
+        param_pid = _coerce_pid(row.get("param_pid"))
+        if param_pid is not None:
+            params["pid"] = param_pid
 
         error: dict[str, Any] | None = None
         err_message = row.get("error_message")
@@ -620,7 +660,7 @@ class JobManager:
             "status": row["status"],
             "evidence_id": row.get("evidence_id"),
             "process_id": row.get("process_id"),
-            "pid": row.get("pid"),
+            "pid": _job_pid(row, params),
             "analysis_run_id": row.get("analysis_run_id"),
             "created_at": row.get("created_at"),
             "started_at": row.get("started_at"),
@@ -632,4 +672,5 @@ class JobManager:
             "params": params,
             "cancel_requested": bool(row.get("cancel_requested")),
             "evidence_filename": _evidence_filename(row),
+            "process_name": _job_process_name(row, params),
         }

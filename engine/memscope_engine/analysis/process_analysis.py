@@ -756,21 +756,46 @@ def list_network(db: Database, evidence_id: str) -> dict[str, Any]:
     }
 
 
-def list_modules(db: Database, evidence_id: str, pid: int | None = None) -> dict[str, Any]:
+def list_modules(
+    db: Database,
+    evidence_id: str,
+    pid: int | None = None,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> dict[str, Any]:
+    clauses = ["evidence_id = ?"]
+    args: list[Any] = [evidence_id]
     if pid is not None:
-        rows = db.fetchall(
-            "SELECT * FROM modules WHERE evidence_id = ? AND pid = ? ORDER BY name COLLATE NOCASE",
-            (evidence_id, pid),
-        )
+        clauses.append("pid = ?")
+        args.append(pid)
+    where = " AND ".join(clauses)
+    total_row = db.fetchone(
+        f"SELECT COUNT(*) AS c FROM modules WHERE {where}",
+        tuple(args),
+    )
+    total = int(total_row["c"]) if total_row else 0
+    start = max(0, int(offset or 0))
+    sql = f"""
+        SELECT * FROM modules
+        WHERE {where}
+        ORDER BY pid, name COLLATE NOCASE
+    """
+    if limit is None:
+        if start:
+            rows = db.fetchall(sql + " LIMIT -1 OFFSET ?", (*args, start))
+        else:
+            rows = db.fetchall(sql, tuple(args))
+        cap: int | None = None
     else:
-        rows = db.fetchall(
-            "SELECT * FROM modules WHERE evidence_id = ? ORDER BY pid, name COLLATE NOCASE LIMIT 20000",
-            (evidence_id,),
-        )
+        cap = max(0, int(limit))
+        rows = db.fetchall(sql + " LIMIT ? OFFSET ?", (*args, cap, start))
     names = _process_names_by_pid(db, evidence_id)
     return {
         "evidence_id": evidence_id,
-        "total": len(rows),
+        "total": total,
+        "limit": total if cap is None else cap,
+        "offset": start,
         "items": [_module_dto(r, names) for r in rows],
     }
 

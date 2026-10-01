@@ -11,11 +11,13 @@ import type {
 } from "../lib/types";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { CenteredLoading } from "./CoverageStatus";
+import { CenteredLoading, LoadMoreBar } from "./CoverageStatus";
 import { ResultFilterBar } from "./ResultFilterBar";
 import { SortableTh } from "./SortableTh";
 import { StatusToast, useStatusToast } from "./StatusToast";
 import { cn } from "../lib/utils";
+
+const FEATURE_PAGE = 800;
 
 function extraText(extra: Record<string, unknown> | undefined, key: string): string {
   const value = extra?.[key];
@@ -74,6 +76,9 @@ export function BulkExtractorResults({
   const scan = bundle?.scan ?? null;
   const [category, setCategory] = useState<string>("");
   const [page, setPage] = useState<BulkExtractorFeaturePage | null>(null);
+  const [items, setItems] = useState<BulkExtractorFeature[]>([]);
+  const itemsRef = useRef<BulkExtractorFeature[]>([]);
+  itemsRef.current = items;
   const [filter, setFilter] = useState("");
   const [filterField, setFilterField] = useState("all");
   const [hideWeak, setHideWeak] = useState(true);
@@ -93,47 +98,57 @@ export function BulkExtractorResults({
     (page.category || "") === selectedCategory &&
     (selectedCategory !== "aes_keys" || Boolean(page.hide_weak) === hideWeak);
 
-  const load = useCallback(async () => {
-    if (!scan?.id) {
-      setPage(null);
-      return;
-    }
-    if (!selectedCategory && categories.length) return;
-    const gen = ++loadGen.current;
-    setLoading(true);
-    try {
-      const res = await engineCall<BulkExtractorFeaturePage>("bulk_extractor.features", {
-        scan_id: scan.id,
-        category: selectedCategory || undefined,
-        hide_weak: selectedCategory === "aes_keys" ? hideWeak : false,
-        limit: 800,
-        offset: 0,
-      });
-      if (gen !== loadGen.current) return;
-      setPage(res);
-    } catch (e) {
-      if (gen !== loadGen.current) return;
-      setPage(null);
-      onError(e instanceof EngineClientError ? e.message : String(e));
-    } finally {
-      if (gen === loadGen.current) setLoading(false);
-    }
-  }, [scan?.id, selectedCategory, categories.length, hideWeak, onError]);
+  const load = useCallback(
+    async (append = false) => {
+      if (!scan?.id) {
+        setPage(null);
+        setItems([]);
+        return;
+      }
+      if (!selectedCategory && categories.length) return;
+      const gen = ++loadGen.current;
+      setLoading(true);
+      try {
+        if (!append) setItems([]);
+        const offset = append ? itemsRef.current.length : 0;
+        const res = await engineCall<BulkExtractorFeaturePage>("bulk_extractor.features", {
+          scan_id: scan.id,
+          category: selectedCategory || undefined,
+          hide_weak: selectedCategory === "aes_keys" ? hideWeak : false,
+          limit: FEATURE_PAGE,
+          offset,
+        });
+        if (gen !== loadGen.current) return;
+        setPage(res);
+        setItems(append ? [...itemsRef.current, ...res.items] : res.items);
+      } catch (e) {
+        if (gen !== loadGen.current) return;
+        if (!append) {
+          setPage(null);
+          setItems([]);
+        }
+        onError(e instanceof EngineClientError ? e.message : String(e));
+      } finally {
+        if (gen === loadGen.current) setLoading(false);
+      }
+    },
+    [scan?.id, selectedCategory, categories.length, hideWeak, onError],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const items = pageMatches && page ? page.items : [];
+  const shownItems = pageMatches ? items : [];
   const filtered = useMemo(
     () =>
-      items.filter((item) =>
+      shownItems.filter((item) =>
         matchesFieldQuery(filter, filterField, featureFields(item, selectedCategory), [
           item.scanner,
           JSON.stringify(item.extra || {}),
         ]),
       ),
-    [items, filter, filterField, selectedCategory],
+    [shownItems, filter, filterField, selectedCategory],
   );
 
   const sortValue = useCallback(
@@ -258,7 +273,7 @@ export function BulkExtractorResults({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {loading && items.length === 0 ? (
+        {loading && shownItems.length === 0 ? (
           <div className="p-6 text-sm text-muted">Loading extracted values…</div>
         ) : sorted.length === 0 ? (
           <div className="p-6 text-sm text-muted">
@@ -267,13 +282,23 @@ export function BulkExtractorResults({
               : "Nothing stored in this category."}
           </div>
         ) : (
-          <FeatureTable
-            category={selectedCategory}
-            items={sorted}
-            sort={sort}
-            onToggle={toggle}
-            onCopy={(value) => void copyValue(value)}
-          />
+          <>
+            <FeatureTable
+              category={selectedCategory}
+              items={sorted}
+              sort={sort}
+              onToggle={toggle}
+              onCopy={(value) => void copyValue(value)}
+            />
+            {!filter.trim() ? (
+              <LoadMoreBar
+                loaded={shownItems.length}
+                total={uniqueTotal}
+                busy={loading}
+                onLoadMore={() => void load(true)}
+              />
+            ) : null}
+          </>
         )}
       </div>
       <StatusToast message={toast} />

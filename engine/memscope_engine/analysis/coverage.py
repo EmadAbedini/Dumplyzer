@@ -16,6 +16,7 @@ import json
 from typing import Any
 
 from memscope_engine.analysis.profiles import EVIDENCE_IDS, PROCESS_IDS
+from memscope_engine.observed_time import ANALYSIS_EVENT_KINDS
 from memscope_engine.storage import Database
 
 # Standalone analysis_runs.kind values that mean a capability executed.
@@ -120,11 +121,7 @@ def _counts(db: Database, evidence_id: str) -> dict[str, int]:
         "iocs": _count(db, "SELECT COUNT(*) AS c FROM iocs WHERE evidence_id = ?", (evidence_id,))
         if _table_exists(db, "iocs")
         else 0,
-        "timeline": _count(
-            db, "SELECT COUNT(*) AS c FROM timeline_events WHERE evidence_id = ?", (evidence_id,)
-        )
-        if _table_exists(db, "timeline_events")
-        else 0,
+        "timeline": _timeline_dump_count(db, evidence_id),
         "network_artifacts": _count(
             db, "SELECT COUNT(*) AS c FROM network_artifacts WHERE evidence_id = ?", (evidence_id,)
         )
@@ -147,6 +144,24 @@ def _counts(db: Database, evidence_id: str) -> dict[str, int]:
         "process_deep_dive": 0,
     }
     return out
+
+
+def _timeline_dump_count(db: Database, evidence_id: str) -> int:
+    """Dump-time events only — matches the Timeline page count in the sidebar."""
+    if not _table_exists(db, "timeline_events"):
+        return 0
+    kinds = tuple(ANALYSIS_EVENT_KINDS)
+    placeholders = ",".join("?" * len(kinds))
+    row = db.fetchone(
+        f"""
+        SELECT COUNT(*) AS c FROM timeline_events
+        WHERE evidence_id = ?
+          AND IFNULL(time_precision, '') != 'analysis_time'
+          AND IFNULL(event_kind, '') NOT IN ({placeholders})
+        """,
+        (evidence_id, *kinds),
+    )
+    return int(row["c"]) if row else 0
 
 
 def _carved_data_count(db: Database, evidence_id: str) -> int:
@@ -360,3 +375,18 @@ def coverage_for_evidence(db: Database, evidence_id: str) -> dict[str, Any]:
         "executed": sorted(executed),
         "failed": sorted(failed),
     }
+
+
+def complete_analysis_completed(db: Database, evidence_id: str) -> bool:
+    """True when a Complete Analysis profile run finished for this evidence."""
+    rows = db.fetchall(
+        """
+        SELECT strategy_json FROM analysis_runs
+        WHERE evidence_id = ? AND kind = 'analysis_profile' AND status = 'completed'
+        """,
+        (evidence_id,),
+    )
+    for row in rows:
+        if _parse_strategy(row.get("strategy_json")).get("profile") == "full":
+            return True
+    return False

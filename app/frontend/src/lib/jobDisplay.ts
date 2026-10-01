@@ -335,7 +335,7 @@ export function jobDisplayPercentValue(
   return jobDisplayPercent(job, jobStageLabel(job), nowMs, cancelling);
 }
 
-/** Average displayed percent across active jobs. Queued jobs count as 0%. */
+/** Average displayed percent across jobs that have started. Queued jobs are omitted. */
 export function averageJobProgressPercentText(
   jobs: readonly Job[],
   nowMs: number = Date.now(),
@@ -347,17 +347,45 @@ export function averageJobProgressPercentText(
   let started = 0;
   for (const job of active) {
     const queued = job.status === "queued" && !isJobCancelling(job, pendingIds);
-    if (!queued) started += 1;
+    if (queued) continue;
+    started += 1;
     sum += jobDisplayPercentValue(job, nowMs, pendingIds) ?? 0;
   }
   if (started === 0) return null;
-  return formatJobPercent(sum / active.length);
+  return formatJobPercent(sum / started);
+}
+
+function asPid(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+export function jobPid(job: Job): number | null {
+  return asPid(job.pid) ?? asPid(job.params?.pid);
+}
+
+export function jobProcessName(job: Job): string {
+  for (const value of [job.process_name, job.params?.process_name]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+/** PID for the Jobs Analysis cell, shown on the same line as the job kind. */
+export function jobProcessDetail(job: Job): string | null {
+  const pid = jobPid(job);
+  if (pid != null) return `PID ${pid}`;
+  return null;
 }
 
 export function jobAnalysisTitle(job: Job): string {
   const label = jobAnalysisLabel(job);
-  if (typeof job.pid === "number") return `${label} · PID ${job.pid}`;
-  return label;
+  const detail = jobProcessDetail(job);
+  return detail ? `${label} - ${detail}` : label;
 }
 
 function jobDisplayPercent(
