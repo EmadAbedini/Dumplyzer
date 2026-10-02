@@ -18,6 +18,16 @@ Dumplyzer is a local-first, single-user forensic workstation. Memory images, ext
 - Artifact, cache, and export writers confine paths to their roots (no `..` traversal).
 - `app.init` ignores a client `data_dir` when `DUMPLYZER_DATA_DIR` or `MEMSCOPE_DATA_DIR` is already set by the desktop shell.
 
+## Endpoint protection and extracted binaries
+
+Carved Data jobs (**Carved Artifacts** and **Extracted Files**) write recovered PE images and carved features under `%LOCALAPPDATA%\Dumplyzer\` (artifacts, analysis output, and related trees). Dumplyzer does not execute those files.
+
+Endpoint products classify on write. A reconstructed PE image is a valid `MZ`/`PE` on disk, so real-time scanners treat it like a dropped executable and quarantine it. Behavioral engines then score the writer — `dumplyzer.exe` and the bundled `python.exe` — as the process that created it. That can quarantine or delete the application binary as well as the extract. The result looks like “Dumplyzer disappeared”; it is the AV product acting on its own heuristics.
+
+Exclude the data folder from real-time scanning before those jobs. Pausing antivirus globally is not required and is not recommended. The install tree is not the write target; excluding `%LOCALAPPDATA%\Dumplyzer\` (or `DUMPLYZER_DATA_DIR`) is.
+
+Operator-facing copy: [README.md](README.md#antivirus-exclusions-carved-data). The Carved Data UI repeats the warning and shows the resolved path.
+
 ## Optional / bundled tools
 
 | Tool | Policy |
@@ -30,6 +40,7 @@ Dumplyzer is a local-first, single-user forensic workstation. Memory images, ext
 
 ## Reports and logs
 
+- Investigation reports can be HTML, JSON, Excel, or CSV. IOC lists can be saved as JSON, Excel, or CSV. All of these are written only under `exports\`.
 - HTML reports are static, with `html.escape` on forensic strings, no JavaScript, no CDN.
 - Structured engine logs are JSON. stderr is appended to `logs\engine-stderr.log` (NUL bytes stripped).
 - Do not log raw memory contents.

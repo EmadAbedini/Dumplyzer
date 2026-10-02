@@ -55,7 +55,7 @@ Use a Windows 11 x64 VM or spare host.
 6. Empty Evidence: the UI should load without an imported image. A short splash should appear first.
 7. Memory-dump providers: Volatility 3 and PE Extraction should be available. bulk_extractor,
    CAPA, FLOSS, and Signature Detection should be available from the installer bundle.
-8. Export options should list HTML / JSON / Excel. Generating a report without evidence may fail
+8. Export options should list HTML / JSON / Excel / CSV. Generating a report without evidence may fail
    with an actionable error; that is acceptable.
 9. Confirm engine logs under `%LOCALAPPDATA%\Dumplyzer\logs\`.
 10. Exit. Confirm `dumplyzer.exe` and bundled `python.exe` are not left running.
@@ -65,10 +65,14 @@ When a memory dump is available:
 
 1. Import the dump (read-only). Windows analysis asks before downloading the matching kernel PDB
    (Download & Continue) or accepting a local `.pdb` / ISF file.
-2. Run PE Extraction; confirm extracted files are labeled extracted PE artifacts.
-3. Run Signature Detection, CAPA, and FLOSS against an extracted PE, and a memory-dump
+2. Before PE Extraction or bulk_extractor, exclude `%LOCALAPPDATA%\Dumplyzer\` from real-time
+   antivirus. Those jobs write reconstructed EXE/DLL images; scanners may quarantine the output
+   and, by attributing the write, `dumplyzer.exe`. See [README](../README.md#antivirus-exclusions-carved-data).
+3. Run PE Extraction; confirm extracted files are labeled extracted PE artifacts.
+4. Run Signature Detection, CAPA, and FLOSS against an extracted PE, and a memory-dump
    Signature Detection scan from Overview.
-4. Generate an HTML, JSON, or Excel export and confirm those sections appear when the jobs completed.
+5. Generate an HTML, JSON, Excel, or CSV export and confirm those sections appear when the jobs completed.
+   From the IOCs view, confirm JSON, Excel, and CSV saves are offered.
 
 Record OS build, installer filename, SHA-256, and each step as pass/fail. Do not mark a new
 run as passed unless it happened.

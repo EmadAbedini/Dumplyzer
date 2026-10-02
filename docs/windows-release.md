@@ -208,3 +208,6 @@ Until that is done, SmartScreen and some enterprise policies will treat the inst
 - Volatility plugins that need capstone or pycryptodome may appear as import failures. That is intentional: those extras are not bundled. Failed imports must not be marked available. yara-python 4.5.4 **is** bundled, so Volatility YARA plugins may become available as a side effect.
 - Code signing / Authenticode is not configured. Artifacts are unsigned.
 - Linux packaging is out of scope.
+- Carved Data jobs write reconstructed PE images under `%LOCALAPPDATA%\Dumplyzer\`. Real-time
+  antivirus may quarantine those files and `dumplyzer.exe`. Documented for operators in
+  [README](../README.md#antivirus-exclusions-carved-data).

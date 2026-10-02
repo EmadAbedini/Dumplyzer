@@ -18,4 +18,6 @@ Run smoke server:
 
 Send NDJSON on stdin, e.g. `{"jsonrpc":"2.0","id":"1","method":"smoke.e2e","params":{}}`
 
+Investigation exports (`export.generate`) support `html`, `json`, `xlsx`, and `csv`. IOC lists can be written with `iocs.export_json`, `iocs.export_xlsx`, and `iocs.export_csv`.
+
 Release builds bundle official CPython 3.12.10 embeddable + this package via `scripts/windows/prepare-engine-runtime.ps1`. See `docs/windows-release.md`.

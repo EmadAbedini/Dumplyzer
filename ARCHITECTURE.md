@@ -123,7 +123,9 @@ in place and keeps existing evidence rows.
 | v13 | Network artifacts + PCAP reconstruction |
 | v14 | bulk_extractor feature rows |
 
-Report schema is independent (`memscope-report-v1`).
+Report schema is independent (`memscope-report-v1`). Investigation reports support HTML, JSON,
+Excel, and CSV. The IOCs view can also write JSON, Excel, or CSV. All of those files are written
+only under the user-data `exports\` directory.
 
 ## Jobs and cache
 
@@ -156,11 +158,13 @@ databases still open.
 ## Security
 
 - Treat memory images, dumps, and extracted artifacts as hostile.
+- Carved Data writes reconstructed PE images under the user-data tree. Real-time AV may quarantine those files and, by attributing the write, `dumplyzer.exe`. Exclude `%LOCALAPPDATA%\Dumplyzer\` before those jobs (`SECURITY.md`).
 - Argument arrays only; no `shell=True`.
 - Path confinement for artifacts, cache, exports, and optional tool EXEs.
 - Exports are written only under the user-data `exports\` directory.
 - Packaged Python uses `python312._pth` isolation, `PYTHONNOUSERSITE=1`, and a reduced `PATH`.
-- HTML reports are static (`html.escape`, no JavaScript, no CDN).
+- HTML reports are static (`html.escape`, no JavaScript, no CDN). JSON, Excel, and CSV exports
+  are tabular or structured dumps of stored analysis, not interactive documents.
 - The only optional Microsoft downloads are WebView2 during setup if the runtime is missing,
   and one kernel PDB after in-app consent.
 
@@ -195,7 +199,8 @@ Implemented methods in `engine/memscope_engine/server.py`:
 | PE / CAPA / FLOSS | `pe_extraction.*`, `capa.*`, `floss.*` |
 | bulk_extractor | `bulk_extractor.status`, `bulk_extractor.configure`, `bulk_extractor.scan`, `bulk_extractor.scans`, `bulk_extractor.scan_get`, `bulk_extractor.features` |
 | Plugins | `plugins.warmup`, `plugins.list`, `plugins.get`, `plugins.validate`, `plugins.execute`, `plugins.execution_get`, `plugins.executions` |
-| Export | `export.options`, `export.generate`, `export.list`, `export.get`, `export.delete` |
+| Export | `export.options`, `export.generate`, `export.list`, `export.get`, `export.delete` (html, json, xlsx, csv) |
+| IOC export | `iocs.export_json`, `iocs.export_xlsx`, `iocs.export_csv` |
 | Jobs | `jobs.submit`, `jobs.get`, `jobs.list`, `jobs.cancel`, `jobs.reset_visible` |
 | Symbols | `symbols.fetch`, `symbols.save_pdb`, `symbols.import_file` |
 

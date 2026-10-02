@@ -7,6 +7,10 @@ and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- CSV export for investigation reports and IOC lists, alongside HTML, JSON, and Excel.
+
 ## [0.1.0] — 2026-09-25
 
 First public Windows x64 release of **Dumplyzer**.
@@ -81,6 +85,6 @@ Windows analysis needs type information for the NT kernel that was running when 
 
 - 0.1.0 NSIS and `dumplyzer.exe` are **unsigned**. SmartScreen or organization policy may warn on first run.
 - The desktop application is Windows 10 22H2+ / Windows 11, **x64 only**. Linux and macOS hosts are not a release target yet.
-- Antivirus products may quarantine reconstructed EXE/DLL files under the data folder. Heuristics may also quarantine or delete `Dumplyzer.exe`. Exclude the Dumplyzer data directory from real-time scanning during analysis; pausing AV globally is not required and is not recommended.
+- Before **Carved Data** jobs, exclude `%LOCALAPPDATA%\Dumplyzer\` from real-time antivirus. Carved Artifacts and Extracted Files write reconstructed EXE/DLL images there. Scanners often quarantine those files (job output vanishes or the scan stops). The same process-aware heuristics can quarantine or delete `Dumplyzer.exe`. That is expected endpoint behavior, not a product defect. Pausing AV globally is not required and is not recommended. See [README](README.md#antivirus-exclusions-carved-data) and [SECURITY.md](SECURITY.md#endpoint-protection-and-extracted-binaries).
 - A reconstructed PCAP is a carve of recoverable Ethernet/IP records, not a guaranteed full original capture.
 - Clean-machine NSIS install on Windows 11 Pro 10.0.26100 x64 (2026-09-20): **pass with limitations**. WebView2 was already present, so first-time WebView2 setup was not observed. See `docs/clean-machine-validation.md`.

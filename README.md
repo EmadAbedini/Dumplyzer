@@ -38,6 +38,7 @@ Analysis runs locally. The original memory image stays at its imported location.
   <a href="#windows-kernel-symbols"><strong>Kernel symbols</strong></a> ·
   <a href="#analysis-components"><strong>Analysis components</strong></a> ·
   <a href="#architecture"><strong>Architecture</strong></a> ·
+  <a href="#antivirus-exclusions-carved-data"><strong>Antivirus</strong></a> ·
   <a href="#documentation"><strong>Docs</strong></a>
 </p>
 
@@ -53,14 +54,14 @@ Analysis runs locally. The original memory image stays at its imported location.
 - **Two analysis modes, plus custom.** **Quick Triage** is a first look (OS/symbol status and the process list). **Complete Analysis** is the evidence-wide pass for processes, command lines, modules, network connections, handles, findings, IOCs, network artifacts, and timeline. **Custom Analysis** runs only the capabilities you select. Heavier jobs stay explicit so a triage run does not walk the whole dump or write reconstructed binaries.
 - **Process analysis.** Process list, command lines, loaded modules/DLLs, open handles, and parent/child relationships (PPID, with a per-process Family view).
 - **Network.** Network connections extracted from the image, plus network indicators and on-demand PCAP reconstruction. Reconstruction builds a `.pcap` from recoverable Ethernet/IP records in the dump; matching flows can be exported. Connection metadata is not a packet capture, and a reconstructed PCAP is not a full original capture.
-- **IOCs.** Indicators extracted from stored process, module, network, and handle data — IPs, domains, URLs, mutexes, registry keys, paths, and MD5/SHA-256 hashes.
+- **IOCs.** Indicators extracted from stored process, module, network, and handle data — IPs, domains, URLs, mutexes, registry keys, paths, and MD5/SHA-256 hashes. The IOCs view can save that list as JSON, Excel, or CSV.
 - **Search and timeline.** Indexed lookup across stored artifacts, plus an investigation timeline with time-range filtering. Search reads what analysis already stored; it does not rescan the dump.
 - **Memory regions.** Inspect VAD / virtual-memory regions for a selected PID.
 - **Signatures and capabilities.** YARA scans of the dump and/or extracted PE files (42 bundled Dumplyzer rules, plus your own `.yar` / `.yara` files). YARA matches are investigation indicators, not malware verdicts. CAPA reports capabilities of reconstructed PE files, not malware verdicts.
 - **Carved strings.** bulk_extractor recovers emails, phone numbers, URLs, IPs, MAC addresses, HTTP logs, AES key candidates, and similar features from the dump.
-- **PE reconstruction.** Rebuild EXE/DLL images from process memory. Reconstructed files are extracted artifacts, not malware, and are never executed.
+- **PE reconstruction.** Rebuild EXE/DLL images from process memory. Reconstructed files are extracted artifacts, not malware, and are never executed. Exclude the data folder from real-time antivirus before this job — see [Antivirus exclusions](#antivirus-exclusions-carved-data).
 - **Plugin Explorer.** Discover and run supported Volatility 3 plugins from the UI, with cached results and job history.
-- **Reports.** Export HTML, JSON, or Excel under the user-data `exports\` directory. HTML reports are static (no JavaScript, no CDN).
+- **Reports.** Export HTML, JSON, Excel, or CSV under the user-data `exports\` directory. HTML reports are static (no JavaScript, no CDN).
 - **Untrusted evidence.** Memory images and extracted artifacts are treated as untrusted. Dumplyzer does not execute them. Matches, strings, and carved features are investigation indicators — not verdicts.
 
 Complete Analysis does **not** auto-run PE reconstruction, signature detection, CAPA, FLOSS, bulk_extractor, or PCAP reconstruction. Start those from the workspace when you need them.
@@ -73,12 +74,12 @@ Complete Analysis does **not** auto-run PE reconstruction, signature detection, 
 | Processes | Process list, command lines, parent/child, and per-process deep dive |
 | Network | Connections extracted from the image, network indicators, optional PCAP reconstruction |
 | Modules / Memory | Loaded modules, handles, and VAD regions |
-| Findings / IOCs / Search | Heuristics, extracted indicators, and cross-view search |
+| Findings / IOCs / Search | Heuristics, extracted indicators, and cross-view search. IOCs can be exported as JSON, Excel, or CSV |
 | Timeline | Investigation timeline built from stored records, with time-range filter |
-| Carved Data | Reconstructed PE images and carved feature files |
+| Carved Data | Reconstructed PE images and carved feature files. Exclude the data folder from real-time antivirus first ([why](#antivirus-exclusions-carved-data)). |
 | Signatures | Memory-dump and artifact signature scans, including your own rules |
 | Plugins | Supported Volatility 3 plugins against the imported image |
-| Export | HTML / JSON / Excel reports of completed analysis |
+| Export | HTML / JSON / Excel / CSV reports of completed analysis |
 | Jobs | Background work with real progress when the engine knows it |
 
 A memory image is optional. Empty Evidence is a valid first-launch state.
@@ -255,13 +256,27 @@ Uninstall keeps user data unless **Delete app data** is checked. That option rem
 
 This product was previously named MemScope. The engine import path remains `memscope_engine`, and the database file remains `memscope.db`. If `%LOCALAPPDATA%\Dumplyzer\memscope.db` does not exist, first launch copies an older data directory from `%LOCALAPPDATA%\MemScope\` or `%APPDATA%\com.memscope.workbench\` when present. The source is not deleted.
 
+## Antivirus exclusions (Carved Data)
+
+**Carved Artifacts** and **Extracted Files** write recovered content under `%LOCALAPPDATA%\Dumplyzer\` (or `DUMPLYZER_DATA_DIR` if you overrode it). That includes reconstructed EXE/DLL images. Dumplyzer never executes those files. They are forensic extracts.
+
+Real-time antivirus still sees `MZ`/`PE` bytes land on disk and often quarantines them. The job then loses output or stops mid-run. The same scan is process-aware: it attributes the write to Dumplyzer (`dumplyzer.exe` and the bundled engine) and can quarantine or delete **the application executable itself**. That is ordinary endpoint behavior, not a Dumplyzer defect.
+
+Before either Carved Data job, exclude the **data folder** from real-time scanning:
+
+`%LOCALAPPDATA%\Dumplyzer\`
+
+Do not pause antivirus for the whole machine. The install tree (`%ProgramFiles%\Dumplyzer\`) is not where recovered files are written; the data-folder exclusion is the one that matters. The in-app Antivirus Warning shows the resolved path.
+
+Technical background: [SECURITY.md](SECURITY.md#endpoint-protection-and-extracted-binaries).
+
 ## Documentation
 
 | Document | Contents |
 |----------|----------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Layers, IPC, jobs, schema |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Source setup, tests, packaging notes |
-| [SECURITY.md](SECURITY.md) | Process model, path confinement, reporting |
+| [SECURITY.md](SECURITY.md) | Process model, path confinement, endpoint AV, reporting |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Redistributed components and licenses |
 | [docs/windows-release.md](docs/windows-release.md) | How the NSIS installer is built |
@@ -277,6 +292,7 @@ This product was previously named MemScope. The engine import path remains `mems
 ## Security and limitations
 
 - Treat dumps and extracted artifacts as untrusted. Dumplyzer does not execute evidence.
+- Before Carved Data jobs, exclude `%LOCALAPPDATA%\Dumplyzer\` from real-time antivirus. Recovered EXE/DLL images can be quarantined, and the same heuristics can delete `Dumplyzer.exe`. See [Antivirus exclusions](#antivirus-exclusions-carved-data).
 - Dumplyzer does not score malware and does not claim a verdict from signatures, capabilities, or strings.
 - The desktop application is Windows x64. Linux and macOS hosts are not a release target yet. Evidence is not limited to Windows dumps.
 - Unsigned 0.1.0 artifacts may be blocked by SmartScreen until a signed build is published.

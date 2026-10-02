@@ -91,3 +91,4 @@ The installer lands at `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.0_x
 - Do not execute artifacts.
 - Keep Volatility integration on Python APIs (`construct_plugin` / TreeGrid), not `vol.py` stdout.
 - User data stays under `%LOCALAPPDATA%\Dumplyzer\`, never inside the install/runtime tree.
+- Before Carved Data jobs on a developer host, exclude that data folder (or `DUMPLYZER_DATA_DIR`) from real-time antivirus. Reconstructed PE writes can quarantine extracts and `dumplyzer.exe`. See [README](README.md#antivirus-exclusions-carved-data).
