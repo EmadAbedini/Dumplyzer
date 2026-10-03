@@ -421,20 +421,13 @@ table {
 .app-result-table > tbody > tr.app-row-analyzed:not(.app-row-active),
 .app-result-table > tbody > tr.app-row-analyzed:nth-child(even):not(.app-row-active),
 .app-result-table > tbody > tr.app-row-analyzed:hover:not(.app-row-empty):not(.app-row-active) {
-  background: color-mix(in srgb, var(--success) 16%, var(--surface));
-  box-shadow: inset 3px 0 0 var(--success);
+  background: color-mix(in srgb, var(--success) 14%, var(--surface));
 }
 
 .app-result-table > tbody > tr.app-row-analyzed.app-row-analyzed-alt:not(.app-row-active),
 .app-result-table > tbody > tr.app-row-analyzed.app-row-analyzed-alt:nth-child(even):not(.app-row-active),
 .app-result-table > tbody > tr.app-row-analyzed.app-row-analyzed-alt:hover:not(.app-row-empty):not(.app-row-active) {
-  background: color-mix(in srgb, var(--success) 14%, var(--surface));
-}
-
-.app-result-table > tbody > tr.app-row-analyzed.app-row-active,
-.app-result-table > tbody > tr.app-row-analyzed.app-row-active:nth-child(even),
-.app-result-table > tbody > tr.app-row-analyzed.app-row-active:hover:not(.app-row-empty) {
-  box-shadow: inset 3px 0 0 var(--success);
+  background: color-mix(in srgb, var(--success) 7%, var(--surface));
 }
 
 .selected-record-detail {
