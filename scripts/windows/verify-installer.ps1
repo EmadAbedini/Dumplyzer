@@ -143,8 +143,13 @@ $msi = @(Get-ChildItem -Path (Join-Path $Bundle "msi") -Filter "*.msi" -ErrorAct
 
 if ($nsis.Count -eq 0) { throw "NSIS installer not found under $Bundle\nsis" }
 if ($nsis.Count -ne 1) { throw "expected exactly one NSIS installer, found $($nsis.Count)" }
-if ($nsis[0].Name -ne "Dumplyzer_0.1.0_x64-setup.exe") {
-    throw "end-user installer name must be Dumplyzer_0.1.0_x64-setup.exe, got $($nsis[0].Name)"
+if ($probe -notmatch 'runtime_ok\s+(\S+)') {
+    throw "runtime probe did not report APP_VERSION: $probe"
+}
+$appVersion = $Matches[1]
+$expectedNsis = "Dumplyzer_${appVersion}_x64-setup.exe"
+if ($nsis[0].Name -ne $expectedNsis) {
+    throw "end-user installer name must be $expectedNsis, got $($nsis[0].Name)"
 }
 if ($msi.Count -gt 0) {
     throw "MSI must not be produced; Dumplyzer ships as one NSIS EXE. Found: $($msi[0].FullName)"

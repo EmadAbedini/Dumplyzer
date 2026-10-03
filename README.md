@@ -6,7 +6,7 @@
 <h3 align="center">Advanced Memory Forensics Platform</h3>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/release-v0.1.0-0B3D2E" alt="v0.1.0">
+  <img src="https://img.shields.io/badge/release-v0.1.1-0B3D2E" alt="v0.1.1">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D6?logo=windows&logoColor=white" alt="Windows x64">
   <img src="https://img.shields.io/badge/runtime-local--first-0B3D2E" alt="Local-first">
   <a href="CONTRIBUTING.md#tests"><img src="https://img.shields.io/badge/engine%20tests-passing-brightgreen" alt="Engine tests passing"></a>
@@ -57,7 +57,7 @@ Analysis runs locally. The original memory image stays at its imported location.
 - **IOCs.** Indicators extracted from stored process, module, network, and handle data — IPs, domains, URLs, mutexes, registry keys, paths, and MD5/SHA-256 hashes. The IOCs view can save that list as JSON, Excel, or CSV.
 - **Search and timeline.** Indexed lookup across stored artifacts, plus an investigation timeline with time-range filtering. Search reads what analysis already stored; it does not rescan the dump.
 - **Memory regions.** Inspect VAD / virtual-memory regions for a selected PID.
-- **Signatures and capabilities.** YARA scans of the dump and/or extracted PE files (42 bundled Dumplyzer rules, plus your own `.yar` / `.yara` files). YARA matches are investigation indicators, not malware verdicts. CAPA reports capabilities of reconstructed PE files, not malware verdicts.
+- **Signatures and capabilities.** YARA scans of the dump and/or extracted PE files (**56** bundled Dumplyzer rules, plus your own `.yar` / `.yara` files). You can run all compiled rules or a subset by rule name or category. YARA matches are investigation indicators, not malware verdicts. CAPA reports capabilities of reconstructed PE files, not malware verdicts.
 - **Carved strings.** bulk_extractor recovers emails, phone numbers, URLs, IPs, MAC addresses, HTTP logs, AES key candidates, and similar features from the dump.
 - **PE reconstruction.** Rebuild EXE/DLL images from process memory. Reconstructed files are extracted artifacts, not malware, and are never executed. Exclude the data folder from real-time antivirus before this job — see [Antivirus exclusions](#antivirus-exclusions-carved-data).
 - **Plugin Explorer.** Discover and run supported Volatility 3 plugins from the UI, with cached results and job history.
@@ -77,10 +77,10 @@ Complete Analysis does **not** auto-run PE reconstruction, signature detection, 
 | Findings / IOCs / Search | Heuristics, extracted indicators, and cross-view search. IOCs can be exported as JSON, Excel, or CSV |
 | Timeline | Investigation timeline built from stored records, with time-range filter |
 | Carved Data | Reconstructed PE images and carved feature files. Exclude the data folder from real-time antivirus first ([why](#antivirus-exclusions-carved-data)). |
-| Signatures | Memory-dump and artifact signature scans, including your own rules |
+| Signatures | Memory-dump and artifact signature scans, including a per-scan rule picker and your own rules |
 | Plugins | Supported Volatility 3 plugins against the imported image |
 | Export | HTML / JSON / Excel / CSV reports of completed analysis |
-| Jobs | Background work with real progress when the engine knows it |
+| Jobs | Background work with real progress when the engine knows it. Analyze Process jobs show the target PID |
 
 A memory image is optional. Empty Evidence is a valid first-launch state.
 
@@ -93,7 +93,7 @@ Dumplyzer integrates established open-source engines. They are **bundled in the 
 | Memory analysis | Processes, modules, network, VAD, plugin explorer | [Volatility 3](https://github.com/volatilityfoundation/volatility3) **2.28.0** (Python APIs, not `vol.py` stdout) |
 | PE reconstruction | Rebuild EXE/DLL images from process memory | Engine workflow on top of Volatility 3 |
 | Artifact extraction | Carve URLs, domains, IPs, emails, MAC addresses, HTTP logs, AES key candidates, and similar strings from the dump | [bulk_extractor](https://github.com/simsong/bulk_extractor) **2.2.0** (separate process, GPLv3, corresponding source shipped) |
-| Signature detection | Scan the dump and/or extracted PE files. Matches are investigation indicators. | yara-python **4.5.4** plus **42** original Dumplyzer rules (memory + artifact). Copy extra `.yar` / `.yara` files into the custom rules folder |
+| Signature detection | Scan the dump and/or extracted PE files. Matches are investigation indicators. | yara-python **4.5.4** plus **56** original Dumplyzer rules (memory + artifact). Select rules per scan, or copy extra `.yar` / `.yara` files into the custom rules folder |
 | Capability analysis | Report capabilities of reconstructed PE files, not malware verdicts | [CAPA](https://github.com/mandiant/capa) **9.4.0** (separate process) |
 | String analysis | Static and deobfuscated strings from reconstructed PE files | [FLOSS](https://github.com/mandiant/flare-floss) **3.1.1** (separate process) |
 
@@ -133,7 +133,7 @@ There are two ways to get Dumplyzer. **If you want to use the product, use the W
 
 You do **not** need Python, Node, Rust, or a source checkout. This is the supported way to run Dumplyzer.
 
-1. Download `Dumplyzer_0.1.0_x64-setup.exe` from [Releases](https://github.com/EmadAbedini/Dumplyzer/releases).
+1. Download `Dumplyzer_0.1.1_x64-setup.exe` from [Releases](https://github.com/EmadAbedini/Dumplyzer/releases).
 2. Run the installer. It defaults to `%ProgramFiles%\Dumplyzer` and requires administrator rights.
 3. Launch **Dumplyzer** from the Start menu.
 
@@ -141,7 +141,7 @@ The Microsoft Edge **WebView2** runtime is required. If it is already installed,
 
 Windows dumps also need a matching kernel PDB the first time you analyze a given OS build. That is handled in the app, not by the installer — see [Windows kernel symbols](#windows-kernel-symbols).
 
-0.1.0 installers are **unsigned**. SmartScreen or organization policy may warn on first run.
+0.1.1 installers are **unsigned**. SmartScreen or organization policy may warn on first run.
 
 #### Supported platform
 
@@ -150,7 +150,7 @@ Windows dumps also need a matching kernel PDB the first time you analyze a given
 | Desktop app | Windows 10 22H2+ / Windows 11, x64 |
 | Arch | x64 only |
 | Evidence | Windows and Linux memory images (crash dump, LiME, ELF core, raw / QEMU / VMware, …) |
-| App | **0.1.0** |
+| App | **0.1.1** |
 | Engine runtime | Bundled CPython **3.12.10** |
 | Linux / macOS hosts | Not a release target yet |
 
@@ -213,7 +213,7 @@ This step is heavier: it downloads the pinned CPython embeddable runtime and bun
 .\scripts\windows\build-release.ps1
 ```
 
-The installer lands at `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.0_x64-setup.exe`.
+The installer lands at `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.1_x64-setup.exe`.
 
 Tests, engine notes, and packaging details: [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/windows-release.md](docs/windows-release.md).
 
@@ -295,7 +295,7 @@ Technical background: [SECURITY.md](SECURITY.md#endpoint-protection-and-extracte
 - Before Carved Data jobs, exclude `%LOCALAPPDATA%\Dumplyzer\` from real-time antivirus. Recovered EXE/DLL images can be quarantined, and the same heuristics can delete `Dumplyzer.exe`. See [Antivirus exclusions](#antivirus-exclusions-carved-data).
 - Dumplyzer does not score malware and does not claim a verdict from signatures, capabilities, or strings.
 - The desktop application is Windows x64. Linux and macOS hosts are not a release target yet. Evidence is not limited to Windows dumps.
-- Unsigned 0.1.0 artifacts may be blocked by SmartScreen until a signed build is published.
+- Unsigned 0.1.1 artifacts may be blocked by SmartScreen until a signed build is published.
 - If WebView2 is absent, setup asks before downloading it. Cancelling that download exits the installer.
 - Windows analysis needs the kernel PDB for **that dump's OS build**. Dumplyzer asks before downloading it. **Download & Continue** is the recommended path; you can instead browse to a matching `.pdb` or ISF. See [Windows kernel symbols](#windows-kernel-symbols).
 

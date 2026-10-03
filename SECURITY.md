@@ -54,7 +54,7 @@ Operator-facing copy: [README.md](README.md#antivirus-exclusions-carved-data). T
 
 ## WebView2
 
-The desktop UI requires the Microsoft Edge WebView2 Runtime. The Windows bundle uses Tauri `webviewInstallMode.embedBootstrapper`. The small Evergreen bootstrapper is packed into `Dumplyzer_0.1.0_x64-setup.exe`. If WebView2 is missing, setup asks before downloading. Agreeing runs Microsoft's installer UI. Declining or cancelling that download exits Dumplyzer setup. If WebView2 is already present, the bootstrapper is skipped.
+The desktop UI requires the Microsoft Edge WebView2 Runtime. The Windows bundle uses Tauri `webviewInstallMode.embedBootstrapper`. The small Evergreen bootstrapper is packed into `Dumplyzer_0.1.1_x64-setup.exe`. If WebView2 is missing, setup asks before downloading. Agreeing runs Microsoft's installer UI. Declining or cancelling that download exits Dumplyzer setup. If WebView2 is already present, the bootstrapper is skipped.
 
 Dumplyzer itself does not phone home. The WebView2 bootstrapper is Microsoft's installer, not Dumplyzer telemetry.
 
@@ -64,7 +64,7 @@ Windows analysis may download **one** kernel PDB from `https://msdl.microsoft.co
 
 ## Authenticode
 
-0.1.0 release artifacts are **unsigned**. There is no `certificateThumbprint` or `signCommand` in `tauri.conf.json`. Unsigned NSIS and `dumplyzer.exe` files must not be described as signed. The signing procedure for a future trusted build is in `docs/windows-release.md`.
+0.1.1 release artifacts are **unsigned**. There is no `certificateThumbprint` or `signCommand` in `tauri.conf.json`. Unsigned NSIS and `dumplyzer.exe` files must not be described as signed. The signing procedure for a future trusted build is in `docs/windows-release.md`.
 
 ## License
 

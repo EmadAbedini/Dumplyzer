@@ -75,13 +75,13 @@ cargo build
 
 ## Windows installer
 
-This is a separate, heavier step than `tauri dev`. It downloads official CPython embeddable and bundled tools (SHA-256 pinned) and produces `Dumplyzer_0.1.0_x64-setup.exe`. Run it from the repository root. Stop `tauri dev` first if that process is still running.
+This is a separate, heavier step than `tauri dev`. It downloads official CPython embeddable and bundled tools (SHA-256 pinned) and produces `Dumplyzer_0.1.1_x64-setup.exe`. Run it from the repository root. Stop `tauri dev` first if that process is still running.
 
 ```powershell
 .\scripts\windows\build-release.ps1
 ```
 
-The installer lands at `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.0_x64-setup.exe`. See [docs/windows-release.md](docs/windows-release.md).
+The installer lands at `app\desktop\target\release\bundle\nsis\Dumplyzer_0.1.1_x64-setup.exe`. See [docs/windows-release.md](docs/windows-release.md).
 
 ## Security notes for contributors
 

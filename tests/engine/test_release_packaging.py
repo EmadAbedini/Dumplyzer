@@ -121,8 +121,26 @@ def test_nsis_template_stops_runtime_without_powershell_command_braces() -> None
 
 def test_app_version_is_release_coherent() -> None:
     assert APP_NAME == "Dumplyzer"
-    assert APP_VERSION == "0.1.0"
+    assert APP_VERSION == "0.1.1"
     assert SCHEMA_VERSION == 14
+    root = Path(__file__).resolve().parents[2]
+    tauri = json.loads((root / "app" / "desktop" / "tauri.conf.json").read_text(encoding="utf-8"))
+    desktop_pkg = json.loads((root / "app" / "desktop" / "package.json").read_text(encoding="utf-8"))
+    frontend_pkg = json.loads((root / "app" / "frontend" / "package.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (root / "packaging" / "windows" / "runtime-manifest.json").read_text(encoding="utf-8")
+    )
+    cargo = (root / "app" / "desktop" / "Cargo.toml").read_text(encoding="utf-8")
+    pyproject = (root / "engine" / "pyproject.toml").read_text(encoding="utf-8")
+    package_block = cargo.split("[package]", 1)[-1].split("\n[", 1)[0]
+    project_block = pyproject.split("[project]", 1)[-1].split("\n[", 1)[0]
+    assert tauri["version"] == APP_VERSION
+    assert desktop_pkg["version"] == APP_VERSION
+    assert frontend_pkg["version"] == APP_VERSION
+    assert manifest["engine"]["version"] == APP_VERSION
+    assert manifest["application"]["version"] == APP_VERSION
+    assert f'version = "{APP_VERSION}"' in package_block
+    assert f'version = "{APP_VERSION}"' in project_block
 
 
 def test_first_launch_creates_directories(tmp_path: Path) -> None:

@@ -9,7 +9,7 @@
   },
   "engine": {
     "package": "memscope-engine",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "volatility3": "2.28.0",
     "pefile": "2024.8.26",
     "yara_python": "4.5.4",
@@ -75,7 +75,7 @@
     "note": "Not shipped. Optional local windows.zip. Default path is in-app Download & Continue for one build, or a file the user browses to under %LOCALAPPDATA%\\Dumplyzer\\symbols."
   },
   "application": {
-    "version": "0.1.0",
+    "version": "0.1.1",
     "identifier": "com.dumplyzer.workbench",
     "install_nsis": "%ProgramFiles%\\Dumplyzer",
     "data_dir": "%LOCALAPPDATA%\\Dumplyzer"

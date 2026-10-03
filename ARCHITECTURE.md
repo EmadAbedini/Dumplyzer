@@ -172,7 +172,7 @@ See `SECURITY.md`.
 
 ## Packaging
 
-One NSIS installer (`Dumplyzer_0.1.0_x64-setup.exe`), default `%ProgramFiles%\Dumplyzer`,
+One NSIS installer (`Dumplyzer_0.1.1_x64-setup.exe`), default `%ProgramFiles%\Dumplyzer`,
 elevation required. The small WebView2 Evergreen bootstrapper is packed (`embedBootstrapper`).
 If WebView2 is already present, setup skips it. If it is missing, setup asks before downloading
 from Microsoft; declining or cancelling that download exits setup.
@@ -195,7 +195,7 @@ Implemented methods in `engine/memscope_engine/server.py`:
 | Network | `network.list`, `network.artifacts`, `network.artifact_runs`, `network.extract_artifacts` |
 | PCAP | `pcap.reconstructions`, `pcap.get`, `pcap.reconstruct`, `pcap.export_flow` |
 | Entities | `modules.list`, `findings.list`, `search.query`, `iocs.*`, `memory.*`, `timeline.*`, `artifacts.*` |
-| YARA | `yara.status`, `yara.reload`, `yara.configure`, `yara.scan_*`, `yara.scans_*`, `yara.scan_get`, `yara.matches_for_evidence` |
+| YARA | `yara.status`, `yara.ruleset`, `yara.reload`, `yara.configure`, `yara.scan_*`, `yara.scans_*`, `yara.scan_get`, `yara.matches_for_evidence` |
 | PE / CAPA / FLOSS | `pe_extraction.*`, `capa.*`, `floss.*` |
 | bulk_extractor | `bulk_extractor.status`, `bulk_extractor.configure`, `bulk_extractor.scan`, `bulk_extractor.scans`, `bulk_extractor.scan_get`, `bulk_extractor.features` |
 | Plugins | `plugins.warmup`, `plugins.list`, `plugins.get`, `plugins.validate`, `plugins.execute`, `plugins.execution_get`, `plugins.executions` |

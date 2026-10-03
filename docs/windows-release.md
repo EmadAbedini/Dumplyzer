@@ -1,6 +1,6 @@
 # Windows release build
 
-Application version: **0.1.0**  
+Application version: **0.1.1**  
 Python runtime: official CPython **3.12.10** Windows embeddable x64  
 Volatility 3: **2.28.0**  
 Installers: one NSIS EXE (default `%ProgramFiles%\Dumplyzer`, small WebView2 Evergreen bootstrapper)
@@ -94,11 +94,11 @@ cd app\desktop; cargo test; cargo build; cd ..\..
 | `app/desktop/resources/runtime/` | Bundled engine runtime |
 | `app/desktop/target/release/dumplyzer.exe` | Unpackaged cargo leftover. Tauri leaves this as `BUNDLE_TYPE_VAR_UNK`. **Not** the shipped hash. |
 | `app/desktop/target/release/bundle/nsis/payload/dumplyzer.exe` | Canonical shipped `dumplyzer.exe`, extracted from the NSIS payload (`BUNDLE_TYPE_VAR_NSS`). Use this hash for VirusTotal / signing of the app binary. |
-| `app/desktop/target/release/bundle/nsis/Dumplyzer_0.1.0_x64-setup.exe` | End-user NSIS installer (per-machine, WebView2 bootstrapper) |
+| `app/desktop/target/release/bundle/nsis/Dumplyzer_0.1.1_x64-setup.exe` | End-user NSIS installer (per-machine, WebView2 bootstrapper) |
 | `$env:CARGO_TARGET_DIR/release/bundle/` | Same artifact if `CARGO_TARGET_DIR` is overridden |
 | `packaging/cache/` | Downloaded zips |
 
-Version stamping: `0.1.0` in `tauri.conf.json`, `app/desktop/Cargo.toml`, frontend/desktop `package.json`, `engine/pyproject.toml`, and `memscope_engine.version.APP_VERSION`. Report schema v1 and SQLite schema v14 stay independent.
+Version stamping: `0.1.1` in `tauri.conf.json`, `app/desktop/Cargo.toml`, frontend/desktop `package.json`, `engine/pyproject.toml`, and `memscope_engine.version.APP_VERSION`. Report schema v1 and SQLite schema v14 stay independent.
 
 ## Installed layout (conceptual)
 
@@ -139,7 +139,7 @@ User data (writable, not removed as part of a normal uninstall of binaries):
 - bundled `resources/tools/{bulk_extractor,capa,floss}` EXEs are present
 - bundled `resources/rules/yara/bundled` memory and artifact rules are present
 - bundled `resources/tools/bulk_extractor/bulk_extractor64.exe` is present with matching SHA-256
-- exactly one NSIS `Dumplyzer_0.1.0_x64-setup.exe`; no MSI
+- exactly one NSIS `Dumplyzer_<APP_VERSION>_x64-setup.exe` (currently `Dumplyzer_0.1.1_x64-setup.exe`); no MSI
 - NSIS payload `dumplyzer.exe` extracted to `bundle/nsis/payload/` (`BUNDLE_TYPE_VAR_NSS`); unpackaged leftover may differ by only the Tauri UNK/NSS stamp
 - `embedBootstrapper` WebView2 payload is staged and referenced
 - `windows.zip` is not under `app/desktop/resources` and is not `File`d into INSTDIR; kernel PDBs stay under `%LOCALAPPDATA%\Dumplyzer\symbols`
@@ -178,7 +178,7 @@ Do not invent or commit a certificate. Do not mark artifacts as signed.
 Sign all of the following with the same Authenticode certificate, **after** a successful `tauri build`:
 
 1. `bundle/nsis/payload/dumplyzer.exe` (the NSIS-stamped `BUNDLE_TYPE_VAR_NSS` binary that the installer actually ships). Do **not** treat `target/release/dumplyzer.exe` as the shipped app hash; Tauri restores that leftover to `BUNDLE_TYPE_VAR_UNK` after packaging.
-2. NSIS `Dumplyzer_0.1.0_x64-setup.exe`
+2. NSIS `Dumplyzer_0.1.1_x64-setup.exe`
 
 Signing only the installer and leaving `dumplyzer.exe` unsigned is incomplete.
 
@@ -192,12 +192,12 @@ Example (replace thumbprint and timestamp URL with values from the certificate i
 
 ```powershell
 signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 <THUMBPRINT> dumplyzer.exe
-signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 <THUMBPRINT> Dumplyzer_0.1.0_x64-setup.exe
+signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 <THUMBPRINT> Dumplyzer_0.1.1_x64-setup.exe
 ```
 
 Tauri equivalent once a cert exists: set `bundle.windows.certificateThumbprint` and `bundle.windows.timestampUrl` (and `tsp: true` for RFC 3161). Verify with `signtool verify /pa /v <file>` and confirm a timestamp is present.
 
-Until that is done, SmartScreen and some enterprise policies will treat the installers as unknown publishers. That is expected for unsigned 0.1.0 builds.
+Until that is done, SmartScreen and some enterprise policies will treat the installers as unknown publishers. That is expected for unsigned 0.1.1 builds.
 
 ## Known limitations
 

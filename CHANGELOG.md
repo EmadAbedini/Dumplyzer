@@ -7,9 +7,31 @@ and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-10-03
+
+Investigation workbench follow-up to the first public Windows x64 release. Application, Tauri, engine, and installer metadata are **0.1.1**. Report schema remains v1. SQLite schema remains v14. Installer: `Dumplyzer_0.1.1_x64-setup.exe`. NSIS and `dumplyzer.exe` remain **unsigned**.
+
 ### Added
 
-- CSV export for investigation reports and IOC lists, alongside HTML, JSON, and Excel.
+- CSV export for investigation reports (Export) and IOC lists, alongside HTML, JSON, and Excel.
+- Per-scan YARA selection: choose individual rules or whole categories (including a Custom group) before scanning the memory image or extracted PE files.
+- Jobs labels Analyze Process (process deep dive) with the target PID on the same line as the job kind.
+- Bundled YARA rules expanded from 42 to **56** (33 memory, 23 artifact) for stealers, C2 frameworks, and recon tools. Provenance: `engine/memscope_engine/rules/yara/RULES.md`.
+- Pagination on large result views (IOCs, network, modules, carved features, and related lists) so those pages no longer load the full stored set at once.
+
+### Changed
+
+- Domain IOCs use the Public Suffix List (registrable eTLD+1) instead of a TLD-allowlist regex. The old matcher missed suffixes such as `.xyz`, `.app`, and `.co.uk`. A naive `anything.anything` matcher treated filenames like `jquery.js` and path segments as hosts. Hits are scored by source (network/URL vs filesystem path) so file extensions are less likely to become domain IOCs.
+- Carved Data antivirus warning: clearer layout, **Antivirus Warning** title, and the resolved data-folder path with Copy Path / Open Folder.
+- Signature Detection keeps the latest scan per target and stays locked while another analysis job is running.
+
+### Fixed
+
+- Job progress percent included queued jobs as 0% in the average, so the displayed total lagged. Queued jobs are omitted until they start.
+- Processes could look fully analyzed in the workspace before command-line collection finished. Quick Triage (`windows.pslist`) never stores command lines; that coverage stays not-analyzed until cmdline text is stored.
+- IOC export from the IOCs view failed or wrote the wrong file extension for some formats. JSON, Excel, and CSV saves now complete with the correct suffix.
+- Custom `.yar` / `.yara` files saved as UTF-16 (typical Windows Notepad encoding) failed to compile. Those files now load; Settings lists files that were skipped.
+- Consecutive Analyze Process rows used the same highlight, so adjacent analyzed processes blended into one block. Those rows now alternate.
 
 ## [0.1.0] — 2026-09-25
 
@@ -88,3 +110,7 @@ Windows analysis needs type information for the NT kernel that was running when 
 - Before **Carved Data** jobs, exclude `%LOCALAPPDATA%\Dumplyzer\` from real-time antivirus. Carved Artifacts and Extracted Files write reconstructed EXE/DLL images there. Scanners often quarantine those files (job output vanishes or the scan stops). The same process-aware heuristics can quarantine or delete `Dumplyzer.exe`. That is expected endpoint behavior, not a product defect. Pausing AV globally is not required and is not recommended. See [README](README.md#antivirus-exclusions-carved-data) and [SECURITY.md](SECURITY.md#endpoint-protection-and-extracted-binaries).
 - A reconstructed PCAP is a carve of recoverable Ethernet/IP records, not a guaranteed full original capture.
 - Clean-machine NSIS install on Windows 11 Pro 10.0.26100 x64 (2026-09-20): **pass with limitations**. WebView2 was already present, so first-time WebView2 setup was not observed. See `docs/clean-machine-validation.md`.
+
+[Unreleased]: https://github.com/EmadAbedini/Dumplyzer/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/EmadAbedini/Dumplyzer/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/EmadAbedini/Dumplyzer/releases/tag/v0.1.0

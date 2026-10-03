@@ -10,17 +10,19 @@ A memory image is optional. Empty Evidence is a valid state. Do not fabricate fo
 
 | Item | Value |
 |------|--------|
-| File | `Dumplyzer_0.1.0_x64-setup.exe` |
+| File | `Dumplyzer_0.1.1_x64-setup.exe` |
 | Default install | `%ProgramFiles%\Dumplyzer` (elevation required) |
 | User data | `%LOCALAPPDATA%\Dumplyzer\` |
 | WebView2 | Small Evergreen bootstrapper packed (`embedBootstrapper`). If WebView2 is already present it is skipped. If it is missing, setup asks before downloading the runtime. |
-| Authenticode | Unsigned for 0.1.0 |
+| Authenticode | Unsigned for 0.1.1 |
 
 MSI is not an end-user artifact.
 
 ## Latest executed run
 
 **2026-09-20 — PASS WITH LIMITATIONS** on Windows 11 Pro 10.0.26100 x64.
+
+That run used `Dumplyzer_0.1.0_x64-setup.exe`. A 0.1.1 clean-machine install has not been recorded.
 
 The guest had no developer toolchain. Silent NSIS `/S` installed to Program Files. The bundled
 CPython 3.12.10 runtime started Volatility 3 2.28.0 (191 plugins). YARA, PE Extraction, CAPA,
