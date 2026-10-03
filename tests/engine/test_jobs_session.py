@@ -636,7 +636,13 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "app-row-analyzed" in (
         root / "app" / "frontend" / "src" / "components" / "ProcessExplorer.tsx"
     ).read_text(encoding="utf-8")
+    assert "app-row-analyzed-alt" in (
+        root / "app" / "frontend" / "src" / "components" / "ProcessExplorer.tsx"
+    ).read_text(encoding="utf-8")
     assert "app-row-analyzed" in (
+        root / "app" / "frontend" / "src" / "styles.css"
+    ).read_text(encoding="utf-8")
+    assert "app-row-analyzed-alt" in (
         root / "app" / "frontend" / "src" / "styles.css"
     ).read_text(encoding="utf-8")
     assert "app-analyzed-badge" not in (

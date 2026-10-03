@@ -65,6 +65,19 @@ export function ProcessExplorer({
     return "";
   }, []);
   const { sorted, sort, toggle } = useTableSort(filtered, processSortValue);
+  const analyzedAltIds = useMemo(() => {
+    const ids = new Set<string>();
+    let streak = 0;
+    for (const p of sorted) {
+      if (p.process_analyzed) {
+        streak += 1;
+        if (streak % 2 === 0) ids.add(p.id);
+      } else {
+        streak = 0;
+      }
+    }
+    return ids;
+  }, [sorted]);
   const commandLinesMissing =
     items.length > 0 && !capabilityHasStoredData(analysisCoverage, "command_lines");
 
@@ -144,6 +157,7 @@ export function ProcessExplorer({
               const label = `Open details for ${p.name ?? "process"} (PID ${p.pid})`;
               const open = () => onSelect(p);
               const analyzed = Boolean(p.process_analyzed);
+              const analyzedAlt = analyzed && analyzedAltIds.has(p.id);
               const onRowKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
@@ -162,7 +176,8 @@ export function ProcessExplorer({
                 className={
                   "cursor-pointer border-t border-border/40 " +
                   (selectedId === p.id ? "app-row-active " : "") +
-                  (analyzed ? "app-row-analyzed " : "")
+                  (analyzed ? "app-row-analyzed " : "") +
+                  (analyzedAlt ? "app-row-analyzed-alt " : "")
                 }
               >
                 <td className="whitespace-nowrap px-2 py-1 font-mono">{p.pid}</td>
