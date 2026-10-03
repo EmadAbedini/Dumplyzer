@@ -338,6 +338,50 @@ def test_memory_scan_findings_and_custom_rule(tmp_path: Path) -> None:
     db.close()
 
 
+def test_memory_scan_replaces_prior_results(tmp_path: Path) -> None:
+    _require_yara()
+    paths = AppPaths(tmp_path / "data").ensure()
+    db = Database(paths.db_path)
+    img = tmp_path / "mem.raw"
+    img.write_bytes(
+        b"padding-"
+        + b"System.Management.Automation.AmsiUtils\x00amsiInitFailed\x00NonPublic,Static\x00"
+        + b"mimikatz gentilkiwi"
+        + b"-end"
+    )
+    ev = import_evidence(db, str(img))
+    first = yara_workflows.run_yara_memory_scan_job(
+        db,
+        {"evidence_id": ev["id"]},
+        cancelled=lambda: False,
+        progress=lambda _m: None,
+        paths=paths,
+    )
+    first_id = first["scan"]["id"]
+    second = yara_workflows.run_yara_memory_scan_job(
+        db,
+        {"evidence_id": ev["id"]},
+        cancelled=lambda: False,
+        progress=lambda _m: None,
+        paths=paths,
+    )
+    listed = yara_workflows.list_yara_scans_for_evidence(db, ev["id"])
+    memory_items = [
+        item
+        for item in listed["items"]
+        if (item["scan"].get("target_kind") or "artifact") == KIND_MEMORY
+    ]
+    assert len(memory_items) == 1
+    assert memory_items[0]["scan"]["id"] == second["scan"]["id"]
+    assert memory_items[0]["scan"]["id"] != first_id
+    stored = db.fetchall(
+        "SELECT id FROM yara_scans WHERE evidence_id = ? AND COALESCE(target_kind, 'artifact') = ?",
+        (ev["id"], KIND_MEMORY),
+    )
+    assert [row["id"] for row in stored] == [second["scan"]["id"]]
+    db.close()
+
+
 def test_memory_scan_does_not_modify_dump(tmp_path: Path) -> None:
     _require_yara()
     paths = AppPaths(tmp_path / "data").ensure()

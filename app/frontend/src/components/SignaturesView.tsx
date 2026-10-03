@@ -135,12 +135,18 @@ export function SignaturesView({
 
   const memoryBundles = useMemo(
     () =>
-      bundles.filter((b) => (b.scan.target_kind || "artifact") === "memory"),
+      latestBundles(
+        bundles.filter((b) => (b.scan.target_kind || "artifact") === "memory"),
+        () => "memory",
+      ),
     [bundles],
   );
   const extractedBundles = useMemo(
     () =>
-      bundles.filter((b) => (b.scan.target_kind || "artifact") === "artifact"),
+      latestBundles(
+        bundles.filter((b) => (b.scan.target_kind || "artifact") === "artifact"),
+        (b) => b.scan.artifact_id || b.scan.id,
+      ),
     [bundles],
   );
 
@@ -161,6 +167,13 @@ export function SignaturesView({
     const names = pool.map((rule) => rule.name).filter((name) => chosen.has(name));
     if (names.length === 0) return;
     setSubmitting(kind);
+    setBundles((prev) =>
+      prev.filter((bundle) =>
+        kind === "memory"
+          ? (bundle.scan.target_kind || "artifact") !== "memory"
+          : (bundle.scan.target_kind || "artifact") !== "artifact",
+      ),
+    );
     try {
       const payload: { evidence_id: string; rule_names?: string[] } = {
         evidence_id: evidenceId,
@@ -170,6 +183,7 @@ export function SignaturesView({
       onJobSubmitted?.(job);
     } catch (err) {
       onError(err instanceof EngineClientError ? err.message : String(err));
+      void load();
     } finally {
       setSubmitting(null);
     }
@@ -183,14 +197,18 @@ export function SignaturesView({
     "yara_extracted_scan",
     "yara_artifact_scan",
   );
-  const scanBusy =
+  const memoryScanActive =
     submitting === "memory" ||
-    (memoryJob != null && isActiveJobStatus(memoryJob.status)) ||
-    (actionsLocked && tab === "memory");
-  const extractedBusy =
+    (memoryJob != null && isActiveJobStatus(memoryJob.status));
+  const extractedScanActive =
     submitting === "extracted" ||
-    (extractedJob != null && isActiveJobStatus(extractedJob.status)) ||
-    (actionsLocked && tab === "extracted");
+    (extractedJob != null && isActiveJobStatus(extractedJob.status));
+  const waitingForAnalysis =
+    jobsRunning && !memoryScanActive && !extractedScanActive;
+  const scanBusy =
+    memoryScanActive || (actionsLocked && tab === "memory");
+  const extractedBusy =
+    extractedScanActive || (actionsLocked && tab === "extracted");
   const memoryPercent = jobProgressPercentText(memoryJob, nowMs);
   const extractedPercent = jobProgressPercentText(extractedJob, nowMs);
   const showMemoryPercent = Boolean(memoryPercent && scanBusy && memoryJob?.status !== "queued");
@@ -212,7 +230,7 @@ export function SignaturesView({
           ]}
         />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-auto">
         {checking ? (
           <p className="p-4 text-sm text-muted">{CHECKING_DETAIL}</p>
         ) : !available ? (
@@ -236,6 +254,7 @@ export function SignaturesView({
               <ScanPanel
                 title="Memory Image"
                 description="Scan the imported memory image with the selected YARA rules. Progress stays on this page."
+                waiting={waitingForAnalysis}
                 buttonLabel={scanButtonLabel(
                   submitting === "memory",
                   memoryJob,
@@ -245,12 +264,15 @@ export function SignaturesView({
                     memoryRules.length,
                     "Scan Memory Image",
                   ),
+                  waitingForAnalysis,
                 )}
                 disabled={scanBusy || selectedFor(selected.memory, memoryRules).length === 0}
                 buttonTitle={
-                  selectedFor(selected.memory, memoryRules).length === 0
-                    ? "Select at least one rule."
-                    : undefined
+                  waitingForAnalysis
+                    ? WAITING_FOR_ANALYSIS_TITLE
+                    : selectedFor(selected.memory, memoryRules).length === 0
+                      ? "Select at least one rule."
+                      : undefined
                 }
                 extra={yara?.status_summary}
                 picker={
@@ -265,13 +287,14 @@ export function SignaturesView({
                 }
                 percent={showMemoryPercent ? memoryPercent : null}
                 onScan={() => void queue("yara.scan_memory", "memory")}
-                empty="No memory-image scans yet."
-                bundles={memoryBundles}
+                empty={memoryScanActive ? "" : "No memory-image scans yet."}
+                bundles={memoryScanActive ? [] : memoryBundles}
               />
             ) : (
               <ScanPanel
                 title="Extracted PE Scan"
                 description="Scan files already listed in Carved Data → Extracted Files. This page does not extract them from the dump."
+                waiting={waitingForAnalysis}
                 buttonLabel={scanButtonLabel(
                   submitting === "extracted",
                   extractedJob,
@@ -281,6 +304,7 @@ export function SignaturesView({
                     extractedRules.length,
                     "Scan Extracted PE Files",
                   ),
+                  waitingForAnalysis,
                 )}
                 disabled={
                   extractedBusy ||
@@ -288,11 +312,13 @@ export function SignaturesView({
                   selectedFor(selected.extracted, extractedRules).length === 0
                 }
                 buttonTitle={
-                  peFiles.length === 0
-                    ? "Extract files in Carved Data → Extracted Files, or extract a region from Memory first."
-                    : selectedFor(selected.extracted, extractedRules).length === 0
-                      ? "Select at least one rule."
-                      : undefined
+                  waitingForAnalysis
+                    ? WAITING_FOR_ANALYSIS_TITLE
+                    : peFiles.length === 0
+                      ? "Extract files in Carved Data → Extracted Files, or extract a region from Memory first."
+                      : selectedFor(selected.extracted, extractedRules).length === 0
+                        ? "Select at least one rule."
+                        : undefined
                 }
                 extra={
                   peFiles.length === 0 ? (
@@ -323,8 +349,8 @@ export function SignaturesView({
                 }
                 percent={showExtractedPercent ? extractedPercent : null}
                 onScan={() => void queue("yara.scan_extracted", "extracted")}
-                empty={peFiles.length === 0 ? "" : "No scans yet."}
-                bundles={extractedBundles}
+                empty={extractedScanActive || peFiles.length === 0 ? "" : "No scans yet."}
+                bundles={extractedScanActive ? [] : extractedBundles}
                 peById={peById}
               />
             )}
@@ -335,23 +361,28 @@ export function SignaturesView({
   );
 }
 
+const WAITING_FOR_ANALYSIS_TITLE = "Wait for the current analysis to finish.";
+
 function scanButtonLabel(
   submitting: boolean,
   job: Job | null,
   percent: string | null,
   idle: string,
+  waiting = false,
 ): string {
   if (submitting && !job) return "Starting…";
   if (job?.status === "queued") return "Queued";
   if (job != null && isActiveJobStatus(job.status)) {
     return percent ? `Scanning… ${percent}` : "Scanning…";
   }
+  if (waiting) return "Waiting For Analysis";
   return idle;
 }
 
 function ScanPanel({
   title,
   description,
+  waiting = false,
   buttonLabel,
   disabled,
   buttonTitle,
@@ -365,6 +396,7 @@ function ScanPanel({
 }: {
   title: string;
   description: string;
+  waiting?: boolean;
   buttonLabel: string;
   disabled: boolean;
   buttonTitle?: string;
@@ -377,16 +409,34 @@ function ScanPanel({
   peById?: Map<string, Artifact>;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-      <div className="shrink-0 px-4 pt-4 pb-3">
-        <h3 className="text-sm font-semibold">{title}</h3>
+    <div className="pb-6">
+      <div className="px-4 pt-4 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          {waiting ? (
+            <Badge className="normal-case tracking-normal">Waiting For Analysis</Badge>
+          ) : null}
+        </div>
         <p className="mt-1 text-sm text-muted">{description}</p>
         {typeof extra === "string" ? (
           <p className="mt-1 text-xs text-muted">{extra}</p>
         ) : extra ? (
           <div className="mt-2">{extra}</div>
         ) : null}
-        {picker}
+        {waiting ? (
+          <div className="mt-2" role="status">
+            <AnalysisScopeNote>
+              Signature scans stay locked until the current analysis finishes. Cancel
+              it from <span className="font-semibold">Jobs</span> if you need to scan
+              now.
+            </AnalysisScopeNote>
+          </div>
+        ) : null}
+        {picker ? (
+          <div className={waiting ? "pointer-events-none opacity-60" : undefined}>
+            {picker}
+          </div>
+        ) : null}
         <Button
           size="sm"
           className="mt-3 min-w-[10rem]"
@@ -415,7 +465,7 @@ function ScanPanel({
           <p className="px-4 text-sm text-muted">{empty}</p>
         ) : null
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div>
           {bundles.map((b) => (
             <ScanResultCard key={b.scan.id} bundle={b} peById={peById} />
           ))}
@@ -626,4 +676,25 @@ function scanCountIdleLabel(count: number, total: number, allLabel: string): str
     return `${allLabel} (${count} rule${count === 1 ? "" : "s"})`;
   }
   return allLabel;
+}
+
+function scanStartedAt(bundle: YaraScanBundle): string {
+  return bundle.scan.started_at || bundle.scan.finished_at || "";
+}
+
+function latestBundles(
+  bundles: YaraScanBundle[],
+  keyOf: (bundle: YaraScanBundle) => string,
+): YaraScanBundle[] {
+  const latest = new Map<string, YaraScanBundle>();
+  for (const bundle of bundles) {
+    const key = keyOf(bundle);
+    const prev = latest.get(key);
+    if (!prev || scanStartedAt(bundle) >= scanStartedAt(prev)) {
+      latest.set(key, bundle);
+    }
+  }
+  return [...latest.values()].sort((a, b) =>
+    scanStartedAt(b).localeCompare(scanStartedAt(a)),
+  );
 }

@@ -170,6 +170,44 @@ def _selected_rule_names(params: dict[str, Any]) -> list[str] | None:
     return names
 
 
+def _discard_prior_scans(
+    db: Database,
+    *,
+    evidence_id: str,
+    target_kind: str,
+    artifact_id: str | None = None,
+) -> None:
+    """Drop previous Signature Detection results so only the latest scan is kept."""
+    if artifact_id:
+        rows = db.fetchall(
+            "SELECT id, analysis_run_id FROM yara_scans WHERE artifact_id = ?",
+            (artifact_id,),
+        )
+    else:
+        rows = db.fetchall(
+            """
+            SELECT id, analysis_run_id FROM yara_scans
+            WHERE evidence_id = ? AND COALESCE(target_kind, 'artifact') = ?
+            """,
+            (evidence_id, target_kind),
+        )
+    if not rows:
+        return
+    scan_ids = [str(row["id"]) for row in rows]
+    run_ids = [str(row["analysis_run_id"]) for row in rows if row.get("analysis_run_id")]
+    scan_ph = ",".join("?" * len(scan_ids))
+    db.execute(f"DELETE FROM yara_scans WHERE id IN ({scan_ph})", tuple(scan_ids))
+    if run_ids:
+        run_ph = ",".join("?" * len(run_ids))
+        db.execute(
+            f"""
+            DELETE FROM findings
+            WHERE finding_type = 'signature_detection' AND analysis_run_id IN ({run_ph})
+            """,
+            tuple(run_ids),
+        )
+
+
 def configure_yara(paths: AppPaths, db: Database, settings: dict[str, Any]) -> dict[str, Any]:
     provider = get_or_create_provider(paths, db)
     provider.configure(settings)
@@ -226,6 +264,12 @@ def run_yara_artifact_scan_job(
 
     selected_names = _selected_rule_names(params)
     job_id = params.get("job_id")
+    _discard_prior_scans(
+        db,
+        evidence_id=str(evidence_id),
+        target_kind=KIND_ARTIFACT,
+        artifact_id=str(artifact_id),
+    )
     run_id = str(uuid4())
     scan_id = str(uuid4())
     started = _utcnow()
@@ -471,6 +515,9 @@ def run_yara_extracted_files_job(
             entity="yara",
         )
 
+    _discard_prior_scans(
+        db, evidence_id=str(evidence_id), target_kind=KIND_ARTIFACT
+    )
     scanned: list[dict[str, Any]] = []
     total = len(artifacts)
     for index, art in enumerate(artifacts, start=1):
@@ -543,6 +590,9 @@ def run_yara_memory_scan_job(
 
     selected_names = _selected_rule_names(params)
     job_id = params.get("job_id")
+    _discard_prior_scans(
+        db, evidence_id=str(evidence_id), target_kind=KIND_MEMORY
+    )
     run_id = str(uuid4())
     scan_id = str(uuid4())
     started = _utcnow()
@@ -846,7 +896,7 @@ def list_yara_scans_for_artifact(db: Database, artifact_id: str) -> dict[str, An
     rows = db.fetchall(
         """
         SELECT * FROM yara_scans WHERE artifact_id = ?
-        ORDER BY started_at DESC LIMIT 50
+        ORDER BY started_at DESC LIMIT 1
         """,
         (artifact_id,),
     )
@@ -879,12 +929,28 @@ def list_yara_scans_for_evidence(db: Database, evidence_id: str) -> dict[str, An
     rows = db.fetchall(
         """
         SELECT * FROM yara_scans WHERE evidence_id = ?
-        ORDER BY started_at DESC LIMIT 50
+        ORDER BY started_at DESC
         """,
         (evidence_id,),
     )
+    latest_memory: dict[str, Any] | None = None
+    latest_artifact: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        kind = row.get("target_kind") or "artifact"
+        if kind == KIND_MEMORY:
+            if latest_memory is None:
+                latest_memory = row
+            continue
+        art_id = str(row.get("artifact_id") or row["id"])
+        if art_id not in latest_artifact:
+            latest_artifact[art_id] = row
+    selected = []
+    if latest_memory is not None:
+        selected.append(latest_memory)
+    selected.extend(latest_artifact.values())
+    selected.sort(key=lambda row: str(row.get("started_at") or ""), reverse=True)
     items = []
-    for r in rows:
+    for r in selected:
         matches = db.fetchall(
             "SELECT * FROM yara_matches WHERE scan_id = ? ORDER BY rule_name",
             (r["id"],),

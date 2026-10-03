@@ -777,6 +777,10 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "yara.ruleset" in signatures
     assert "YaraRulePicker" in signatures
     assert "rule_names" in signatures
+    assert "Waiting For Analysis" in signatures
+    assert "Wait for the current analysis to finish." in signatures
+    assert "latestBundles" in signatures
+    assert "memoryScanActive ? []" in signatures
     assert "All rules" in picker
     assert "Custom rules" in picker
     assert "skipped_rule_files" in settings

@@ -153,7 +153,7 @@ export function YaraRulePicker({ rules, selected, onChange, disabled }: Props) {
                 </label>
               </div>
               {expanded && emptyCustom ? (
-                <p className="px-10 pb-2 text-xs text-muted">
+                <p className="px-10 pb-3 text-xs text-muted">
                   Files you add in Settings → Signature Detection appear here after Reload
                   Rules. Use this group to scan only your rules.
                 </p>
