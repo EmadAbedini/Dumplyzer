@@ -56,6 +56,9 @@ Desktop.ini
 .env.*
 !.env.example
 
+# Local notes
+todo.txt
+
 # Build outputs
 dist/
 build/
