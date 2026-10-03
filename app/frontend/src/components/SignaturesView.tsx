@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -22,12 +23,13 @@ import {
   ruleLevelFromMeta,
 } from "../lib/findings";
 import { useTableSort } from "../lib/tableSort";
-import type { Artifact, Job, YaraMatch, YaraScanBundle } from "../lib/types";
+import type { Artifact, Job, YaraMatch, YaraRuleInfo, YaraRuleset, YaraScanBundle } from "../lib/types";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { AnalysisScopeNote, ImportEvidenceState } from "./CoverageStatus";
 import { SegmentedControl } from "./ui/segmented";
 import { SortableTh } from "./SortableTh";
+import { YaraRulePicker } from "./YaraRulePicker";
 
 type TabId = "memory" | "extracted";
 
@@ -57,6 +59,15 @@ export function SignaturesView({
   const [submitting, setSubmitting] = useState<"memory" | "extracted" | null>(
     null,
   );
+  const [rules, setRules] = useState<YaraRuleInfo[]>([]);
+  const [selected, setSelected] = useState<{
+    memory: Set<string>;
+    extracted: Set<string>;
+  }>({ memory: new Set(), extracted: new Set() });
+  const knownRuleNames = useRef<{ memory: Set<string>; extracted: Set<string> }>({
+    memory: new Set(),
+    extracted: new Set(),
+  });
 
   const load = useCallback(async () => {
     if (!evidenceId) {
@@ -80,9 +91,41 @@ export function SignaturesView({
     }
   }, [evidenceId, onError]);
 
+  const loadRules = useCallback(async () => {
+    try {
+      const ruleset = await engineCall<YaraRuleset>("yara.ruleset");
+      const items = (ruleset.items ?? []).filter((row) => row.available !== false);
+      const memoryNames = namesForTarget(items, "memory");
+      const extractedNames = namesForTarget(items, "artifact");
+      setRules(items);
+      setSelected((prev) => ({
+        memory: mergeRuleSelection(
+          prev.memory,
+          memoryNames,
+          knownRuleNames.current.memory,
+        ),
+        extracted: mergeRuleSelection(
+          prev.extracted,
+          extractedNames,
+          knownRuleNames.current.extracted,
+        ),
+      }));
+      knownRuleNames.current = {
+        memory: new Set(memoryNames),
+        extracted: new Set(extractedNames),
+      };
+    } catch (err) {
+      onError(err instanceof EngineClientError ? err.message : String(err));
+    }
+  }, [onError]);
+
   useEffect(() => {
     void load();
   }, [load, refreshToken]);
+
+  useEffect(() => {
+    void loadRules();
+  }, [loadRules, refreshToken, yara?.loaded_rule_count, yara?.custom_rule_count]);
 
   const peById = useMemo(() => {
     const map = new Map<string, Artifact>();
@@ -105,14 +148,25 @@ export function SignaturesView({
   const checking = yaraRow.kind === "checking";
   const actionsLocked = jobsRunning || submitting != null;
 
+  const memoryRules = useMemo(() => rulesForTarget(rules, "memory"), [rules]);
+  const extractedRules = useMemo(() => rulesForTarget(rules, "artifact"), [rules]);
+
   const queue = async (
     method: "yara.scan_memory" | "yara.scan_extracted",
     kind: "memory" | "extracted",
   ) => {
     if (!evidenceId || submitting) return;
+    const pool = kind === "memory" ? memoryRules : extractedRules;
+    const chosen = kind === "memory" ? selected.memory : selected.extracted;
+    const names = pool.map((rule) => rule.name).filter((name) => chosen.has(name));
+    if (names.length === 0) return;
     setSubmitting(kind);
     try {
-      const job = await engineCall<Job>(method, { evidence_id: evidenceId });
+      const payload: { evidence_id: string; rule_names?: string[] } = {
+        evidence_id: evidenceId,
+      };
+      if (names.length !== pool.length) payload.rule_names = names;
+      const job = await engineCall<Job>(method, payload);
       onJobSubmitted?.(job);
     } catch (err) {
       onError(err instanceof EngineClientError ? err.message : String(err));
@@ -181,15 +235,34 @@ export function SignaturesView({
             {tab === "memory" ? (
               <ScanPanel
                 title="Memory Image"
-                description="Scan the imported memory image with YARA rules. Progress stays on this page."
+                description="Scan the imported memory image with the selected YARA rules. Progress stays on this page."
                 buttonLabel={scanButtonLabel(
                   submitting === "memory",
                   memoryJob,
                   showMemoryPercent ? memoryPercent : null,
-                  "Scan Memory Image",
+                  scanCountIdleLabel(
+                    selectedFor(selected.memory, memoryRules).length,
+                    memoryRules.length,
+                    "Scan Memory Image",
+                  ),
                 )}
-                disabled={scanBusy}
+                disabled={scanBusy || selectedFor(selected.memory, memoryRules).length === 0}
+                buttonTitle={
+                  selectedFor(selected.memory, memoryRules).length === 0
+                    ? "Select at least one rule."
+                    : undefined
+                }
                 extra={yara?.status_summary}
+                picker={
+                  <YaraRulePicker
+                    rules={memoryRules}
+                    selected={selected.memory}
+                    disabled={scanBusy}
+                    onChange={(next) =>
+                      setSelected((prev) => ({ ...prev, memory: next }))
+                    }
+                  />
+                }
                 percent={showMemoryPercent ? memoryPercent : null}
                 onScan={() => void queue("yara.scan_memory", "memory")}
                 empty="No memory-image scans yet."
@@ -203,13 +276,23 @@ export function SignaturesView({
                   submitting === "extracted",
                   extractedJob,
                   showExtractedPercent ? extractedPercent : null,
-                  "Scan Extracted PE Files",
+                  scanCountIdleLabel(
+                    selectedFor(selected.extracted, extractedRules).length,
+                    extractedRules.length,
+                    "Scan Extracted PE Files",
+                  ),
                 )}
-                disabled={extractedBusy || peFiles.length === 0}
+                disabled={
+                  extractedBusy ||
+                  peFiles.length === 0 ||
+                  selectedFor(selected.extracted, extractedRules).length === 0
+                }
                 buttonTitle={
                   peFiles.length === 0
                     ? "Extract files in Carved Data → Extracted Files, or extract a region from Memory first."
-                    : undefined
+                    : selectedFor(selected.extracted, extractedRules).length === 0
+                      ? "Select at least one rule."
+                      : undefined
                 }
                 extra={
                   peFiles.length === 0 ? (
@@ -227,6 +310,16 @@ export function SignaturesView({
                   ) : (
                     `${peFiles.length} extracted file${peFiles.length === 1 ? "" : "s"} ready to scan.`
                   )
+                }
+                picker={
+                  <YaraRulePicker
+                    rules={extractedRules}
+                    selected={selected.extracted}
+                    disabled={extractedBusy}
+                    onChange={(next) =>
+                      setSelected((prev) => ({ ...prev, extracted: next }))
+                    }
+                  />
                 }
                 percent={showExtractedPercent ? extractedPercent : null}
                 onScan={() => void queue("yara.scan_extracted", "extracted")}
@@ -263,6 +356,7 @@ function ScanPanel({
   disabled,
   buttonTitle,
   extra,
+  picker,
   percent,
   onScan,
   empty,
@@ -275,6 +369,7 @@ function ScanPanel({
   disabled: boolean;
   buttonTitle?: string;
   extra?: ReactNode;
+  picker?: ReactNode;
   percent?: string | null;
   onScan: () => void;
   empty: string;
@@ -282,7 +377,7 @@ function ScanPanel({
   peById?: Map<string, Artifact>;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
       <div className="shrink-0 px-4 pt-4 pb-3">
         <h3 className="text-sm font-semibold">{title}</h3>
         <p className="mt-1 text-sm text-muted">{description}</p>
@@ -291,6 +386,7 @@ function ScanPanel({
         ) : extra ? (
           <div className="mt-2">{extra}</div>
         ) : null}
+        {picker}
         <Button
           size="sm"
           className="mt-3 min-w-[10rem]"
@@ -498,4 +594,36 @@ function groupMatches(matches: YaraMatch[]): GroupedRule[] {
     }
   }
   return [...map.values()];
+}
+
+function rulesForTarget(rules: YaraRuleInfo[], target: string): YaraRuleInfo[] {
+  return rules.filter((rule) => (rule.targets ?? []).includes(target));
+}
+
+function namesForTarget(rules: YaraRuleInfo[], target: string): string[] {
+  return rulesForTarget(rules, target).map((rule) => rule.name);
+}
+
+function mergeRuleSelection(
+  prev: Set<string>,
+  names: string[],
+  known: Set<string>,
+): Set<string> {
+  if (known.size === 0) return new Set(names);
+  const next = new Set<string>();
+  for (const name of names) {
+    if (prev.has(name) || !known.has(name)) next.add(name);
+  }
+  return next;
+}
+
+function selectedFor(selected: Set<string>, rules: YaraRuleInfo[]): string[] {
+  return rules.map((rule) => rule.name).filter((name) => selected.has(name));
+}
+
+function scanCountIdleLabel(count: number, total: number, allLabel: string): string {
+  if (total > 0 && count < total) {
+    return `${allLabel} (${count} rule${count === 1 ? "" : "s"})`;
+  }
+  return allLabel;
 }

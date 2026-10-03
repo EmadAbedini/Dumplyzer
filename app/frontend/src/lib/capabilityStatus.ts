@@ -185,6 +185,7 @@ async function checkStringAnalysis(): Promise<void> {
 }
 
 export function applySignatureDetection(status: YaraStatus): void {
+  if (status.checking && status.available == null) return;
   snapshot = {
     ...snapshot,
     yara: { ...status },

@@ -470,6 +470,31 @@ def _artifact_get(artifact_id: str) -> dict[str, Any]:
     return dto
 
 
+def _cache_yara_status(status: dict[str, Any]) -> dict[str, Any]:
+    cached = _STATE.get("capabilities")
+    if isinstance(cached, dict):
+        _STATE["capabilities"] = {**cached, "yara": status, "checking": False}
+    return status
+
+
+def handle_yara_reload(_params: dict[str, Any]) -> dict[str, Any]:
+    return _cache_yara_status(yara_workflows.reload_yara_rules(_paths(), _db()))
+
+
+def _yara_rule_names(params: dict[str, Any]) -> list[str] | None:
+    raw = params.get("rule_names")
+    return list(raw) if isinstance(raw, list) else None
+
+
+def _yara_scan_message(kind: str, params: dict[str, Any]) -> str:
+    names = _yara_rule_names(params)
+    if names:
+        n = len(names)
+        noun = "rule" if n == 1 else "rules"
+        return f"Signature Detection {kind} ({n} {noun})"
+    return f"Signature Detection {kind}"
+
+
 HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "health": handle_health,
     "app.init": handle_app_init,
@@ -643,7 +668,10 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "artifacts.list": lambda p: memory_artifacts.list_artifacts(_db(), p["evidence_id"]),
     "artifacts.get": lambda p: _artifact_get(p["artifact_id"]),
     "yara.status": lambda _p: yara_workflows.yara_status(_paths(), _db()),
-    "yara.reload": lambda _p: yara_workflows.reload_yara_rules(_paths(), _db()),
+    "yara.reload": handle_yara_reload,
+    "yara.ruleset": lambda p: yara_workflows.list_yara_ruleset(
+        _paths(), _db(), p.get("kind")
+    ),
     "yara.configure": lambda p: yara_workflows.configure_yara(
         _paths(), _db(), p.get("settings") or p
     ),
@@ -652,20 +680,30 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
         evidence_id=p.get("evidence_id"),
         process_id=p.get("process_id"),
         pid=p.get("pid"),
-        params={"artifact_id": p["artifact_id"], "evidence_id": p.get("evidence_id")},
-        message="Signature Detection artifact scan",
+        params={
+            "artifact_id": p["artifact_id"],
+            "evidence_id": p.get("evidence_id"),
+            "rule_names": _yara_rule_names(p),
+        },
+        message=_yara_scan_message("artifact scan", p),
     ),
     "yara.scan_memory": lambda p: _jobs().submit(
         "yara_memory_scan",
         evidence_id=p["evidence_id"],
-        params={"evidence_id": p["evidence_id"]},
-        message="Signature Detection memory dump scan",
+        params={
+            "evidence_id": p["evidence_id"],
+            "rule_names": _yara_rule_names(p),
+        },
+        message=_yara_scan_message("memory dump scan", p),
     ),
     "yara.scan_extracted": lambda p: _jobs().submit(
         "yara_extracted_scan",
         evidence_id=p["evidence_id"],
-        params={"evidence_id": p["evidence_id"]},
-        message="Signature Detection extracted files scan",
+        params={
+            "evidence_id": p["evidence_id"],
+            "rule_names": _yara_rule_names(p),
+        },
+        message=_yara_scan_message("extracted files scan", p),
     ),
     "yara.scans_for_artifact": lambda p: yara_workflows.list_yara_scans_for_artifact(
         _db(), p["artifact_id"]

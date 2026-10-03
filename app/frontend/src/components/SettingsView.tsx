@@ -142,6 +142,30 @@ export function SettingsView({
               <span className="font-mono">.yara</span> files to extend
               signature detection.
             </p>
+            {yara.status_summary ? (
+              <p className="mt-2 text-xs text-muted">{yara.status_summary}</p>
+            ) : null}
+            {(yara.skipped_rule_files ?? []).length > 0 ? (
+              <div className="mt-2 text-xs text-danger">
+                {(yara.skipped_rule_file_count ?? yara.skipped_rule_files?.length ?? 0).toLocaleString()}{" "}
+                rule file
+                {(yara.skipped_rule_file_count ?? yara.skipped_rule_files?.length ?? 0) === 1
+                  ? ""
+                  : "s"}{" "}
+                skipped and not counted:
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {(yara.skipped_rule_files ?? []).slice(0, 8).map((item, index) => {
+                    const name = (item.path ?? "").split(/[/\\]/).pop() || item.path || "rule file";
+                    return (
+                      <li key={`${name}-${index}`}>
+                        <span className="font-mono">{name}</span>
+                        {item.error ? ` — ${item.error}` : ""}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
           </>
         ) : (
           <p className="mt-1 text-sm text-muted">{UNAVAILABLE_DETAIL}</p>

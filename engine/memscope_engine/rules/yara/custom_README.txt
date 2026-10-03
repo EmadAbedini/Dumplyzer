@@ -1,4 +1,5 @@
 Place .yar / .yara files here. Dumplyzer never overwrites this folder.
+On Signatures they appear under Custom rules so you can scan only your set.
 
   memory\    Rules used when scanning the original memory dump
   artifact\  Rules used when scanning extracted PE / artifacts

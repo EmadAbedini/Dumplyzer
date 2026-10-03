@@ -458,6 +458,7 @@ def test_yara_reload_rpc(tmp_path: Path) -> None:
 
     handle_app_init({"data_dir": str(tmp_path / "ipc")})
     assert "yara.reload" in HANDLERS
+    assert "yara.ruleset" in HANDLERS
     assert "yara.scan_extracted" in HANDLERS
     status = HANDLERS["yara.reload"]({})
     assert "available" in status
@@ -583,3 +584,81 @@ def test_extracted_files_scan_includes_vad_dump(tmp_path: Path) -> None:
     )
     assert result["scanned"] == 1
     db.close()
+
+
+def test_list_rules_groups_bundled_and_custom(tmp_path: Path) -> None:
+    _require_yara()
+    paths = AppPaths(tmp_path / "data").ensure()
+    (paths.yara_rules_custom / "company.yar").write_text(
+        "rule CompanyBeacon { condition: true }\n",
+        encoding="utf-8",
+    )
+    p = _provider(paths)
+    items = p.list_rules(KIND_MEMORY)
+    names = {row["name"] for row in items}
+    assert "dumplyzer_malware_lumma_memory" in names
+    assert "CompanyBeacon" in names
+    lumma = next(row for row in items if row["name"] == "dumplyzer_malware_lumma_memory")
+    assert lumma["category"] == "malware"
+    assert lumma["display_name"] == "LummaC2"
+    assert "memory" in lumma["targets"]
+    custom = next(row for row in items if row["name"] == "CompanyBeacon")
+    assert custom["category"] == "custom"
+    assert custom["source"] == "custom"
+    grouped = yara_workflows.list_yara_ruleset(paths, Database(paths.db_path), KIND_MEMORY)
+    labels = {g["label"] for g in grouped["groups"]}
+    assert "Malware" in labels
+    assert "Custom rules" in labels
+    assert grouped["total"] == len(items)
+
+
+def test_selective_scan_keeps_only_selected_rule(tmp_path: Path) -> None:
+    _require_yara()
+    bundled = tmp_path / "bundled"
+    custom = tmp_path / "custom"
+    bundled.mkdir()
+    custom.mkdir()
+    (custom / "pair.yar").write_text(
+        """
+rule KeepMe { strings: $a = "KEEPTOKEN" ascii condition: $a }
+rule DropMe { strings: $a = "DROPTOKEN" ascii condition: $a }
+""",
+        encoding="utf-8",
+    )
+    p = YaraProvider(default_rules_dir=tmp_path, bundled_dir=bundled, custom_dir=custom)
+    target = tmp_path / "hit.bin"
+    target.write_bytes(b"KEEPTOKEN DROPTOKEN")
+    both = p.scan_file(target, kind=KIND_ARTIFACT)
+    assert {m["rule_name"] for m in both["matches"]} == {"KeepMe", "DropMe"}
+    selected = p.scan_file(target, kind=KIND_ARTIFACT, rule_names=["KeepMe"])
+    assert [m["rule_name"] for m in selected["matches"]] == ["KeepMe"]
+    assert selected["ruleset"]["selected_rule_names"] == ["KeepMe"]
+
+
+def test_utf16_custom_rule_is_counted_on_reload(tmp_path: Path) -> None:
+    _require_yara()
+    from memscope_engine.server import HANDLERS, handle_app_init
+
+    handle_app_init({"data_dir": str(tmp_path / "ipc")})
+    custom = AppPaths(tmp_path / "ipc").yara_rules_custom
+    (custom / "notepad.yar").write_bytes(
+        "rule Utf16Probe { condition: true }\n".encode("utf-16")
+    )
+    added = HANDLERS["yara.reload"]({})
+    assert int(added.get("custom_rule_count") or 0) == 1
+    names = {row["name"] for row in HANDLERS["yara.ruleset"]({}).get("items") or []}
+    assert "Utf16Probe" in names
+
+
+def test_yara_reload_updates_capabilities_cache(tmp_path: Path) -> None:
+    _require_yara()
+    from memscope_engine.server import HANDLERS, _STATE, handle_app_init
+
+    handle_app_init({"data_dir": str(tmp_path / "ipc")})
+    _STATE["capabilities"] = {"checking": False, "yara": {"custom_rule_count": 0}}
+    custom = AppPaths(tmp_path / "ipc").yara_rules_custom
+    (custom / "cached.yar").write_text("rule CacheProbe { condition: true }\n", encoding="utf-8")
+    added = HANDLERS["yara.reload"]({})
+    assert int(added.get("custom_rule_count") or 0) == 1
+    cached = _STATE.get("capabilities") or {}
+    assert int((cached.get("yara") or {}).get("custom_rule_count") or 0) == 1

@@ -13,9 +13,11 @@ from memscope_engine.artifacts import store as artifact_store
 from memscope_engine.errors import AppError
 from memscope_engine.paths import AppPaths
 from memscope_engine.providers.yara_provider import (
+    CATEGORY_ORDER,
     KIND_ARTIFACT,
     KIND_MEMORY,
     YaraProvider,
+    category_label,
 )
 from memscope_engine.storage import Database
 
@@ -107,7 +109,65 @@ def yara_status(paths: AppPaths, db: Database) -> dict[str, Any]:
 def reload_yara_rules(paths: AppPaths, db: Database) -> dict[str, Any]:
     """Re-discover bundled and custom rules. Never modifies custom files."""
     paths.ensure()
-    return get_or_create_provider(paths, db).availability(validate=True)
+    status = get_or_create_provider(paths, db).availability(validate=True)
+    return status
+
+
+def list_yara_ruleset(paths: AppPaths, db: Database, kind: str | None = None) -> dict[str, Any]:
+    provider = get_or_create_provider(paths, db)
+    target = kind if kind in {KIND_MEMORY, KIND_ARTIFACT} else None
+    items = provider.list_rules(target)
+    groups: dict[str, dict[str, Any]] = {}
+    for row in items:
+        cat = str(row.get("category") or "other")
+        bucket = groups.get(cat)
+        if bucket is None:
+            bucket = {
+                "id": cat,
+                "label": row.get("category_label") or cat,
+                "count": 0,
+            }
+            groups[cat] = bucket
+        bucket["count"] += 1
+    if "custom" not in groups:
+        groups["custom"] = {
+            "id": "custom",
+            "label": category_label("custom"),
+            "count": 0,
+        }
+    ordered = sorted(
+        groups.values(),
+        key=lambda g: (
+            CATEGORY_ORDER.index(g["id"]) if g["id"] in CATEGORY_ORDER else len(CATEGORY_ORDER),
+            str(g["label"]),
+        ),
+    )
+    return {
+        "kind": target,
+        "total": len(items),
+        "items": items,
+        "groups": ordered,
+    }
+
+
+def _selected_rule_names(params: dict[str, Any]) -> list[str] | None:
+    raw = params.get("rule_names")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise AppError(
+            code="yara_invalid_rules",
+            message="rule_names must be a list of rule identifiers.",
+            entity="yara",
+        )
+    names = [str(item).strip() for item in raw if str(item).strip()]
+    if not names:
+        raise AppError(
+            code="yara_no_rules",
+            message="Select at least one YARA rule to scan.",
+            entity="yara",
+        )
+    return names
 
 
 def configure_yara(paths: AppPaths, db: Database, settings: dict[str, Any]) -> dict[str, Any]:
@@ -164,6 +224,8 @@ def run_yara_artifact_scan_job(
             entity="yara",
         )
 
+    selected_names = _selected_rule_names(params)
+    job_id = params.get("job_id")
     run_id = str(uuid4())
     scan_id = str(uuid4())
     started = _utcnow()
@@ -189,6 +251,7 @@ def run_yara_artifact_scan_job(
                         "target": "artifact",
                         "artifact_id": artifact_id,
                         "reason": "Scan extracted artifact bytes with configured YARA rules",
+                        "rule_names": selected_names,
                     }
                 ]
             ),
@@ -231,7 +294,13 @@ def run_yara_artifact_scan_job(
             exec_id,
             run_id,
             evidence_id,
-            json.dumps({"artifact_id": artifact_id, "target": str(stored)}),
+            json.dumps(
+                {
+                    "artifact_id": artifact_id,
+                    "target": str(stored),
+                    "rule_names": selected_names,
+                }
+            ),
             started,
         ),
     )
@@ -241,7 +310,12 @@ def run_yara_artifact_scan_job(
             raise AppError(code="job_cancelled", message="Job was cancelled.", entity="job")
         progress("Compiling Signature Detection rules")
         progress(f"Scanning artifact {art['filename']}")
-        result = provider.scan_file(stored, cancelled=cancelled, kind=KIND_ARTIFACT)
+        result = provider.scan_file(
+            stored,
+            cancelled=cancelled,
+            kind=KIND_ARTIFACT,
+            rule_names=selected_names,
+        )
         _persist_matches(
             db,
             scan_id=scan_id,
@@ -415,6 +489,7 @@ def run_yara_extracted_files_job(
                 "artifact_id": art["id"],
                 "evidence_id": evidence_id,
                 "job_id": params.get("job_id"),
+                "rule_names": params.get("rule_names"),
             },
             cancelled,
             progress,
@@ -466,6 +541,7 @@ def run_yara_memory_scan_job(
             entity="yara",
         )
 
+    selected_names = _selected_rule_names(params)
     job_id = params.get("job_id")
     run_id = str(uuid4())
     scan_id = str(uuid4())
@@ -490,6 +566,7 @@ def run_yara_memory_scan_job(
                         "target": "memory",
                         "evidence_id": evidence_id,
                         "reason": "Scan original memory dump with memory-oriented rules",
+                        "rule_names": selected_names,
                     }
                 ]
             ),
@@ -519,7 +596,13 @@ def run_yara_memory_scan_job(
             exec_id,
             run_id,
             evidence_id,
-            json.dumps({"target": str(target), "target_kind": KIND_MEMORY}),
+            json.dumps(
+                {
+                    "target": str(target),
+                    "target_kind": KIND_MEMORY,
+                    "rule_names": selected_names,
+                }
+            ),
             started,
         ),
     )
@@ -533,6 +616,7 @@ def run_yara_memory_scan_job(
         result = provider.scan_memory_image(
             target,
             cancelled=cancelled,
+            rule_names=selected_names,
             progress=lambda frac: _emit_yara_progress(
                 progress,
                 f"Scanning memory dump {ev['filename']}",

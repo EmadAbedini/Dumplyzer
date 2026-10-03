@@ -273,6 +273,27 @@ export type YaraStatus = {
   memory_timeout_secs?: number;
   scan_modes?: string[];
   status_summary?: string;
+  checking?: boolean;
+};
+
+export type YaraRuleInfo = {
+  name: string;
+  display_name: string;
+  description?: string;
+  category: string;
+  category_label: string;
+  targets: string[];
+  source?: "bundled" | "custom" | "extra" | string;
+  file?: string;
+  severity?: string | null;
+  available?: boolean;
+};
+
+export type YaraRuleset = {
+  kind?: string | null;
+  total: number;
+  items: YaraRuleInfo[];
+  groups?: Array<{ id: string; label: string; count: number }>;
 };
 
 export type YaraMatch = {

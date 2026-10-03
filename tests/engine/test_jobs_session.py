@@ -765,5 +765,21 @@ def test_keep_alive_app_init_preserves_tmp_during_job(tmp_path: Path) -> None:
     assert "coverageWaitingForPdb" in app
     assert "waitingForPdb={waitingForPdb}" in app
     assert "setNav(\"overview\")" in app
+    signatures = (
+        root / "app" / "frontend" / "src" / "components" / "SignaturesView.tsx"
+    ).read_text(encoding="utf-8")
+    settings = (
+        root / "app" / "frontend" / "src" / "components" / "SettingsView.tsx"
+    ).read_text(encoding="utf-8")
+    picker = (
+        root / "app" / "frontend" / "src" / "components" / "YaraRulePicker.tsx"
+    ).read_text(encoding="utf-8")
+    assert "yara.ruleset" in signatures
+    assert "YaraRulePicker" in signatures
+    assert "rule_names" in signatures
+    assert "All rules" in picker
+    assert "Custom rules" in picker
+    assert "skipped_rule_files" in settings
+    assert "Reload Rules" in settings
     for label in ("cancelling", "cancelled", "completed", "failed", "running"):
         assert label in view or label in helpers or label in display

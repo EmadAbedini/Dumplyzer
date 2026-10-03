@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import mmap
 import os
@@ -19,8 +20,65 @@ log = logging.getLogger("memscope.tool")
 _RULE_SUFFIXES = {".yar", ".yara"}
 KIND_MEMORY = "memory"
 KIND_ARTIFACT = "artifact"
-_RULE_DECL = re.compile(r"(?m)^\s*rule\s+")
-_RULE_NAME = re.compile(r"(?m)^\s*rule\s+([A-Za-z_][A-Za-z0-9_]*)")
+_RULE_DECL = re.compile(r"(?m)^\s*(?:private\s+|global\s+)*rule\s+")
+_RULE_NAME = re.compile(
+    r"(?m)^\s*(?:private\s+|global\s+)*rule\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
+CATEGORY_LABELS = {
+    "credential_theft": "Credential theft",
+    "c2": "C2",
+    "malware": "Malware",
+    "injection": "Injection",
+    "command_script": "Scripts",
+    "recon": "Recon",
+    "custom": "Custom rules",
+    "other": "Other",
+}
+CATEGORY_ORDER = (
+    "credential_theft",
+    "c2",
+    "malware",
+    "injection",
+    "command_script",
+    "recon",
+    "custom",
+    "other",
+)
+_DISPLAY_BRANDS = (
+    ("cobaltstrike", "Cobalt Strike"),
+    ("bruteratel", "Brute Ratel"),
+    ("asyncrat", "AsyncRAT"),
+    ("nanocore", "NanoCore"),
+    ("meterpreter", "Meterpreter"),
+    ("mimikatz", "Mimikatz"),
+    ("safetykatz", "SafetyKatz"),
+    ("nanodump", "NanoDump"),
+    ("pypykatz", "pypykatz"),
+    ("procdump", "ProcDump"),
+    ("comsvcs_minidump", "comsvcs MiniDump"),
+    ("redline", "RedLine"),
+    ("lumma", "LummaC2"),
+    ("vidar", "Vidar"),
+    ("quasar", "Quasar"),
+    ("remcos", "Remcos"),
+    ("sliver", "Sliver"),
+    ("havoc", "Havoc"),
+    ("empire", "Empire"),
+    ("covenant", "Covenant"),
+    ("mythic", "Mythic"),
+    ("sharphound", "SharpHound"),
+    ("seatbelt", "Seatbelt"),
+    ("powerview", "PowerView"),
+    ("powersploit", "PowerSploit"),
+    ("amsi_bypass", "AMSI bypass"),
+    ("encoded_powershell", "Encoded PowerShell"),
+    ("embedded_powershell", "Embedded PowerShell"),
+    ("reflective_loader", "Reflective loader"),
+    ("ror13_apihash", "ror13 API hash"),
+    ("srdi", "sRDI"),
+    ("donut", "Donut"),
+    ("rubeus", "Rubeus"),
+)
 DEFAULT_CHUNK_THRESHOLD = 512 * 1024 * 1024
 DEFAULT_CHUNK_BYTES = 32 * 1024 * 1024
 DEFAULT_CHUNK_OVERLAP = 1024 * 1024
@@ -117,11 +175,34 @@ def validate_rule_path(path: Path, allowed_roots: list[Path]) -> Path:
     return resolved
 
 
+def read_rule_text(path: Path) -> str:
+    """Decode a YARA source file, including Notepad UTF-16 saves."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        return raw.decode("utf-16", errors="replace")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig", errors="replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("utf-16", errors="replace")
+
+
+def _looks_utf16(path: Path) -> bool:
+    try:
+        raw = path.read_bytes()[:4]
+    except OSError:
+        return False
+    return raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff")
+
+
 def list_rule_names(path: Path) -> list[str]:
     """Return declared YARA rule identifiers in file order."""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    text = read_rule_text(path)
+    if not text:
         return []
     return _RULE_NAME.findall(text)
 
@@ -130,11 +211,48 @@ def count_rule_declarations(path: Path) -> int:
     names = list_rule_names(path)
     if names:
         return len(names)
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    text = read_rule_text(path)
+    if not text:
         return 0
     return len(_RULE_DECL.findall(text))
+
+
+def rule_display_name(name: str, catalog_entry: dict[str, Any] | None = None) -> str:
+    """Short investigator-facing label for a compiled rule identifier."""
+    stem = re.sub(r"^dumplyzer_", "", str(name))
+    stem = re.sub(r"_(memory|pe|artifact)$", "", stem)
+    parts = stem.split("_")
+    while parts and parts[0] in {
+        "credtheft",
+        "c2",
+        "malware",
+        "inject",
+        "script",
+        "recon",
+        "cmd",
+    }:
+        parts.pop(0)
+    raw = "_".join(parts) or stem
+    lowered = raw.lower()
+    for key, label in _DISPLAY_BRANDS:
+        if lowered == key:
+            return label
+        prefix = key + "_"
+        if lowered.startswith(prefix):
+            rest = raw[len(key) :].strip("_").replace("_", " ")
+            return f"{label} {rest}".strip()
+    labeled = raw.replace("_", " ").strip()
+    if labeled:
+        return labeled[:1].upper() + labeled[1:]
+    if catalog_entry and catalog_entry.get("description"):
+        return str(catalog_entry["description"]).split(".")[0][:48]
+    return str(name)
+
+
+def category_label(category: str) -> str:
+    if category in CATEGORY_LABELS:
+        return CATEGORY_LABELS[category]
+    return category.replace("_", " ").title() or "Other"
 
 
 def classify_rule_kinds(path: Path, *, bundled_dir: Path | None, custom_dir: Path | None) -> set[str]:
@@ -334,6 +452,79 @@ class YaraProvider:
                 out.append(path)
         return out
 
+    def _load_catalog(self) -> dict[str, dict[str, Any]]:
+        root = self.bundled_dir
+        if not root:
+            return {}
+        path = Path(root) / "catalog.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        for entry in data.get("rules") or []:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if name:
+                out[str(name)] = entry
+        return out
+
+    def list_rules(self, kind: str | None = None) -> list[dict[str, Any]]:
+        """Inventory of compiled rules for grouping and selective scan."""
+        catalog = self._load_catalog()
+        inventory = self.compile_inventory(kind, validate=True)
+        valid = {p.resolve() for p in inventory["valid_files"]}
+        items: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for path in inventory["valid_files"]:
+            kinds = classify_rule_kinds(
+                path, bundled_dir=self.bundled_dir, custom_dir=self.custom_dir
+            )
+            if kind is not None and kind not in kinds:
+                continue
+            source = classify_rule_source(
+                path, bundled_dir=self.bundled_dir, custom_dir=self.custom_dir
+            )
+            for name in list_rule_names(path):
+                key = (name, source)
+                if key in seen:
+                    continue
+                seen.add(key)
+                entry = catalog.get(name) or {}
+                category = str(entry.get("category") or ("custom" if source == "custom" else "other"))
+                if source == "custom":
+                    category = "custom"
+                targets = sorted(kinds)
+                if entry.get("target") in {KIND_MEMORY, KIND_ARTIFACT}:
+                    targets = [str(entry["target"])]
+                    if kind is not None and kind not in targets:
+                        continue
+                items.append(
+                    {
+                        "name": name,
+                        "display_name": rule_display_name(name, entry),
+                        "description": str(entry.get("description") or ""),
+                        "category": category,
+                        "category_label": category_label(category),
+                        "targets": targets,
+                        "source": source,
+                        "file": str(path),
+                        "severity": entry.get("severity"),
+                        "available": path.resolve() in valid,
+                    }
+                )
+        items.sort(
+            key=lambda row: (
+                CATEGORY_ORDER.index(row["category"])
+                if row["category"] in CATEGORY_ORDER
+                else len(CATEGORY_ORDER),
+                str(row["display_name"]).lower(),
+                str(row["name"]).lower(),
+            )
+        )
+        return items
+
     def compile_inventory(self, kind: str | None = None, *, validate: bool = True) -> dict[str, Any]:
         files = self.list_rule_sources(kind)
         skipped: list[dict[str, str]] = []
@@ -351,18 +542,12 @@ class YaraProvider:
                 skipped.append({"path": str(path), "error": exc.message})
                 continue
             if validate:
-                try:
-                    yara.compile(filepath=str(rf))
-                except Exception as exc:  # noqa: BLE001
-                    skipped.append(
-                        {
-                            "path": str(rf),
-                            "error": str(exc).splitlines()[0] if str(exc) else "syntax error",
-                        }
-                    )
+                error = _compile_file_error(yara, rf)
+                if error:
+                    skipped.append({"path": str(rf), "error": error})
                     log.info(
                         "yara rule file skipped",
-                        extra={"channel": "tool", "path": str(rf), "error": str(exc)},
+                        extra={"channel": "tool", "path": str(rf), "error": error},
                     )
                     continue
             valid.append(rf)
@@ -413,7 +598,13 @@ class YaraProvider:
             "extra_rule_count": extra_rules,
         }
 
-    def compile_rules(self, rule_files: list[Path] | None = None, *, kind: str | None = None) -> Any:
+    def compile_rules(
+        self,
+        rule_files: list[Path] | None = None,
+        *,
+        kind: str | None = None,
+        rule_names: list[str] | None = None,
+    ) -> Any:
         info = detect_yara()
         if not info["available"]:
             raise AppError(
@@ -448,14 +639,38 @@ class YaraProvider:
                 suggestion=f"Add .yar/.yara files under {self.custom_dir or self.default_rules_dir}",
                 entity="yara",
             )
+        selected = {str(name) for name in rule_names} if rule_names is not None else None
+        if selected is not None:
+            files = [
+                path
+                for path in files
+                if selected.intersection(list_rule_names(path))
+            ]
+            if not files:
+                raise AppError(
+                    code="yara_no_rules",
+                    message="None of the selected rules could be compiled.",
+                    suggestion="Reload rules and choose a different set.",
+                    entity="yara",
+                )
         allowed = self._allowed_roots()
         filemap: dict[str, str] = {}
+        sources: dict[str, str] = {}
+        resolved_files: list[Path] = []
+        use_sources = False
         for i, f in enumerate(files):
             rf = validate_rule_path(f, allowed)
             key = f"r{i}_{rf.stem}"[:40]
             filemap[key] = str(rf)
+            resolved_files.append(rf)
+            if _looks_utf16(rf):
+                use_sources = True
+            sources[key] = read_rule_text(rf)
         try:
-            rules = yara.compile(filepaths=filemap)
+            if use_sources:
+                rules = yara.compile(sources=sources)
+            else:
+                rules = yara.compile(filepaths=filemap)
         except Exception as exc:  # noqa: BLE001
             raise AppError(
                 code="yara_compile_failed",
@@ -463,15 +678,16 @@ class YaraProvider:
                 details=str(exc).splitlines()[0] if str(exc) else "compile error",
                 suggestion="Fix syntax errors in the rule files and retry.",
                 entity="yara",
-                data={"rule_files": [str(p) for p in files], "skipped": skipped},
+                data={"rule_files": [str(p) for p in resolved_files], "skipped": skipped},
             ) from exc
         return rules, {
             "filemap": filemap,
-            "rule_files": [str(p) for p in files],
+            "rule_files": [str(p) for p in resolved_files],
             "skipped": skipped,
             "yara_version": info["yara_version"],
             "binding": info["binding"],
             "kind": kind,
+            "selected_rule_names": sorted(selected) if selected is not None else None,
         }
 
     def scan_file(
@@ -479,6 +695,7 @@ class YaraProvider:
         target: Path,
         *,
         rule_files: list[Path] | None = None,
+        rule_names: list[str] | None = None,
         timeout_secs: float | None = None,
         cancelled: Any = None,
         kind: str = KIND_ARTIFACT,
@@ -488,6 +705,7 @@ class YaraProvider:
             target,
             kind=kind,
             rule_files=rule_files,
+            rule_names=rule_names,
             timeout_secs=timeout_secs if timeout_secs is not None else self.timeout_secs,
             cancelled=cancelled,
             allow_chunked=False,
@@ -498,6 +716,7 @@ class YaraProvider:
         target: Path,
         *,
         rule_files: list[Path] | None = None,
+        rule_names: list[str] | None = None,
         timeout_secs: float | None = None,
         cancelled: Any = None,
         progress: Any = None,
@@ -508,6 +727,7 @@ class YaraProvider:
             target,
             kind=KIND_MEMORY,
             rule_files=rule_files,
+            rule_names=rule_names,
             timeout_secs=timeout,
             cancelled=cancelled,
             allow_chunked=True,
@@ -524,6 +744,7 @@ class YaraProvider:
         cancelled: Any,
         allow_chunked: bool,
         progress: Any = None,
+        rule_names: list[str] | None = None,
     ) -> dict[str, Any]:
         info = detect_yara()
         if not info["available"]:
@@ -542,7 +763,9 @@ class YaraProvider:
                 details=str(target),
                 entity="yara",
             )
-        rules, ruleset_meta = self.compile_rules(rule_files, kind=kind)
+        rules, ruleset_meta = self.compile_rules(
+            rule_files, kind=kind, rule_names=rule_names
+        )
         size = target.stat().st_size
         chunked = allow_chunked and size >= _chunk_threshold()
         if chunked:
@@ -563,6 +786,10 @@ class YaraProvider:
             if callable(progress):
                 progress(1.0)
         normalized = [normalize_match(m, ruleset_meta) for m in matches]
+        selected = ruleset_meta.get("selected_rule_names")
+        if selected:
+            allow = set(selected)
+            normalized = [row for row in normalized if row.get("rule_name") in allow]
         return {
             "status": "completed",
             "match_count": len(normalized),
@@ -575,6 +802,8 @@ class YaraProvider:
                 "skipped": ruleset_meta.get("skipped") or [],
                 "kind": kind,
                 "scan_mode": scan_mode,
+                "selected_rule_names": selected,
+                "selected_rule_count": len(selected) if selected else None,
             },
             "target": str(target),
             "target_kind": kind,
@@ -695,6 +924,23 @@ class YaraProvider:
                 entity="yara",
             ) from exc
         return result_holder["matches"] or []
+
+
+def _compile_file_error(yara_mod: Any, path: Path) -> str | None:
+    try:
+        if _looks_utf16(path):
+            yara_mod.compile(source=read_rule_text(path))
+        else:
+            yara_mod.compile(filepath=str(path))
+        return None
+    except Exception as exc:  # noqa: BLE001
+        if not _looks_utf16(path):
+            try:
+                yara_mod.compile(source=read_rule_text(path))
+                return None
+            except Exception as retry:  # noqa: BLE001
+                exc = retry
+        return str(exc).splitlines()[0] if str(exc) else "syntax error"
 
 
 def _count_noun(n: int, singular: str, plural: str) -> str:
