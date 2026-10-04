@@ -82,6 +82,21 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+Var InstalledVersion
+Var VersionCmp
+Var PreviousInstallDir
+Var NeedRemovePrevious
+Var RemovePreviousDone
+Var RemoveStatusLabel
+Var RemoveProgress
+Var RemoveTreeStarted
+Var RemoveTargetDir
+Var RemoveWipeUserData
+Var RemoveKeepUninstaller
+Var UninstallTreeRemoved
+Var DeleteAppDataCheckbox
+Var DeleteAppDataCheckboxState
+Var RemovePollCount
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -192,6 +207,10 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; only if a previous installation was detected
 Var ReinstallPageCheck
 Page custom PageReinstall PageLeaveReinstall
+; HideWindow made Setup vanish for several seconds. Exec of powershell.exe
+; also flashes a console even with -WindowStyle Hidden. Delete with cmd.exe
+; created via CreateProcess(CREATE_NO_WINDOW) and poll progress from a timer.
+Page custom PageRemovePrevious PageRemovePreviousLeave
 Function PageReinstall
  ; Uninstall previous WiX installation if exists.
  ;
@@ -226,33 +245,38 @@ Function PageReinstall
  ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
  ${IfThen} "$R0$R1" == "" ${|} Abort ${|}
 
- ; Compare this installar version with the existing installation
+ ; Compare this installer version with the existing installation
  ; and modify the messages presented to the user accordingly
  compare_version:
  StrCpy $R4 "$(older)"
  ${If} $WixMode = 1
- ReadRegStr $R0 HKLM "$R6" "DisplayVersion"
+ ReadRegStr $R8 HKLM "$R6" "DisplayVersion"
  ${Else}
- ReadRegStr $R0 SHCTX "${UNINSTKEY}" "DisplayVersion"
+ ReadRegStr $R8 SHCTX "${UNINSTKEY}" "DisplayVersion"
  ${EndIf}
- ${IfThen} $R0 == "" ${|} StrCpy $R4 "$(unknown)" ${|}
+ ${If} $R8 == ""
+ StrCpy $InstalledVersion "unknown"
+ ${Else}
+ StrCpy $InstalledVersion $R8
+ ${EndIf}
 
- nsis_tauri_utils::SemverCompare "${VERSION}" $R0
- Pop $R0
+ nsis_tauri_utils::SemverCompare "${VERSION}" $R8
+ Pop $VersionCmp
  ; Reinstalling the same version
- ${If} $R0 = 0
+ ${If} $VersionCmp = 0
  StrCpy $R1 "$(alreadyInstalledLong)"
  StrCpy $R2 "$(addOrReinstall)"
  StrCpy $R3 "$(uninstallApp)"
  !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(chooseMaintenanceOption)"
- ; Upgrading
- ${ElseIf} $R0 = 1
- StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
- StrCpy $R2 "$(uninstallBeforeInstalling)"
- StrCpy $R3 "$(dontUninstall)"
- !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
+ ; Upgrading: previous build must be removed. Overlay upgrades leave a mixed
+ ; Program Files tree (locked python312.dll, stale engine).
+ ${ElseIf} $VersionCmp = 1
+ StrCpy $R1 "Dumplyzer $InstalledVersion is already installed.$\r$\nSetup will uninstall version $InstalledVersion before installing version ${VERSION}.$\r$\nYour Dumplyzer data will be preserved.$\r$\n$\r$\nClick Next to uninstall and continue, or Cancel to exit Setup."
+ StrCpy $R2 ""
+ StrCpy $R3 ""
+ !insertmacro MUI_HEADER_TEXT "Previous version installed" "Uninstall required"
  ; Downgrading
- ${ElseIf} $R0 = -1
+ ${ElseIf} $VersionCmp = -1
  StrCpy $R1 "$(newerVersionInstalled)"
  StrCpy $R2 "$(uninstallBeforeInstalling)"
  !if "${ALLOWDOWNGRADES}" == "true"
@@ -278,31 +302,37 @@ Function PageReinstall
  Pop $R4
  ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
 
- ${NSD_CreateLabel} 0 0 100% 24u $R1
+ ${If} $R2 == ""
+ ${NSD_CreateLabel} 0 0 100% 56u $R1
+ Pop $R1
+ ${Else}
+ ${NSD_CreateLabel} 0 0 100% 28u $R1
  Pop $R1
 
- ${NSD_CreateRadioButton} 30u 50u -30u 8u $R2
+ ${NSD_CreateRadioButton} 0u 40u 100% 10u $R2
  Pop $R2
  ${NSD_OnClick} $R2 PageReinstallUpdateSelection
 
- ${NSD_CreateRadioButton} 30u 70u -30u 8u $R3
+ ${If} $R3 != ""
+ ${NSD_CreateRadioButton} 0u 56u 100% 10u $R3
  Pop $R3
  ; Disable this radio button if downgrading and downgrades are disabled
  !if "${ALLOWDOWNGRADES}" == "false"
- ${IfThen} $R0 = -1 ${|} EnableWindow $R3 0 ${|}
+ ${IfThen} $VersionCmp = -1 ${|} EnableWindow $R3 0 ${|}
  !endif
  ${NSD_OnClick} $R3 PageReinstallUpdateSelection
+ ${EndIf}
 
- ; Check the first radio button if this the first time
- ; we enter this page or if the second button wasn't
- ; selected the last time we were on this page
  ${If} $ReinstallPageCheck <> 2
  SendMessage $R2 ${BM_SETCHECK} ${BST_CHECKED} 0
- ${Else}
+ ${ElseIf} $R3 != ""
  SendMessage $R3 ${BM_SETCHECK} ${BST_CHECKED} 0
+ ${Else}
+ SendMessage $R2 ${BM_SETCHECK} ${BST_CHECKED} 0
  ${EndIf}
 
  ${NSD_SetFocus} $R2
+ ${EndIf}
  nsDialogs::Show
  ${EndIf}
 FunctionEnd
@@ -315,35 +345,37 @@ Function PageReinstallUpdateSelection
  ${EndIf}
 FunctionEnd
 Function PageLeaveReinstall
+ ${If} $PassiveMode <> 1
+ ${AndIf} $VersionCmp <> 1
  ${NSD_GetState} $R2 $R1
+ ${EndIf}
 
  ; If migrating from Wix, always uninstall
  ${If} $WixMode = 1
  Goto reinst_uninstall
  ${EndIf}
 
- ; In update mode, always proceeds without uninstalling
+ ; $VersionCmp: same(0) / this installer is newer(1) / this installer is older(-1)
+ ; $R1 radio state: 1 = first choice, 0 = second choice
+ ;
+ ; A newer installer never overlays Program Files. Next on that page is
+ ; confirmation to uninstall the previous version, then continue setup.
+ ${If} $VersionCmp = 1
+ Goto reinst_uninstall
+ ${EndIf}
+
+ ; In-app updater (/UPDATE) replacing the same version: copy over files.
  ${If} $UpdateMode = 1
  Goto reinst_done
  ${EndIf}
 
- ; $R0 holds whether same(0)/upgrading(1)/downgrading(-1) version
- ; $R1 holds the radio buttons state:
- ; 1 => first choice was selected
- ; 0 => second choice was selected
- ${If} $R0 = 0 ; Same version, proceed
+ ${If} $VersionCmp = 0 ; Same version, proceed
  ${If} $R1 = 1 ; User chose to add/reinstall
  Goto reinst_done
  ${Else} ; User chose to uninstall
  Goto reinst_uninstall
  ${EndIf}
- ${ElseIf} $R0 = 1 ; Upgrading
- ${If} $R1 = 1 ; User chose to uninstall
- Goto reinst_uninstall
- ${Else}
- Goto reinst_done ; User chose NOT to uninstall
- ${EndIf}
- ${ElseIf} $R0 = -1 ; Downgrading
+ ${ElseIf} $VersionCmp = -1 ; Downgrading
  ${If} $R1 = 1 ; User chose to uninstall
  Goto reinst_uninstall
  ${Else}
@@ -352,43 +384,455 @@ Function PageLeaveReinstall
  ${EndIf}
 
  reinst_uninstall:
- HideWindow
- ClearErrors
+ StrCpy $NeedRemovePrevious 1
+ Goto reinst_done
+ reinst_done:
+FunctionEnd
 
+; ExecWait on uninstall.exe / rmdir freezes the wizard: NSIS is single-threaded
+; and the bundled CPython tree is thousands of files. Delete from hidden cmd.exe
+; (CREATE_NO_WINDOW) and pump a determinate progress bar from a nsDialogs timer.
+!if "${ARCH}" == "x86"
+ !define DUMPLYZER_STARTUPINFO_CB 68
+ !define DUMPLYZER_PROCESSINFO_CB 16
+!else
+ !define DUMPLYZER_STARTUPINFO_CB 104
+ !define DUMPLYZER_PROCESSINFO_CB 24
+!endif
+!define CREATE_NO_WINDOW 0x08000000
+
+!macro WriteRemoveInstallTreeScript UN
+Function ${UN}WriteRemoveInstallTreeScript
+ InitPluginsDir
+ FileOpen $0 "$PLUGINSDIR\remove-install-tree.cmd" w
+ FileWrite $0 "@echo off$\r$\n"
+ FileWrite $0 "setlocal$\r$\n"
+ FileWrite $0 "set $\"ROOT=%~1$\"$\r$\n"
+ FileWrite $0 "set $\"STATUS=%~2$\"$\r$\n"
+ FileWrite $0 "set $\"WIPE=%~3$\"$\r$\n"
+ FileWrite $0 "set $\"KEEPUN=%~4$\"$\r$\n"
+ FileWrite $0 "call :S 2 $\"Stopping Dumplyzer...$\"$\r$\n"
+ FileWrite $0 "taskkill /F /IM dumplyzer.exe /T >nul 2>&1$\r$\n"
+ FileWrite $0 "ping -n 2 127.0.0.1 >nul$\r$\n"
+ FileWrite $0 "call :S 5 $\"Preparing to remove files...$\"$\r$\n"
+ FileWrite $0 "call :D $\"%ROOT%\resources\runtime\Lib\site-packages\volatility3$\" 20$\r$\n"
+ FileWrite $0 "call :D $\"%ROOT%\resources\runtime\Lib\site-packages$\" 35$\r$\n"
+ FileWrite $0 "call :D $\"%ROOT%\resources\runtime\Lib$\" 45$\r$\n"
+ FileWrite $0 "call :D $\"%ROOT%\resources\runtime$\" 55$\r$\n"
+ FileWrite $0 "call :D $\"%ROOT%\resources\tools$\" 65$\r$\n"
+ FileWrite $0 "call :D $\"%ROOT%\resources$\" 75$\r$\n"
+ FileWrite $0 "if $\"%KEEPUN%$\"==$\"1$\" ($\r$\n"
+ FileWrite $0 "call :S 85 $\"Removing application files...$\"$\r$\n"
+ FileWrite $0 "for /d %%D in ($\"%ROOT%\*$\") do rmdir /S /Q $\"%%D$\" >nul 2>&1$\r$\n"
+ FileWrite $0 "for %%F in ($\"%ROOT%\*$\") do if /I not $\"%%~nxF$\"==$\"uninstall.exe$\" del /F /Q $\"%%F$\" >nul 2>&1$\r$\n"
+ FileWrite $0 ") else ($\r$\n"
+ FileWrite $0 "call :S 90 $\"Removing application files...$\"$\r$\n"
+ FileWrite $0 "rmdir /S /Q $\"%ROOT%$\" >nul 2>&1$\r$\n"
+ FileWrite $0 ")$\r$\n"
+ FileWrite $0 "if $\"%WIPE%$\"==$\"1$\" ($\r$\n"
+ FileWrite $0 "call :S 95 $\"Removing application data...$\"$\r$\n"
+ FileWrite $0 "rmdir /S /Q $\"%LOCALAPPDATA%\Dumplyzer$\" >nul 2>&1$\r$\n"
+ FileWrite $0 "rmdir /S /Q $\"%APPDATA%\${BUNDLEID}$\" >nul 2>&1$\r$\n"
+ FileWrite $0 "rmdir /S /Q $\"%LOCALAPPDATA%\${BUNDLEID}$\" >nul 2>&1$\r$\n"
+ FileWrite $0 ")$\r$\n"
+ FileWrite $0 "call :S 100 $\"done$\"$\r$\n"
+ FileWrite $0 "echo done>$\"%STATUS%\remove-done.txt$\"$\r$\n"
+ FileWrite $0 "exit /B 0$\r$\n"
+ FileWrite $0 ":S$\r$\n"
+ FileWrite $0 "echo %~1>$\"%STATUS%\remove-percent.txt$\"$\r$\n"
+ FileWrite $0 "echo %~2>$\"%STATUS%\remove-text.txt$\"$\r$\n"
+ FileWrite $0 "goto :eof$\r$\n"
+ FileWrite $0 ":D$\r$\n"
+ FileWrite $0 "if exist $\"%~1$\" ($\r$\n"
+ FileWrite $0 "call :S %~2 $\"Removing %~nx1$\"$\r$\n"
+ FileWrite $0 "rmdir /S /Q $\"%~1$\" >nul 2>&1$\r$\n"
+ FileWrite $0 "if exist $\"%~1$\" del /F /Q $\"%~1$\" >nul 2>&1$\r$\n"
+ FileWrite $0 ")$\r$\n"
+ FileWrite $0 "goto :eof$\r$\n"
+ FileClose $0
+FunctionEnd
+!macroend
+!insertmacro WriteRemoveInstallTreeScript ""
+!insertmacro WriteRemoveInstallTreeScript "un."
+
+!macro ExecHiddenCommand UN
+Function ${UN}ExecHiddenCommand
+ ; $9 = command line. CREATE_NO_WINDOW avoids a console flash (Exec cannot).
+ System::Alloc ${DUMPLYZER_STARTUPINFO_CB}
+ Pop $1
+ System::Call "*$1(i ${DUMPLYZER_STARTUPINFO_CB})"
+ System::Alloc ${DUMPLYZER_PROCESSINFO_CB}
+ Pop $2
+ StrCpy $8 "$SYSDIR\cmd.exe"
+ System::Call "kernel32::CreateProcessW(t r8, t r9, n, n, i 0, i ${CREATE_NO_WINDOW}, n, n, p r1, p r2) i .r3"
+ ${If} $3 = 0
+ nsExec::ExecToLog `$9`
+ ${EndIf}
+ ${If} $2 != ""
+ System::Call "*$2(p .r4, p .r5)"
+ ${If} $4 != 0
+ ${AndIf} $4 != ""
+ System::Call "kernel32::CloseHandle(p r4)"
+ ${EndIf}
+ ${If} $5 != 0
+ ${AndIf} $5 != ""
+ System::Call "kernel32::CloseHandle(p r5)"
+ ${EndIf}
+ ${EndIf}
+ System::Free $1
+ System::Free $2
+FunctionEnd
+!macroend
+!insertmacro ExecHiddenCommand ""
+!insertmacro ExecHiddenCommand "un."
+
+!macro StartRemoveInstallTree UN
+Function ${UN}StartRemoveInstallTree
+ ${If} $RemoveTreeStarted = 1
+ Return
+ ${EndIf}
+ Call ${UN}WriteRemoveInstallTreeScript
+ Delete "$PLUGINSDIR\remove-done.txt"
+ Delete "$PLUGINSDIR\remove-percent.txt"
+ Delete "$PLUGINSDIR\remove-text.txt"
+ StrCpy $RemovePollCount 0
+ StrCpy $9 '"$SYSDIR\cmd.exe" /C call "$PLUGINSDIR\remove-install-tree.cmd" "$RemoveTargetDir" "$PLUGINSDIR" $RemoveWipeUserData $RemoveKeepUninstaller'
+ Call ${UN}ExecHiddenCommand
+ StrCpy $RemoveTreeStarted 1
+FunctionEnd
+!macroend
+!insertmacro StartRemoveInstallTree ""
+!insertmacro StartRemoveInstallTree "un."
+
+!macro RemoveInstallTreeBlocking UN
+Function ${UN}RemoveInstallTreeBlocking
+ Call ${UN}WriteRemoveInstallTreeScript
+ Delete "$PLUGINSDIR\remove-done.txt"
+ Delete "$PLUGINSDIR\remove-percent.txt"
+ Delete "$PLUGINSDIR\remove-text.txt"
+ nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C call "$PLUGINSDIR\remove-install-tree.cmd" "$RemoveTargetDir" "$PLUGINSDIR" $RemoveWipeUserData $RemoveKeepUninstaller'
+ ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|}
+FunctionEnd
+!macroend
+!insertmacro RemoveInstallTreeBlocking ""
+!insertmacro RemoveInstallTreeBlocking "un."
+
+!macro PollRemoveInstallTree UN
+Function ${UN}PollRemoveInstallTree
+ StrCpy $0 0
+ IntOp $RemovePollCount $RemovePollCount + 1
+ ${If} ${FileExists} "$PLUGINSDIR\remove-done.txt"
+ StrCpy $0 1
+ ${If} $RemoveProgress != ""
+ SendMessage $RemoveProgress 0x402 100 0
+ ${EndIf}
+ Return
+ ${EndIf}
+ ${If} $RemovePollCount > 25
+ ${AndIfNot} ${FileExists} "$PLUGINSDIR\remove-percent.txt"
+ StrCpy $0 2
+ Return
+ ${EndIf}
+ ${If} $RemovePollCount > 3600
+ StrCpy $0 2
+ Return
+ ${EndIf}
+ ${If} ${FileExists} "$PLUGINSDIR\remove-percent.txt"
+ ClearErrors
+ FileOpen $1 "$PLUGINSDIR\remove-percent.txt" r
+ FileRead $1 $2
+ FileClose $1
+ StrCpy $3 $2 1 -1
+ ${If} $3 == "$\r"
+ StrCpy $2 $2 -1
+ ${EndIf}
+ ${If} $RemoveProgress != ""
+ SendMessage $RemoveProgress 0x402 $2 0
+ ${EndIf}
+ ${EndIf}
+ ${If} ${FileExists} "$PLUGINSDIR\remove-text.txt"
+ ClearErrors
+ FileOpen $1 "$PLUGINSDIR\remove-text.txt" r
+ FileRead $1 $2
+ FileClose $1
+ StrCpy $3 $2 1 -1
+ ${If} $3 == "$\r"
+ StrCpy $2 $2 -1
+ ${EndIf}
+ ${If} $2 == "done"
+ StrCpy $2 "Finishing..."
+ ${EndIf}
+ ${If} $RemoveStatusLabel != ""
+ ${NSD_SetText} $RemoveStatusLabel $2
+ ${EndIf}
+ ${EndIf}
+FunctionEnd
+!macroend
+!insertmacro PollRemoveInstallTree ""
+!insertmacro PollRemoveInstallTree "un."
+
+!macro SetWizardButtonsEnabled UN
+Function ${UN}SetWizardButtonsEnabled
+ GetDlgItem $1 $HWNDPARENT 1
+ EnableWindow $1 $0
+ GetDlgItem $1 $HWNDPARENT 2
+ EnableWindow $1 $0
+ GetDlgItem $1 $HWNDPARENT 3
+ EnableWindow $1 $0
+FunctionEnd
+!macroend
+!insertmacro SetWizardButtonsEnabled ""
+!insertmacro SetWizardButtonsEnabled "un."
+
+!macro ShowRemoveProgressPage UN
+Function ${UN}ShowRemoveProgressPage
+ nsDialogs::Create 1018
+ Pop $R4
+ ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
+ ${NSD_CreateLabel} 0 0 100% 12u $R8
+ Pop $R1
+ ${NSD_CreateProgressBar} 0 18u 100% 12u
+ Pop $RemoveProgress
+ SendMessage $RemoveProgress 0x406 0 100
+ SendMessage $RemoveProgress 0x402 0 0
+ ${NSD_CreateLabel} 0 36u 100% 28u "Preparing..."
+ Pop $RemoveStatusLabel
+ StrCpy $0 0
+ Call ${UN}SetWizardButtonsEnabled
+ Call ${UN}StartRemoveInstallTree
+ ${NSD_CreateTimer} ${UN}RemoveTreeTick 200
+ nsDialogs::Show
+FunctionEnd
+!macroend
+!insertmacro ShowRemoveProgressPage ""
+!insertmacro ShowRemoveProgressPage "un."
+
+Function PreparePreviousInstallDir
+ ReadRegStr $PreviousInstallDir SHCTX "${MANUPRODUCTKEY}" ""
+ ${If} $PreviousInstallDir == ""
+ ReadRegStr $PreviousInstallDir SHCTX "${UNINSTKEY}" "InstallLocation"
+ ${EndIf}
+ StrCpy $R7 $PreviousInstallDir 1
+ ${If} $R7 == '"'
+ StrLen $R7 $PreviousInstallDir
+ IntOp $R7 $R7 - 2
+ StrCpy $PreviousInstallDir $PreviousInstallDir $R7 1
+ ${EndIf}
+ ${If} $PreviousInstallDir == ""
+ StrCpy $PreviousInstallDir $INSTDIR
+ ${EndIf}
+ ${If} $PreviousInstallDir != ""
+ StrCpy $INSTDIR $PreviousInstallDir
+ ${EndIf}
+FunctionEnd
+
+Function FinishRemoveInstallTree
+ ${If} ${FileExists} "$RemoveTargetDir\${MAINBINARYNAME}.exe"
+ ${AndIf} ${FileExists} "$RemoveTargetDir\uninstall.exe"
+ StrCpy $R9 " /S"
+ ${IfThen} $UpdateMode = 1 ${|} StrCpy $R9 "$R9 /UPDATE" ${|}
+ ${IfThen} $PassiveMode = 1 ${|} StrCpy $R9 "$R9 /P" ${|}
+ ExecWait '"$RemoveTargetDir\uninstall.exe"$R9 _?=$RemoveTargetDir' $0
+ ${EndIf}
+ ${If} ${FileExists} "$RemoveTargetDir\${MAINBINARYNAME}.exe"
+ nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$RemoveTargetDir" rmdir /S /Q "$RemoveTargetDir"'
+ RMDir /r /REBOOTOK "$RemoveTargetDir"
+ ${EndIf}
+FunctionEnd
+
+Function un.FinishRemoveInstallTree
+ ; Keep uninstall.exe on disk until this uninstall wizard completes. Windows
+ ; Settings re-checks UninstallString; deleting it here makes the file "not found".
+ nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$RemoveTargetDir\resources" rmdir /S /Q "$RemoveTargetDir\resources"'
+FunctionEnd
+
+Function UninstallPreviousInstall
+ ClearErrors
  ${If} $WixMode = 1
+ HideWindow
  ReadRegStr $R1 HKLM "$R6" "UninstallString"
  ExecWait '$R1' $0
- ${Else}
- ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
- ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
- ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
- ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
- StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
- ExecWait '$R1' $0
- ${EndIf}
-
  BringToFront
+ ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|}
+ Return
+ ${EndIf}
 
- ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|} ; ExecWait failed, set fake exit code
+ Call PreparePreviousInstallDir
+ StrCpy $RemoveTargetDir $PreviousInstallDir
+ StrCpy $RemoveWipeUserData 0
+ StrCpy $RemoveKeepUninstaller 0
+ StrCpy $RemoveTreeStarted 0
+ Call RemoveInstallTreeBlocking
+ Call FinishRemoveInstallTree
+ ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|}
+FunctionEnd
 
- ${If} $0 <> 0
+Function PreviousInstallStillPresent
+ ${If} ${FileExists} "$PreviousInstallDir\${MAINBINARYNAME}.exe"
  ${OrIf} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
- ; User cancelled wix uninstaller? return to select un/reinstall page
+ ${OrIf} ${FileExists} "$RemoveTargetDir\${MAINBINARYNAME}.exe"
+ StrCpy $0 1
+ ${Else}
+ StrCpy $0 0
+ ${EndIf}
+FunctionEnd
+
+Function un.InstallTreeStillPresent
+ ${If} ${FileExists} "$RemoveTargetDir\${MAINBINARYNAME}.exe"
+ ${OrIf} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+ StrCpy $0 1
+ ${Else}
+ StrCpy $0 0
+ ${EndIf}
+FunctionEnd
+
+Function AbortIfPreviousUninstallFailed
  ${If} $WixMode = 1
- ${AndIf} $0 = 1602
+ ${AndIf} $0 <> 0
+ ${If} $0 = 1602
  Abort
  ${EndIf}
-
- ; User cancelled NSIS uninstaller? return to select un/reinstall page
- ${If} $0 = 1
- Abort
- ${EndIf}
-
- ; Other erros? show generic error message and return to select un/reinstall page
  MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
  Abort
  ${EndIf}
- reinst_done:
+
+ Call PreviousInstallStillPresent
+ ${If} $0 = 1
+ MessageBox MB_ICONEXCLAMATION "Could not remove the previous Dumplyzer install.$\r$\n$\r$\nClose Dumplyzer if it is running, then click Next to try again."
+ Abort
+ ${EndIf}
+FunctionEnd
+
+Function PageRemovePrevious
+ ${If} $NeedRemovePrevious != 1
+ ${OrIf} $RemovePreviousDone = 1
+ Abort
+ ${EndIf}
+
+ ${If} ${Silent}
+ ${OrIf} $PassiveMode = 1
+ ${OrIf} $WixMode = 1
+ Call UninstallPreviousInstall
+ Call AbortIfPreviousUninstallFailed
+ StrCpy $RemovePreviousDone 1
+ Abort
+ ${EndIf}
+
+ Call PreparePreviousInstallDir
+ StrCpy $RemoveTargetDir $PreviousInstallDir
+ StrCpy $RemoveWipeUserData 0
+ StrCpy $RemoveKeepUninstaller 0
+ StrCpy $RemoveTreeStarted 0
+ !insertmacro MUI_HEADER_TEXT "Removing previous version" "Please wait"
+ StrCpy $R8 "Uninstalling Dumplyzer $InstalledVersion..."
+ Call ShowRemoveProgressPage
+FunctionEnd
+
+Function RemoveTreeTick
+ Call PollRemoveInstallTree
+ ${If} $0 = 2
+ ${NSD_KillTimer} RemoveTreeTick
+ StrCpy $RemoveTreeStarted 0
+ StrCpy $0 1
+ Call SetWizardButtonsEnabled
+ MessageBox MB_ICONEXCLAMATION "Could not remove the previous Dumplyzer install.$\r$\n$\r$\nClose Dumplyzer if it is running, then click Next to try again."
+ Return
+ ${EndIf}
+ ${If} $0 != 1
+ Return
+ ${EndIf}
+ ${NSD_KillTimer} RemoveTreeTick
+ Call FinishRemoveInstallTree
+ Call PreviousInstallStillPresent
+ ${If} $0 = 1
+ StrCpy $RemoveTreeStarted 0
+ StrCpy $0 1
+ Call SetWizardButtonsEnabled
+ MessageBox MB_ICONEXCLAMATION "Could not remove the previous Dumplyzer install.$\r$\n$\r$\nClose Dumplyzer if it is running, then click Next to try again."
+ Return
+ ${EndIf}
+
+ StrCpy $RemovePreviousDone 1
+ ${NSD_SetText} $RemoveStatusLabel "Previous version removed."
+ SendMessage $RemoveProgress 0x402 100 0
+ Sleep 300
+ GetDlgItem $1 $HWNDPARENT 1
+ EnableWindow $1 1
+ SendMessage $HWNDPARENT 0x0111 1 $1
+FunctionEnd
+
+Function PageRemovePreviousLeave
+ ${If} $RemovePreviousDone = 1
+ Return
+ ${EndIf}
+ ${If} $RemoveTreeStarted = 1
+ Abort
+ ${EndIf}
+ Call UninstallPreviousInstall
+ Call AbortIfPreviousUninstallFailed
+ StrCpy $RemovePreviousDone 1
+FunctionEnd
+
+Function un.PageRemoving
+ ${If} ${Silent}
+ ${OrIf} $PassiveMode = 1
+ Abort
+ ${EndIf}
+
+ StrCpy $RemoveTargetDir $INSTDIR
+ ${If} $DeleteAppDataCheckboxState = 1
+ ${AndIf} $UpdateMode <> 1
+ StrCpy $RemoveWipeUserData 1
+ ${Else}
+ StrCpy $RemoveWipeUserData 0
+ ${EndIf}
+ StrCpy $RemoveKeepUninstaller 1
+ StrCpy $RemoveTreeStarted 0
+ !insertmacro MUI_HEADER_TEXT "Uninstalling Dumplyzer" "Please wait"
+ StrCpy $R8 "Uninstalling Dumplyzer..."
+ Call un.ShowRemoveProgressPage
+FunctionEnd
+
+Function un.RemoveTreeTick
+ Call un.PollRemoveInstallTree
+ ${If} $0 = 2
+ ${NSD_KillTimer} un.RemoveTreeTick
+ StrCpy $RemoveTreeStarted 0
+ StrCpy $0 1
+ Call un.SetWizardButtonsEnabled
+ MessageBox MB_ICONEXCLAMATION "Could not remove Dumplyzer.$\r$\n$\r$\nClose Dumplyzer if it is running, then click Next to try again."
+ Return
+ ${EndIf}
+ ${If} $0 != 1
+ Return
+ ${EndIf}
+ ${NSD_KillTimer} un.RemoveTreeTick
+ Call un.FinishRemoveInstallTree
+ Call un.InstallTreeStillPresent
+ ${If} $0 = 1
+ StrCpy $RemoveTreeStarted 0
+ StrCpy $0 1
+ Call un.SetWizardButtonsEnabled
+ MessageBox MB_ICONEXCLAMATION "Could not remove Dumplyzer.$\r$\n$\r$\nClose Dumplyzer if it is running, then click Next to try again."
+ Return
+ ${EndIf}
+
+ StrCpy $UninstallTreeRemoved 1
+ ${NSD_SetText} $RemoveStatusLabel "Application files removed."
+ SendMessage $RemoveProgress 0x402 100 0
+ Sleep 300
+ GetDlgItem $1 $HWNDPARENT 1
+ EnableWindow $1 1
+ SendMessage $HWNDPARENT 0x0111 1 $1
+FunctionEnd
+
+Function un.PageRemovingLeave
+ ${If} $UninstallTreeRemoved = 1
+ Return
+ ${EndIf}
+ ${If} $RemoveTreeStarted = 1
+ Abort
+ ${EndIf}
 FunctionEnd
 
 ; 5. Choose install directory page
@@ -429,8 +873,6 @@ FunctionEnd
 
 ; Uninstaller Pages
 ; 1. Confirm uninstall page
-Var DeleteAppDataCheckbox
-Var DeleteAppDataCheckboxState
 !define /ifndef WS_EX_LAYOUTRTL 0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow ; Add add a `Delete app data` check box
@@ -469,6 +911,10 @@ FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
 !insertmacro MUI_UNPAGE_CONFIRM
 
+; 1b. Keep a determinate progress bar visible while the Python runtime
+; tree is deleted. A single rmdir on INSTFILES froze this page.
+UninstPage custom un.PageRemoving un.PageRemovingLeave
+
 ; 2. Uninstalling Page
 !insertmacro MUI_UNPAGE_INSTFILES
 
@@ -482,6 +928,15 @@ FunctionEnd
 {{/each}}
 
 Function .onInit
+ StrCpy $VersionCmp 0
+ StrCpy $InstalledVersion ""
+ StrCpy $PreviousInstallDir ""
+ StrCpy $NeedRemovePrevious 0
+ StrCpy $RemovePreviousDone 0
+ StrCpy $RemoveTreeStarted 0
+ StrCpy $RemoveWipeUserData 0
+ StrCpy $RemoveKeepUninstaller 0
+ StrCpy $UninstallTreeRemoved 0
  ${GetOptions} $CMDLINE "/P" $PassiveMode
  ${IfNot} ${Errors}
  StrCpy $PassiveMode 1
@@ -534,7 +989,7 @@ Section EarlyChecks
  !if "${ALLOWDOWNGRADES}" == "false"
  ${If} ${Silent}
  ; If downgrading
- ${If} $R0 = -1
+ ${If} $VersionCmp = -1
  System::Call 'kernel32::AttachConsole(i -1)i.r0'
  ${If} $0 <> 0
  System::Call 'kernel32::GetStdHandle(i -11)i.r0'
@@ -759,6 +1214,7 @@ Section Install
  WriteRegStr SHCTX "${UNINSTKEY}" "Publisher" "${MANUFACTURER}"
  WriteRegStr SHCTX "${UNINSTKEY}" "InstallLocation" "$\"$INSTDIR$\""
  WriteRegStr SHCTX "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+ WriteRegStr SHCTX "${UNINSTKEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
  WriteRegDWORD SHCTX "${UNINSTKEY}" "NoModify" "1"
  WriteRegDWORD SHCTX "${UNINSTKEY}" "NoRepair" "1"
 
@@ -817,6 +1273,13 @@ Function un.onInit
 
  !insertmacro MUI_UNGETLANGUAGE
 
+ StrCpy $RemoveTreeStarted 0
+ StrCpy $UninstallTreeRemoved 0
+ StrCpy $RemoveTargetDir ""
+ StrCpy $RemoveWipeUserData 0
+ StrCpy $RemoveKeepUninstaller 1
+ StrCpy $DeleteAppDataCheckboxState 0
+
  ${GetOptions} $CMDLINE "/P" $PassiveMode
  ${IfNot} ${Errors}
  StrCpy $PassiveMode 1
@@ -834,8 +1297,8 @@ Section Uninstall
  !insertmacro NSIS_HOOK_PREUNINSTALL
  !endif
 
- !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
  Call un.StopDumplyzerRuntime
+ !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
  ; Delete app associations
  {{#each file_associations as |association| ~}}
@@ -854,8 +1317,21 @@ Section Uninstall
 
  ; Bundled CPython + Volatility is thousands of files. Per-file Delete
  ; (Tauri's default) spends minutes redrawing "Delete file:" in the UI.
+ ; Interactive uninstall already deleted the tree on un.PageRemoving.
+ ${If} $UninstallTreeRemoved != 1
+ StrCpy $RemoveTargetDir $INSTDIR
+ ${If} $DeleteAppDataCheckboxState = 1
+ ${AndIf} $UpdateMode <> 1
+ StrCpy $RemoveWipeUserData 1
+ ${Else}
+ StrCpy $RemoveWipeUserData 0
+ ${EndIf}
+ StrCpy $RemoveKeepUninstaller 1
  SetDetailsPrint textonly
  DetailPrint "Removing application files..."
+ Call un.RemoveInstallTreeBlocking
+ StrCpy $UninstallTreeRemoved 1
+ ${EndIf}
  nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$INSTDIR" rmdir /S /Q "$INSTDIR"'
  RMDir /r /REBOOTOK "$INSTDIR"
  SetDetailsPrint both

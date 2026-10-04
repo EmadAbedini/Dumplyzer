@@ -108,7 +108,42 @@ def test_nsis_template_stops_runtime_without_powershell_command_braces() -> None
     assert 'rmdir /S /Q "$INSTDIR"' in uninstall
     assert """ExecWait '"$6" ${WEBVIEW2INSTALLERARGS} /install'""" in text
     assert 'ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install"' not in text
-    assert "MB_YESNO" in text
+    assert "Previous version installed" in text
+    assert "Uninstall required" in text
+    assert "is already installed." in text
+    assert "Your Dumplyzer data will be preserved." in text
+    assert "Click Next to uninstall and continue, or Cancel to exit Setup." in text
+    assert "Uninstall $InstalledVersion, then install" not in text
+    assert 'uninstall.exe"$R9 _?=$RemoveTargetDir' in text
+    assert "Could not remove the previous Dumplyzer install." in text
+    assert "Call StopDumplyzerRuntime" in text
+    assert "Removing previous version" in text
+    assert "Uninstalling Dumplyzer $InstalledVersion..." in text
+    assert "PageRemovePrevious" in text
+    assert "un.PageRemoving" in text
+    assert "remove-install-tree.cmd" in text
+    assert "remove-done.txt" in text
+    assert "CREATE_NO_WINDOW" in text
+    assert "0x08000000" in text
+    assert "CreateProcessW" in text
+    assert "%%~nxF" in text
+    assert "QuietUninstallString" in text
+    assert "StrCpy $RemoveKeepUninstaller 1" in text
+    assert "remove-install-tree.ps1" not in text
+    assert "PollRemoveInstallTree" in text
+    assert "ShowRemoveProgressPage" in text
+    assert "SendMessage $RemoveProgress 0x406 0 100" in text
+    assert "${NSD_CreateTimer}" in text
+    assert "StrCpy $NeedRemovePrevious 1" in text
+    tick = text.split("Function RemoveTreeTick", 1)[-1].split(
+        "Function PageRemovePreviousLeave", 1
+    )[0]
+    assert "Call UninstallPreviousInstall" not in tick
+    assert "ExecWait" not in tick
+    leave = text.split("Function PageLeaveReinstall", 1)[-1].split(
+        "Function UninstallPreviousInstall", 1
+    )[0]
+    assert "HideWindow" not in leave
     assert "WebView2 is required" in text
     assert "SetErrorLevel" in text
     assert r"%LOCALAPPDATA%\Dumplyzer\symbols" in text
