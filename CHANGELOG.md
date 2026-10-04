@@ -7,9 +7,11 @@ and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-## [0.1.1] — 2026-10-03
+## [0.1.1] — 2026-10-04
 
 Investigation workbench follow-up to the first public Windows x64 release. Application, Tauri, engine, and installer metadata are **0.1.1**. Report schema remains v1. SQLite schema remains v14. Installer: `Dumplyzer_0.1.1_x64-setup.exe`. NSIS and `dumplyzer.exe` remain **unsigned**.
+
+`Dumplyzer_0.1.1_x64-setup.exe` was install-tested on 2026-10-04 on the same Windows 10/11 x64 hosts as 0.1.0 (Windows 11 Pro 24H2 26100.1742, Windows 10 Pro 22H2 19045.2006, Windows 10 Education 22H2 19045.6456). Notes: [README](README.md#1-windows-installer-recommended), [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
 
 ### Added
 
@@ -24,10 +26,13 @@ Investigation workbench follow-up to the first public Windows x64 release. Appli
 - Domain IOCs use the Public Suffix List (registrable eTLD+1) instead of a TLD-allowlist regex. The old matcher missed suffixes such as `.xyz`, `.app`, and `.co.uk`. A naive `anything.anything` matcher treated filenames like `jquery.js` and path segments as hosts. Hits are scored by source (network/URL vs filesystem path) so file extensions are less likely to become domain IOCs.
 - Carved Data antivirus warning: clearer layout, **Antivirus Warning** title, and the resolved data-folder path with Copy Path / Open Folder.
 - Signature Detection keeps the latest scan per target and stays locked while another analysis job is running.
+- NSIS setup no longer copies over an older Dumplyzer. If a previous version is installed, setup says it must be uninstalled; Next removes that version (user data stays) and then installs this one. Cancel exits without changing the installed copy.
 
 ### Fixed
 
 - Job progress percent included queued jobs as 0% in the average, so the displayed total lagged. Queued jobs are omitted until they start.
+- Upgrading or uninstalling froze on "Uninstalling" with no moving progress bar while the bundled Python tree was deleted. Setup now removes those files in the background and shows a determinate progress bar until it finishes.
+- Uninstall no longer flashes a PowerShell window. Windows Settings can find `uninstall.exe` after an upgrade because that file stays until uninstall finishes.
 - Processes could look fully analyzed in the workspace before command-line collection finished. Quick Triage (`windows.pslist`) never stores command lines; that coverage stays not-analyzed until cmdline text is stored.
 - IOC export from the IOCs view failed or wrote the wrong file extension for some formats. JSON, Excel, and CSV saves now complete with the correct suffix.
 - Custom `.yar` / `.yara` files saved as UTF-16 (typical Windows Notepad encoding) failed to compile. Those files now load; Settings lists files that were skipped.

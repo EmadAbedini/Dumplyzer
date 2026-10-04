@@ -5,19 +5,20 @@ Python runtime: official CPython **3.12.10** Windows embeddable x64
 Volatility 3: **2.28.0**  
 Installers: one NSIS EXE (default `%ProgramFiles%\Dumplyzer`, small WebView2 Evergreen bootstrapper)
 
-This procedure produces the single NSIS installer. It does **not** perform a clean-machine installation test. The produced EXE is **unsigned** unless a certificate is supplied outside this repository.
+This procedure produces the single NSIS installer. The build script does **not** install onto a VM; 0.1.1 host runs are recorded in [`docs/clean-machine-validation.md`](clean-machine-validation.md). The produced EXE is **unsigned** unless a certificate is supplied outside this repository.
 
 ## Windows version target
 
 | Claim | Basis |
 |-------|--------|
-| Windows 11 x64 | Install-tested: Windows 11 Pro **10.0.26100** (NSIS, `docs/clean-machine-validation.md`) |
-| Windows 10 21H2+ x64 (build **19044**) | Documented dependency floor for this packaging stack. |
+| Windows 11 x64 | Install-tested: Windows 11 Pro 24H2 **26100.1742** (`Dumplyzer_0.1.1_x64-setup.exe`, 2026-10-04) |
+| Windows 10 22H2 x64 | Install-tested: Pro **19045.2006** and Education **19045.6456** (same 0.1.1 installer) |
+| Windows 10 21H2+ x64 (build **19044**) | Documented dependency floor for this packaging stack |
 | WebView2 Evergreen technical floor | Windows 10 **1809** (build **17763**). Current Evergreen (Chromium 109+) dropped older Windows 10. |
 | Tauri 2.11 / NSIS `PerMonitorV2` | Windows 10 1607+; older builds ignore the extra manifest field |
 | Python 3.12.10 embeddable | Official CPython 3.12 Windows x64 |
 
-The executed clean-machine install is Windows 11 x64. See `docs/clean-machine-validation.md`.
+Host list and run log: [README](../README.md#1-windows-installer-recommended), [`docs/clean-machine-validation.md`](clean-machine-validation.md). `build-release.ps1` still does not install onto a VM; those runs are manual.
 
 ## Why embeddable CPython (not PyInstaller)
 
@@ -201,8 +202,9 @@ Until that is done, SmartScreen and some enterprise policies will treat the inst
 
 ## Known limitations
 
-- Clean-machine NSIS install was executed on a Windows 11 x64 VM. See `docs/clean-machine-validation.md`. That run used an older offline WebView2 payload. Current packaging uses `embedBootstrapper`.
+- `Dumplyzer_0.1.1_x64-setup.exe` was install-tested on Windows 11 Pro 24H2 and Windows 10 22H2 (Pro and Education). See `docs/clean-machine-validation.md`. The 0.1.0 clean-machine run used an older offline WebView2 payload; 0.1.1 uses `embedBootstrapper`.
 - Default install directory is `%ProgramFiles%\Dumplyzer` (Windows system drive; elevation required). User data remains `%LOCALAPPDATA%\Dumplyzer`.
+- If a previous Dumplyzer version is installed, NSIS requires uninstalling it before copying 0.1.1. Next confirms and shows a progress bar while that version is removed; Cancel leaves the old install. User data is not deleted.
 - WebView2 Evergreen bootstrapper is packed into the NSIS installer (`embedBootstrapper`). If WebView2 is missing, setup asks before downloading the runtime.
 - Windows analysis asks before downloading kernel symbols for that dump's build. Use Download & Continue in the app. You can instead provide a `.pdb` or ISF file.
 - Volatility plugins that need capstone or pycryptodome may appear as import failures. That is intentional: those extras are not bundled. Failed imports must not be marked available. yara-python 4.5.4 **is** bundled, so Volatility YARA plugins may become available as a side effect.

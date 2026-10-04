@@ -20,9 +20,23 @@ MSI is not an end-user artifact.
 
 ## Latest executed run
 
-**2026-09-20 — PASS WITH LIMITATIONS** on Windows 11 Pro 10.0.26100 x64.
+**2026-10-04 — PASS** for `Dumplyzer_0.1.1_x64-setup.exe` (current packaging: per-machine NSIS, `embedBootstrapper` WebView2, unsigned).
 
-That run used `Dumplyzer_0.1.0_x64-setup.exe`. A 0.1.1 clean-machine install has not been recorded.
+Install-tested on the same Windows x64 hosts used for 0.1.0:
+
+| Edition | Version | OS build | Experience pack |
+|---------|---------|----------|-----------------|
+| Windows 11 Pro | 24H2 | 26100.1742 | 1000.26100.18.0 |
+| Windows 10 Pro | 22H2 | 19045.2006 | 120.2212.4180.0 |
+| Windows 10 Education | 22H2 | 19045.6456 | — |
+
+On each host the 0.1.1 setup installed, the app launched, and the install was usable. Default install path `%ProgramFiles%\Dumplyzer`. User data stayed under `%LOCALAPPDATA%\Dumplyzer\`. The installer remains unsigned; SmartScreen or organization policy may still warn.
+
+This run used the shipping 0.1.1 payload (bundled CPython 3.12.10, Volatility 3 2.28.0, yara-python 4.5.4, CAPA 9.4.0, FLOSS 3.1.1, bulk_extractor 2.2.0). It does not replace a first-time WebView2 download observation: those hosts already had WebView2.
+
+## Previous runs
+
+**2026-09-20 — PASS WITH LIMITATIONS** for `Dumplyzer_0.1.0_x64-setup.exe` on Windows 11 Pro 10.0.26100 x64.
 
 The guest had no developer toolchain. Silent NSIS `/S` installed to Program Files. The bundled
 CPython 3.12.10 runtime started Volatility 3 2.28.0 (191 plugins). YARA, PE Extraction, CAPA,
@@ -33,8 +47,8 @@ succeeded. User data stayed under `%LOCALAPPDATA%\Dumplyzer\`.
 Limitations of that run:
 
 - WebView2 Evergreen was already present, so first-time WebView2 install was not observed.
-- The installer under test packed the older offline WebView2 standalone payload. Current
-  packaging uses `embedBootstrapper` instead.
+- The installer under test packed the older offline WebView2 standalone payload. 0.1.1 uses
+  `embedBootstrapper` instead.
 - The installer is unsigned.
 
 An earlier per-user NSIS (and a MemScope-branded build) was also installed on a Windows 11 guest.

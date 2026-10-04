@@ -143,6 +143,8 @@ Windows dumps also need a matching kernel PDB the first time you analyze a given
 
 0.1.1 installers are **unsigned**. SmartScreen or organization policy may warn on first run.
 
+If an older Dumplyzer is already installed, setup tells you that version must be uninstalled first. **Next** uninstalls it with a progress bar (investigation data under `%LOCALAPPDATA%\Dumplyzer\` is kept) and then installs 0.1.1. **Cancel** leaves the previous install unchanged.
+
 #### Supported platform
 
 | Requirement | Detail |
@@ -154,15 +156,15 @@ Windows dumps also need a matching kernel PDB the first time you analyze a given
 | Engine runtime | Bundled CPython **3.12.10** |
 | Linux / macOS hosts | Not a release target yet |
 
-**Tested on**
+**Install-tested (0.1.1)** — `Dumplyzer_0.1.1_x64-setup.exe`, 2026-10-04. The same hosts were used for 0.1.0.
 
-| Edition              | Version | OS Build   | Experience Pack |
+| Edition              | Version | OS build   | Experience pack |
 | -------------------- | ------- | ---------- | --------------- |
 | Windows 11 Pro       | 24H2    | 26100.1742 | 1000.26100.18.0 |
 | Windows 10 Pro       | 22H2    | 19045.2006 | 120.2212.4180.0 |
 | Windows 10 Education | 22H2    | 19045.6456 | —               |
 
-A separate clean-machine install checklist is recorded in [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
+Run log and the older 0.1.0 clean-machine notes: [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
 
 ### 2. Build from source
 
