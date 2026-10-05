@@ -54,7 +54,7 @@ Analysis runs locally. The original memory image stays at its imported location.
 - **Memory regions.** Inspect VAD / virtual-memory regions for a selected PID.
 - **Signatures and capabilities.** YARA scans of the dump and/or extracted PE files (**56** bundled Dumplyzer rules, plus your own `.yar` / `.yara` files). You can run all compiled rules or a subset by rule name or category. YARA matches are investigation indicators, not malware verdicts. CAPA reports capabilities of reconstructed PE files, not malware verdicts.
 - **Carved strings.** bulk_extractor recovers emails, phone numbers, URLs, IPs, MAC addresses, HTTP logs, AES key candidates, and similar features from the dump.
-- **PE reconstruction.** Rebuild EXE/DLL images from process memory. Reconstructed files are extracted artifacts, not malware, and are never executed. Exclude the data folder from real-time antivirus before this job — see [Antivirus exclusions](#antivirus-exclusions-carved-data).
+- **PE reconstruction.** Rebuild EXE/DLL images from process memory. Reconstructed files are extracted artifacts and are never executed. Exclude the data folder from real-time antivirus before this job — see [Antivirus exclusions](#antivirus-exclusions-carved-data).
 - **Plugin Explorer.** Discover and run supported Volatility 3 plugins from the UI, with cached results and job history.
 - **Reports.** Export HTML, JSON, Excel, or CSV under the user-data `exports\` directory. HTML reports are static (no JavaScript, no CDN).
 - **Untrusted evidence.** Memory images and extracted artifacts are treated as untrusted. Dumplyzer does not execute them. Matches, strings, and carved features are investigation indicators — not verdicts.
@@ -151,7 +151,7 @@ If an older Dumplyzer is already installed, setup tells you that version must be
 | Engine runtime | Bundled CPython **3.12.10** |
 | Linux / macOS hosts | Not a release target yet |
 
-**Install-tested (0.1.1)** The same hosts were used for 0.1.0.
+**Install-tested (0.1.1).** Same hosts as 0.1.0.
 
 | Edition              | Version | OS build   | Experience pack |
 | -------------------- | ------- | ---------- | --------------- |
