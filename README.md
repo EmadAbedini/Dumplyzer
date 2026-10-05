@@ -19,16 +19,11 @@
   <a href="https://www.linkedin.com/in/emad-abedini"><img src="https://img.shields.io/badge/LinkedIn-0077B5?logo=linkedin&logoColor=white" alt="LinkedIn"></a>
 </p>
 
-Dumplyzer is an open-source, local-first desktop workbench for memory forensics. It brings processes, network activity, indicators, reconstructed binaries, and signatures into one local investigation workspace, without assembling a separate forensic toolchain.
+Dumplyzer is an open-source, local-first desktop platform for memory forensics. It brings processes, network activity, indicators, reconstructed binaries, and signatures into one investigation workspace.
 
 <p align="center">
-  <a href="docs/assets/screenshots/01-processes.png"><img src="docs/assets/screenshots/01-processes.png" alt="Process list with command lines" width="48%"></a>
-  <a href="docs/assets/screenshots/02-network.png"><img src="docs/assets/screenshots/02-network.png" alt="Network connections extracted from the image" width="48%"></a>
-</p>
-<p align="center">
-  <a href="docs/assets/screenshots/03-timeline.png"><img src="docs/assets/screenshots/03-timeline.png" alt="Investigation timeline with time-range histogram" width="48%"></a>
-  <a href="docs/assets/screenshots/04-memory.png"><img src="docs/assets/screenshots/04-memory.png" alt="Memory VAD regions for a selected process" width="48%"></a>
-</p>
+  <a href="docs/assets/screenshots/01-processes.png"><img src="docs/assets/screenshots/01-processes.png" alt="Process list with command lines" width="48%"></a><a href="docs/assets/screenshots/02-network.png"><img src="docs/assets/screenshots/02-network.png" alt="Network connections extracted from the image" width="48%"></a><br>
+  <a href="docs/assets/screenshots/03-timeline.png"><img src="docs/assets/screenshots/03-timeline.png" alt="Investigation timeline with time-range histogram" width="48%"></a><a href="docs/assets/screenshots/04-memory.png"><img src="docs/assets/screenshots/04-memory.png" alt="Memory VAD regions for a selected process" width="48%"></a></p>
 
 Analysis runs locally. The original memory image stays at its imported location. There is no cloud analysis, no account system, no telemetry, and no phone-home. Dumplyzer does not produce a malware verdict.
 
@@ -64,7 +59,7 @@ Analysis runs locally. The original memory image stays at its imported location.
 - **Reports.** Export HTML, JSON, Excel, or CSV under the user-data `exports\` directory. HTML reports are static (no JavaScript, no CDN).
 - **Untrusted evidence.** Memory images and extracted artifacts are treated as untrusted. Dumplyzer does not execute them. Matches, strings, and carved features are investigation indicators — not verdicts.
 
-Complete Analysis does **not** auto-run PE reconstruction, signature detection, CAPA, FLOSS, bulk_extractor, or PCAP reconstruction. Start those from the workspace when you need them.
+Complete Analysis does **not** auto-run PE reconstruction, signature detection, or PCAP reconstruction. Start those from the workspace when you need them.
 
 ## Investigation workspace
 
@@ -156,7 +151,7 @@ If an older Dumplyzer is already installed, setup tells you that version must be
 | Engine runtime | Bundled CPython **3.12.10** |
 | Linux / macOS hosts | Not a release target yet |
 
-**Install-tested (0.1.1)** — `Dumplyzer_0.1.1_x64-setup.exe`, 2026-10-04. The same hosts were used for 0.1.0.
+**Install-tested (0.1.1)** The same hosts were used for 0.1.0.
 
 | Edition              | Version | OS build   | Experience pack |
 | -------------------- | ------- | ---------- | --------------- |
