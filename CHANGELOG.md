@@ -5,13 +5,11 @@ All notable changes to Dumplyzer are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-## [0.1.1] — 2026-10-04
+## [0.1.1]
 
 Investigation workbench follow-up to the first public Windows x64 release. Application, Tauri, engine, and installer metadata are **0.1.1**. Report schema remains v1. SQLite schema remains v14. Installer: `Dumplyzer_0.1.1_x64-setup.exe`. NSIS and `dumplyzer.exe` remain **unsigned**.
 
-`Dumplyzer_0.1.1_x64-setup.exe` was install-tested on 2026-10-04 on the same Windows 10/11 x64 hosts as 0.1.0 (Windows 11 Pro 24H2 26100.1742, Windows 10 Pro 22H2 19045.2006, Windows 10 Education 22H2 19045.6456). Notes: [README](README.md#1-windows-installer-recommended), [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
+`Dumplyzer_0.1.1_x64-setup.exe` was install-tested on the same Windows 10/11 x64 hosts as 0.1.0 (Windows 11 Pro 24H2 26100.1742, Windows 10 Pro 22H2 19045.2006, Windows 10 Education 22H2 19045.6456). Notes: [README](README.md#1-windows-installer-recommended), [docs/clean-machine-validation.md](docs/clean-machine-validation.md).
 
 ### Added
 
@@ -38,7 +36,7 @@ Investigation workbench follow-up to the first public Windows x64 release. Appli
 - Custom `.yar` / `.yara` files saved as UTF-16 (typical Windows Notepad encoding) failed to compile. Those files now load; Settings lists files that were skipped.
 - Consecutive Analyze Process rows used the same highlight, so adjacent analyzed processes blended into one block. Those rows now alternate.
 
-## [0.1.0] — 2026-09-25
+## [0.1.0]
 
 First public Windows x64 release of **Dumplyzer**.
 
@@ -114,8 +112,7 @@ Windows analysis needs type information for the NT kernel that was running when 
 - The desktop application is Windows 10 22H2+ / Windows 11, **x64 only**. Linux and macOS hosts are not a release target yet.
 - Before **Carved Data** jobs, exclude `%LOCALAPPDATA%\Dumplyzer\` from real-time antivirus. Carved Artifacts and Extracted Files write reconstructed EXE/DLL images there. Scanners often quarantine those files (job output vanishes or the scan stops). The same process-aware heuristics can quarantine or delete `Dumplyzer.exe`. That is expected endpoint behavior, not a product defect. Pausing AV globally is not required and is not recommended. See [README](README.md#antivirus-exclusions-carved-data) and [SECURITY.md](SECURITY.md#endpoint-protection-and-extracted-binaries).
 - A reconstructed PCAP is a carve of recoverable Ethernet/IP records, not a guaranteed full original capture.
-- Clean-machine NSIS install on Windows 11 Pro 10.0.26100 x64 (2026-09-20): **pass with limitations**. WebView2 was already present, so first-time WebView2 setup was not observed. See `docs/clean-machine-validation.md`.
+- Clean-machine NSIS install on Windows 11 Pro 10.0.26100 x64: **pass with limitations**. WebView2 was already present, so first-time WebView2 setup was not observed. See `docs/clean-machine-validation.md`.
 
-[Unreleased]: https://github.com/EmadAbedini/Dumplyzer/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/EmadAbedini/Dumplyzer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/EmadAbedini/Dumplyzer/releases/tag/v0.1.0
